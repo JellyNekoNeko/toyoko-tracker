@@ -152,4 +152,75 @@ In the web interface under **Email Settings**, fill in:
 
 - Recommended to test with **Gmail**  
 - Check your **spam folder** if no emails arrive  
-- If authentication fails, make sure you entered the **App Password**, not your login password  
+- If authentication fails, make sure you entered the **App Password**, not your login password
+
+# Ch.4 Web Interface Operations
+
+This chapter introduces the **Toyoko Tracker Web Interface** after startup.  
+
+---
+
+## 4.1 Main Interface
+
+- After launching, the default address is `http://127.0.0.1:4170`.  
+- The page contains:  
+  - **Run Settings**  
+  - **Status Display**  
+  - **Results Table**  
+  - **Controls**  
+
+---
+
+## 4.2 Control Buttons
+
+- **Start**: Starts background room monitoring and saves the current configuration to `auto_save.json`.  
+- **Stop**: Stops monitoring and closes the browser driver.  
+- **Default**: Resets to default configuration (today + tomorrow, people = 1, rooms = 1).  
+- **Save**: Saves the current configuration to `save.json` (manual save).  
+- **Load**: Loads the configuration from `save.json` and applies it to the interface.  
+
+---
+
+## 4.3 Settings Panel
+
+1. **Start/End Date**: Select check-in and check-out dates.  
+2. **People / Rooms**: Input 1–5 people, 1–9 rooms.  
+3. **Smoking Option**: Choose from:  
+   - `noSmoking` Non-smoking  
+   - `Smoking` Smoking  
+   - `all` No preference  
+4. **Hotel Code**: Supports multiple 5-digit codes separated by commas or spaces.  
+5. **Proxy Settings**: Enable proxy if needed (e.g., `http://127.0.0.1:7890`).  
+6. **Telegram Settings**: Enter Bot Token and Chat ID.  
+7. **Local Notifications**: Check to enable (⚠️ MacOS currently not supported).  
+8. **Email Notifications**: Fill in SMTP server, port, email, and authorization code.  
+
+---
+
+## 4.4 Status Display
+
+The center of the interface shows real-time status:  
+
+- **Round**: Current monitoring round  
+- **Progress Bar**: Progress of completed vs. total hotels  
+- **Elapsed / Uptime**: Elapsed time per round & total running time  
+- **Current Action**: Current task (e.g., "Checking hotel 00061")  
+
+---
+
+## 4.5 Results Table
+
+The table displays the latest monitoring results in real time:  
+
+- **Code**: Hotel code  
+- **HotelName**: Hotel name  
+- **Result**: ✅ Available / ❌ Not Available / ❓ Unknown  
+- **MinPrice**: Lowest non-member price  
+- **Left**: Remaining rooms (`Reserve` means ≥10)  
+- **Type**: Room type  
+
+> Special room types (such as *heartful* / *accessible*) are automatically ignored due to hotel reservation policy.
+
+
+
+
