@@ -2,7 +2,7 @@
 
 *A lovely room availability tracker for [Toyoko Inn](https://www.toyoko-inn.com/), powered by Flask + Selenium.*
 
-🌏 [📖 中文说明书](./README.md)
+🌏 [📖 中文说明书](./README_zh.md)
 
 
 ---
