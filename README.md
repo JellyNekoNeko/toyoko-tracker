@@ -8,8 +8,3 @@ A room availability tracker for [Toyoko Inn](https://www.toyoko-inn.com/), power
 
 ```bash
 pip install toyoko-tracker
-
-## Install
-
-```bash
-toyoko-tracker
