@@ -4,6 +4,8 @@
 
 A lovely room availability tracker for [Toyoko Inn](https://www.toyoko-inn.com/), powered by Flask + Selenium.
 
+
+
 # 📘 Toyoko Tracker 使用说明书
 
 ## Ch.1 安装与启动
@@ -102,4 +104,5 @@ Chat ID 是 Telegram 中标识用户或群的唯一 ID，用来指定推送的�
 5. 填入你通过 @userinfobot 获取的 **Chat ID**  
 
 这样，当有房间可订时，系统就会自动通过 Telegram 向你推送消息。当之前有房间可订的房间不可用时，系统也会推送消息。
+
 
