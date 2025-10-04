@@ -1,0 +1,22 @@
+Metadata-Version: 2.4
+Name: toyoko-tracker
+Version: 0.4.17
+Summary: Toyoko Inn Vacancy Tracker
+Author: bilibili @果冻猫猫丶
+License: MIT License
+        
+        Copyright (c) 2025 bilibili @果冻猫猫丶
+        
+        Permission is hereby granted, free of charge, to any person obtaining a copy...
+Project-URL: Homepage, https://example.com/
+Project-URL: Source, https://example.com/repo
+Project-URL: Issues, https://example.com/issues
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: flask>=2.3
+Requires-Dist: selenium>=4.14
+Requires-Dist: beautifulsoup4>=4.12
+Requires-Dist: webdriver-manager>=4.0
+Requires-Dist: requests>=2.31
+Dynamic: license-file

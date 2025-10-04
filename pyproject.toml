@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "toyoko-tracker"
+version = "0.4.17"
+description = "Toyoko Inn Vacancy Tracker"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+
+authors = [
+  { name = "bilibili @果冻猫猫丶" }
+]
+
+# Runtime Dependencies
+dependencies = [
+  "flask>=2.3",
+  "selenium>=4.14",
+  "beautifulsoup4>=4.12",
+  "webdriver-manager>=4.0",
+  "requests>=2.31",
+  # "win10toast>=0.9",
+]
+
+# Command-Line Entry Point
+[project.scripts]
+toyoko-tracker = "toyoko_tracker.app:main"
+
+[project.urls]
+Homepage = "https://example.com/"
+Source = "https://example.com/repo"
+Issues = "https://example.com/issues"
+
+# Include src Directory in Packaging
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["toyoko_tracker*"]
+exclude = ["tests*"]
+
+# [tool.setuptools.package-data]
+# "toyoko_tracker" = ["static/*", "templates/*"]
+
+# Development Dependencies
+[tool.setuptools.dynamic]

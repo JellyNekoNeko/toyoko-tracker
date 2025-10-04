@@ -1,0 +1,2 @@
+[console_scripts]
+toyoko-tracker = toyoko_tracker.app:main
