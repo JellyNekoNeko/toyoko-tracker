@@ -10,6 +10,8 @@
 
 # 📘 Toyoko Tracker User Guide
 
+
+
 ## Ch.1 Installation & Startup
 
 ### 1.1 Introduction
@@ -59,6 +61,8 @@ Once started:
 - License: MIT  
 
 ---
+
+
 
 ## Ch.2 Telegram Bot Setup
 
@@ -110,6 +114,8 @@ If previously available rooms become unavailable, the system will also notify yo
 
 ---
 
+
+
 ## Ch.3 Email Alerts Setup
 
 You can also receive room availability alerts by email via SMTP.
@@ -153,6 +159,10 @@ In the web interface under **Email Settings**, fill in:
 - Recommended to test with **Gmail**  
 - Check your **spam folder** if no emails arrive  
 - If authentication fails, make sure you entered the **App Password**, not your login password
+
+---
+
+
 
 # Ch.4 Web Interface Operations
 
