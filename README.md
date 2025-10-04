@@ -30,6 +30,7 @@
 
 #### Install from PyPI
 ```bash
+pip install --upgrade pip
 pip install toyoko-tracker
 ```
 
