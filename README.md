@@ -1,154 +1,153 @@
 # Toyoko Inn Room Vacancy Tracker
 
-A lovely room availability tracker for [Toyoko Inn](https://www.toyoko-inn.com/), powered by Flask + Selenium.
+*A lovely room availability tracker for [Toyoko Inn](https://www.toyoko-inn.com/), powered by Flask + Selenium.*
 
-
----
-
-
-# 📘 Toyoko Tracker 使用说明书
-
-## Ch.1 安装与启动
-
-### 1.1 简介
-
-**Toyoko Tracker** 是一个基于 **Flask + Selenium** 的桌面与 Web 工具，用来自动检测 **东横 INN** 酒店房间空余情况，并支持：
-
-- 🌐 Web 界面实时查看房源状况  
-- 🔔 本地通知（⚠️ MacOS 本地通知暂不可用）  
-- 🤖 Telegram 机器人推送  
-- 📧 SMTP 邮件提醒  
+🌏 [📖 中文说明书](./README.md)
 
 ---
 
-### 1.2 安装
+# 📘 Toyoko Tracker User Guide
 
-#### 系统要求
-- Python **3.9+**（推荐 3.10 / 3.11）  
-- 已安装 **Google Chrome 浏览器**（程序依赖 ChromeDriver 自动化）  
+## Ch.1 Installation & Startup
 
-#### 从 PyPI 安装
+### 1.1 Introduction
+
+**Toyoko Tracker** is a desktop and web tool based on **Flask + Selenium** that automatically monitors room availability for **Toyoko Inn** hotels, with support for:
+
+- 🌐 Real-time room status via a web interface  
+- 🔔 Local notifications (⚠️ macOS notifications temporarily unavailable)  
+- 🤖 Telegram bot push notifications  
+- 📧 SMTP email alerts  
+
+---
+
+### 1.2 Installation
+
+#### Requirements
+- Python **3.9+** (recommended: 3.10 / 3.11)  
+- Installed **Google Chrome Browser** (program depends on ChromeDriver automation)  
+
+#### Install from PyPI
 ```bash
 pip install toyoko-tracker
 ```
 
 ---
 
-### 1.3 使用方法
+### 1.3 Usage
 
-安装完成后，在命令行输入：
+After installation, run in terminal:
 
 ```bash
 toyoko-tracker
 ```
 
-启动后：
+Once started:
 
-- 默认会运行一个本地 Web 服务： (http://127.0.0.1:4170)  
-- 程序会尝试自动打开浏览器访问此界面  
-- 如果没有自动打开，可以手动在浏览器输入 `127.0.0.1:4170`  
-
----
-
-### 1.4 版本信息
-
-- 当前版本：`v0.4.17`  
-- 作者：果冻猫猫 (bilibili @果冻猫猫丶)  
-- 开源协议：MIT  
+- A local web service will run at: [http://127.0.0.1:4170](http://127.0.0.1:4170)  
+- The program will attempt to open this URL in your browser automatically  
+- If it doesn’t, you can manually visit `127.0.0.1:4170`  
 
 ---
 
-## Ch.2 Telegram Bot 配置
+### 1.4 Version Info
 
-为了通过 Telegram 接收房源提醒，你需要先配置一个机器人。
+- Current version: `v0.4.17`  
+- Author: 果冻猫猫 (bilibili @果冻猫猫丶)  
+- License: MIT  
 
 ---
 
-### 2.1 创建 Telegram Bot
+## Ch.2 Telegram Bot Setup
 
-1. 在 Telegram 搜索并打开 **BotFather**  
-2. 发送命令：  
+To receive room availability alerts via Telegram, you’ll need to configure a bot.
+
+---
+
+### 2.1 Create a Telegram Bot
+
+1. In Telegram, search and open **BotFather**  
+2. Send the command:  
    ```
    /newbot
    ```
-3. 按提示输入：  
-   - 机器人名称（例如：`ToyokoBot`）  
-   - 用户名（必须以 `bot` 结尾，例如：`toyokotracker_bot`）  
-4. 创建完成后，BotFather 会返回一个 **Bot Token**：  
+3. Follow the prompts:  
+   - Bot name (e.g., `ToyokoBot`)  
+   - Username (must end with `bot`, e.g., `toyokotracker_bot`)  
+4. Once created, BotFather will give you a **Bot Token**:  
    ```
    1234567890:ABCdefGhIJklmNoPQRstuVWxyZ
    ```
 
 ---
 
-### 2.2 获取 Chat ID
+### 2.2 Get Your Chat ID
 
-Chat ID 是 Telegram 中标识用户或群的唯一 ID，用来指定推送的目标。
+The Chat ID uniquely identifies a user or group in Telegram. You’ll need it to specify where alerts should be sent.
 
-方法：
+Steps:
 
-1. 在 Telegram 搜索并启动 **@userinfobot**  
-2. 它会直接告诉你当前账号的 **Chat ID**，格式类似：  
+1. In Telegram, search and start **@userinfobot**  
+2. It will reply with your **Chat ID**, e.g.:  
    ```
    987654321
    ```
 
 ---
 
-### 2.3 配置到 Toyoko Tracker
+### 2.3 Configure in Toyoko Tracker
 
-1. 打开 Toyoko Tracker 的 Web 界面  
-2. 在设置面板中找到 **Telegram Bot** 部分  
-3. 勾选启用 ✅  
-4. 填入 BotFather 给的 **Bot Token**  
-5. 填入你通过 @userinfobot 获取的 **Chat ID**  
+1. Open the Toyoko Tracker web interface  
+2. In the settings panel, find **Telegram Bot**  
+3. Enable it ✅  
+4. Enter the **Bot Token** from BotFather  
+5. Enter your **Chat ID** from @userinfobot  
 
-这样，当有房间可订时，系统就会自动通过 Telegram 向你推送消息。当之前有房间可订的房间不可用时，系统也会推送消息。
-
----
-
-## Ch.3 邮件推送配置
-
-为了通过 **邮箱** 接收房源提醒，你需要配置一个 SMTP 邮件发送账号。  
+Once configured, the system will automatically send Telegram messages when rooms become available.  
+If previously available rooms become unavailable, the system will also notify you.  
 
 ---
 
-### 3.1 开启邮箱 SMTP 服务
+## Ch.3 Email Alerts Setup
 
-不同邮箱服务商的配置方式略有不同：  
+You can also receive room availability alerts by email via SMTP.
+
+---
+
+### 3.1 Enable SMTP for Your Email
+
+Setup depends on your email provider:  
 
 - **Gmail**  
-  1. 登录 Gmail → 管理账户 → 安全性  
-  2. 开启「允许低安全性应用访问」或使用 **应用专用密码**  
-  3. 获取一个 16 位的 **应用专用密码**  
+  1. Log in to Gmail → Manage Account → Security  
+  2. Enable “Allow less secure apps” (or use an **App Password**)  
+  3. Generate a 16-digit **App Password**  
 
 ---
 
-### 3.2 填写 Toyoko Tracker 邮件配置
+### 3.2 Configure Email Settings in Toyoko Tracker
 
-在 Web 界面的 **Email Settings** 中填写以下内容：  
+In the web interface under **Email Settings**, fill in:  
 
-- **SMTP Server**：例如 `smtp.gmail.com`  
-- **SMTP Port**：通常为 `465`（SSL）或 `587`（TLS）  
-- **Username**：你的邮箱地址，例如 `example@gmail.com`  
-- **Password**：邮箱生成的 **授权码**（不是邮箱登录密码）  
-- **To Address**：你希望接收提醒的邮箱地址  
-
----
-
-### 3.3 启用邮件提醒
-
-1. 在 Web 界面勾选 **Enable Email** ✅  
-2. 填写完配置后点击 **Save** 保存  
-3. 点击 **Start** 启动监控  
-4. 当检测到房间空余时，系统会自动发送邮件通知  
+- **SMTP Server**: e.g., `smtp.gmail.com`  
+- **SMTP Port**: typically `465` (SSL) or `587` (TLS)  
+- **Username**: your email address, e.g., `example@gmail.com`  
+- **Password**: your **App Password** (not your email login password)  
+- **To Address**: the email address where you want to receive alerts  
 
 ---
 
-### 3.4 提示
+### 3.3 Enable Email Alerts
 
-- 推荐使用 **Gmail** 测试  
-- 如果邮件没有收到，请检查 **垃圾邮箱**  
-- 若提示认证失败，请确认是否填写了 **授权码** 而不是邮箱密码  
+1. In the web interface, check **Enable Email** ✅  
+2. Fill in the settings and click **Save**  
+3. Click **Start** to begin monitoring  
+4. The system will send an email when rooms are available  
 
+---
 
+### 3.4 Notes
+
+- Recommended to test with **Gmail**  
+- Check your **spam folder** if no emails arrive  
+- If authentication fails, make sure you entered the **App Password**, not your login password  
