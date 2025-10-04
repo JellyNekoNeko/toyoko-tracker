@@ -25,6 +25,8 @@
 - MacOS: 打开 Launchpad，搜索并点击 Terminal (终端)，然后可以输入命令。
 - Linux: 按下 Ctrl + Alt + T，会自动打开终端。也可以在应用菜单里搜索 Terminal。
 
+执行以下命令以完成安装：
+
 ```bash
 pip install --upgrade pip
 pip install toyoko-tracker
