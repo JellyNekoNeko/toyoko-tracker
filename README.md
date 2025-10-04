@@ -7,214 +7,233 @@
 
 ---
 
-# 📘 Toyoko Tracker User Guide  
+# 📘 Toyoko Tracker User Guide
+
+## Ch.1 Installation & Getting Started
+
+### 1.1 Introduction
+
+**Toyoko Tracker** is a **Flask + Selenium** based desktop and web tool designed to automatically check **Toyoko Inn** hotel room availability, with support for:
+
+- 🌐 Web interface for real-time room availability  
+- 🔔 Local notifications (⚠️ MacOS notifications currently not supported)  
+- 🤖 Telegram Bot push  
+- 📧 SMTP Email alerts  
 
 ---
 
-## 🏁 Ch.1 Installation & Startup  
+### 1.2 Installation
 
-### 📖 1.1 Introduction  
+#### Requirements
+- Python **3.9+** (Recommended 3.10 / 3.11)  
+- Installed **Google Chrome Browser** (the tool relies on ChromeDriver for automation)  
 
-**Toyoko Tracker** is a **Flask + Selenium** based desktop & web tool for automatically checking **Toyoko Inn** hotel room availability, with support for:  
-
-- 🌐 **Web Interface**: Real-time room availability display  
-- 🔔 **Local Notifications** (⚠️ MacOS currently unsupported)  
-- 🤖 **Telegram Bot Push**  
-- 📧 **SMTP Email Alerts**  
-
----
-
-### 🔧 1.2 Installation  
-
-#### Requirements  
-- Python **3.9+** (recommended: 3.10 / 3.11)  
-- **Google Chrome Browser** installed (requires ChromeDriver automation)  
-
-#### Install from PyPI  
+#### Install from PyPI
 ```bash
 pip install toyoko-tracker
 ```
 
 ---
 
-### 🚀 1.3 Usage  
+### 1.3 Usage
 
-After installation, run in terminal:  
+After installation, run the following in your terminal:
+
 ```bash
 toyoko-tracker
-```  
+```
 
-Once launched:  
-- A local web service will start at 👉 [http://127.0.0.1:4170](http://127.0.0.1:4170)  
-- The program will attempt to automatically open the browser  
-- If it doesn’t, manually visit `127.0.0.1:4170` in your browser  
+After launching:
+
+- A local web server will run at: [http://127.0.0.1:4170](http://127.0.0.1:4170)  
+- The program will try to automatically open the browser  
+- If it doesn’t, open the browser manually and enter `127.0.0.1:4170`  
 
 ---
 
-### 📝 1.4 Version Info  
+### 1.4 Version Info
 
 - Current version: `v0.4.17`  
-- Author: 果冻猫猫 (bilibili @果冻猫猫丶)  
+- Author: JellyNeko (bilibili @果冻猫猫丶)  
 - License: MIT  
 
 ---
 
-## 🤖 Ch.2 Telegram Bot Setup  
+## 🏨 Ch.2 Getting Hotel 5-Digit Codes
 
-To receive room alerts via **Telegram**, you need to configure a bot.  
+Before using Toyoko Tracker, you need the **5-digit hotel code**.  
+This code is used on the Toyoko Inn official website to uniquely identify each hotel.  
+
+### 🔹 2.1 Search by Hotel Name on Google
+
+1. Search the full hotel name on Google, for example:  
+   ```
+   Toyoko Inn Shin-yokohama Ekimae Shinkan
+   ```  
+2. You will usually see the official Toyoko Inn booking page, such as:  
+   ```
+   https://www.toyoko-inn.com/eng/search/detail/00061/
+   ```  
+3. In this link, **00061** is the hotel code.  
 
 ---
 
-### 🔹 2.1 Create a Telegram Bot  
+### 🔹 2.2 From the Booking URL
 
-1. In Telegram, search and open **BotFather**  
-2. Send command:  
+When you search on the official Toyoko Inn website with check-in and check-out dates, you will see a booking results page like this:  
+```
+https://www.toyoko-inn.com/eng/search/result/room_plan/?hotel=00061&start=2025-10-13&end=2025-10-14&room=1&people=1
+```  
+
+Here, the parameter `hotel=00061` indicates the hotel code.  
+
+---
+
+## 🤖 Ch.3 Telegram Bot Setup
+
+To receive availability alerts via Telegram, you need to configure a bot.  
+
+### 3.1 Create a Telegram Bot
+
+1. Search and open **BotFather** in Telegram  
+2. Send the command:  
    ```
    /newbot
-   ```
-3. Follow instructions to set:  
-   - Bot name (e.g., `ToyokoBot`)  
-   - Username (must end with `bot`, e.g., `toyokotracker_bot`)  
-4. BotFather will return a **Bot Token**:  
+   ```  
+3. Follow the prompts:  
+   - Bot name (e.g. `ToyokoBot`)  
+   - Username (must end with `bot`, e.g. `toyokotracker_bot`)  
+4. BotFather will provide a **Bot Token**:  
    ```
    1234567890:ABCdefGhIJklmNoPQRstuVWxyZ
-   ```
+   ```  
 
----
+### 3.2 Get Chat ID
 
-### 🔹 2.2 Get Chat ID  
+Chat ID is the unique identifier for your Telegram account or group.  
 
-Chat ID identifies your Telegram account or group.  
+Method:  
 
-1. In Telegram, search and start **@userinfobot**  
-2. It will return your **Chat ID**, e.g.:  
+1. Search and start **@userinfobot** in Telegram  
+2. It will show your current account’s **Chat ID**, for example:  
    ```
    987654321
-   ```
+   ```  
+
+### 3.3 Configure in Toyoko Tracker
+
+1. Open the Toyoko Tracker web interface  
+2. Locate the **Telegram Bot** section in the settings panel  
+3. Enable it ✅  
+4. Enter the **Bot Token** from BotFather  
+5. Enter your **Chat ID** from @userinfobot  
+
+Once configured, Toyoko Tracker will automatically send messages via Telegram when rooms are available.  
 
 ---
 
-### 🔹 2.3 Configure in Toyoko Tracker  
+## 📧 Ch.4 Email Notification Setup
 
-1. Open Toyoko Tracker web interface  
-2. Go to **Telegram Bot Settings**  
-3. Enable ✅  
-4. Enter **Bot Token** from BotFather  
-5. Enter **Chat ID** from @userinfobot  
+To receive alerts via **email**, you need to configure an SMTP account.  
 
-Now, when rooms are available, Toyoko Tracker will notify you via Telegram.  
+### 4.1 Enable SMTP Service
 
----
-
-## 📧 Ch.3 Email Alerts Setup  
-
-To receive **email alerts**, configure an SMTP account.  
-
----
-
-### 🔹 3.1 Enable SMTP in Your Email  
-
-Examples:  
-
-- **QQ Mail**  
-  1. Log into QQ Mail → Settings → Account  
-  2. Enable **SMTP service**  
-  3. System generates an **authorization code** (⚠️ not your password!)  
+Steps vary by provider:  
 
 - **Gmail**  
-  1. Log into Gmail → Manage account → Security  
-  2. Enable **Less Secure Apps** or create an **App Password**  
-  3. Get a 16-digit App Password  
+  1. Log in → Manage account → Security  
+  2. Enable “Allow less secure apps” or use **App Passwords**  
+  3. Get a 16-digit **App Password**  
+
+- **QQ Mail**  
+  1. Log in → Settings → Account  
+  2. Enable “SMTP Service”  
+  3. Get an **authorization code** (not your login password)  
 
 - **163/126 Mail**  
-  1. Log into webmail → Settings → POP3/SMTP/IMAP  
-  2. Enable **SMTP service**  
+  1. Log in → Settings → POP3/SMTP/IMAP  
+  2. Enable “SMTP Service”  
   3. Get an **authorization code**  
 
----
+### 4.2 Fill in Email Settings in Toyoko Tracker
 
-### 🔹 3.2 Fill in Toyoko Tracker Email Settings  
+In the **Email Settings** section:  
 
-- **SMTP Server**: e.g. `smtp.qq.com` / `smtp.gmail.com`  
+- **SMTP Server**: e.g. `smtp.gmail.com` / `smtp.qq.com`  
 - **SMTP Port**: usually `465` (SSL) or `587` (TLS)  
-- **Username**: your email (e.g., `example@gmail.com`)  
-- **Password**: the **authorization code**  
-- **To Address**: target email to receive alerts  
+- **Username**: your email address, e.g. `example@gmail.com`  
+- **Password**: the **authorization code** or **app password**  
+- **To Address**: the recipient email address  
+
+### 4.3 Enable Email Alerts
+
+1. Check **Enable Email** ✅ in the web interface  
+2. Save your configuration  
+3. Click **Start** to begin monitoring  
+4. When rooms are found, emails will be automatically sent  
+
+### 4.4 Tips
+
+- Recommended: Gmail or QQ Mail for testing  
+- Check your **spam/junk folder** if emails don’t arrive  
+- Ensure you used the **authorization code** or **app password**, not your login password  
 
 ---
 
-### 🔹 3.3 Enable Email Alerts  
+## 💻 Ch.5 Web Interface Guide
 
-1. Check ✅ **Enable Email**  
-2. Fill config and click **Save**  
-3. Click **Start** to launch monitoring  
-4. When rooms are found, system sends an email  
+This chapter explains the **web interface** after launching Toyoko Tracker.  
 
----
+### 5.1 Main Interface
 
-### 🔹 3.4 Tips  
-
-- Recommended: **QQ Mail** or **Gmail** for testing  
-- If no mail, check **Spam folder**  
-- If auth fails, ensure you used **authorization code** instead of login password  
-
----
-
-## 💻 Ch.4 Web Interface Operations  
-
----
-
-### 🔹 4.1 Main Interface  
-
-- Default address: `http://127.0.0.1:4170`  
-- Sections:  
+- Default: opens at `http://127.0.0.1:4170`  
+- Sections include:  
   - **Run Settings**  
-  - **Status Display**  
+  - **Status**  
   - **Results Table**  
-  - **Control Buttons**  
+  - **Controls**  
 
----
+### 5.2 Control Buttons
 
-### 🔹 4.2 Control Buttons  
+- **Start**: begin monitoring and save config to `auto_save.json`  
+- **Stop**: stop monitoring and close browser driver  
+- **Default**: reset to default config (today+tomorrow, 1 person, 1 room)  
+- **Save**: save config to `save.json` (manual save)  
+- **Load**: load config from `save.json`  
 
-- **Start**: Start monitoring & save config to `auto_save.json`  
-- **Stop**: Stop monitoring & close driver  
-- **Default**: Reset config (today + tomorrow, people = 1, room = 1)  
-- **Save**: Save current config to `save.json`  
-- **Load**: Load config from `save.json`  
+### 5.3 Settings Panel
 
----
-
-### 🔹 4.3 Settings Panel  
-
-1. **Start/End Date**: Check-in/out dates  
-2. **People / Rooms**: Input 1–5 people, 1–9 rooms  
-3. **Smoking Option**: `noSmoking` / `Smoking` / `all`  
-4. **Hotel Code**: multiple 5-digit codes allowed (comma or space separated)  
+1. **Check-in/Check-out Dates**  
+2. **Guests / Rooms** (1–5 people, 1–9 rooms)  
+3. **Smoking Options**:  
+   - `noSmoking` (non-smoking)  
+   - `Smoking` (smoking)  
+   - `all` (any)  
+4. **Hotel Code(s)**: multiple 5-digit codes separated by comma or space  
 5. **Proxy Settings**: e.g. `http://127.0.0.1:7890`  
-6. **Telegram**: Bot Token & Chat ID  
-7. **Local Notifications**: enable (⚠️ MacOS unsupported)  
-8. **Email Notifications**: SMTP config  
+6. **Telegram Settings**: Bot Token & Chat ID  
+7. **Local Notifications**: enable (⚠️ MacOS may not work)  
+8. **Email Notifications**: SMTP server, port, account, password  
 
----
+### 5.4 Status Panel
 
-### 🔹 4.4 Status Display  
+Shows real-time status:  
 
-- **Round**: Current round  
-- **Progress Bar**: Completed vs total  
-- **Elapsed / Uptime**: Time for this round & total uptime  
-- **Current Action**: Current task (e.g. "Checking hotel 00061")  
+- **Round**: iteration count  
+- **Progress Bar**: current vs total  
+- **Elapsed / Uptime**: round time & total runtime  
+- **Current Action**: e.g. “Checking hotel 00061”  
 
----
+### 5.5 Results Table
 
-### 🔹 4.5 Results Table  
+Displays the latest scan results:  
 
-- **Code**: Hotel code  
-- **HotelName**: Hotel name  
-- **Result**: ✅ Available / ❌ Not Available / ❓ Unknown  
-- **MinPrice**: Lowest non-member price  
-- **Left**: Remaining rooms (`Reserve` = ≥10)  
-- **Type**: Room type  
+- **Code**: hotel code  
+- **HotelName**: hotel name  
+- **Result**: ✅ available / ❌ unavailable / ❓ unknown  
+- **MinPrice**: lowest non-member price  
+- **Left**: remaining rooms (`Reserve` means ≥10)  
+- **Type**: room type  
 
 > Special room types (such as *heartful* / *accessible*) are automatically ignored due to hotel reservation policies.
 
