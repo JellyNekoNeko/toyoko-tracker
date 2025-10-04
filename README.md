@@ -101,4 +101,5 @@ Chat ID 是 Telegram 中标识用户或群的唯一 ID，用来指定推送的�
 4. 填入 BotFather 给的 **Bot Token**  
 5. 填入你通过 @userinfobot 获取的 **Chat ID**  
 
-这样，当有房间可订时，系统就会自动通过 Telegram 向你推送消息。  
+这样，当有房间可订时，系统就会自动通过 Telegram 向你推送消息。当之前有房间可订的房间不可用时，系统也会推送消息。
+
