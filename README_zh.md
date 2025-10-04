@@ -214,7 +214,7 @@ Chat ID 是 Telegram 中标识用户或群的唯一 ID，用来指定推送的�
 - **Round**：检测轮次  
 - **进度条**：当前进度与总数  
 - **Elapsed / Uptime**：本轮用时 & 总运行时间  
-- **Current Action**：正在执行的任务（如「正在检查 00061 酒店」）  
+- **Current Action**：正在执行的任务
 
 ### 5.5 结果表格
 
@@ -224,7 +224,7 @@ Chat ID 是 Telegram 中标识用户或群的唯一 ID，用来指定推送的�
 - **酒店名 HotelName**：酒店名称  
 - **结果 Result**：✅ 有房 / ❌ 无房 / ❓ 未知  
 - **最低价 MinPrice**：最低非会员价  
-- **剩余 Left**：剩余房间数（`Reserve` 代表 ≥10）  
+- **剩余 Left**：剩余房间数 
 - **房型 Type**：对应房间类型  
 
 > ⚠️ 特殊房型（如 *heartful* / *accessible*）会自动忽略。  
