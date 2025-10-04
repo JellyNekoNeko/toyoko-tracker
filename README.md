@@ -30,9 +30,9 @@
 
 #### Install from PyPI
 
-- Windows: Press Win + R, type cmd, then press Enter. This will open the Command Prompt window where you can enter commands. Alternatively, click the Start menu → search for PowerShell → open Windows PowerShell.
-- MacOS: Open Launchpad, search for and click Terminal, then you can enter commands.
-- Linux: Press Ctrl + Alt + T to automatically open the terminal. You can also search for Terminal in the applications menu.
+- **Windows**: Press Win + R, type cmd, then press Enter. This will open the Command Prompt window where you can enter commands. Alternatively, click the Start menu → search for PowerShell → open Windows PowerShell.
+- **MacOS**: Open Launchpad, search for and click Terminal, then you can enter commands.
+- **Linux**: Press Ctrl + Alt + T to automatically open the terminal. You can also search for Terminal in the applications menu.
 
 Run the following commands to complete the installation:
 
