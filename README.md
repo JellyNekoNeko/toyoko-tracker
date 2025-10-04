@@ -232,7 +232,7 @@ Displays the latest scan results:
 - **HotelName**: hotel name  
 - **Result**: ✅ available / ❌ unavailable / ❓ unknown  
 - **MinPrice**: lowest non-member price  
-- **Left**: remaining rooms (`Reserve` means ≥10)  
+- **Left**: remaining rooms 
 - **Type**: room type  
 
 > Special room types (such as *heartful* / *accessible*) are automatically ignored due to hotel reservation policies.
