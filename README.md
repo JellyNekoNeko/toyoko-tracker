@@ -25,8 +25,11 @@
 ### 1.2 Installation
 
 #### Requirements
-- Python **3.9+** (Recommended 3.10 / 3.11)  
-- Installed **Google Chrome Browser** (the tool relies on ChromeDriver for automation)  
+- Python **3.9+** (Recommended 3.10 / 3.11)
+- Chromium
+
+#### Optional
+- Installed **Google Chrome Browser** (Using Selenium Web Rendering Driver)  
 
 #### Install from PyPI
 
@@ -39,6 +42,12 @@ Run the following commands to complete the installation:
 ```bash
 pip install --upgrade pip
 pip install toyoko-tracker
+```
+
+#### Install **chromium** from from playwright (Required)
+
+```bash
+playwright install chromium
 ```
 
 ---
