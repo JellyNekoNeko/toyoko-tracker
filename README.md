@@ -1,4 +1,4 @@
-# Toyoko Inn Room Vacancy Tracker
+# Toyoko Inn Room Vacancy Tracker WebUI
 
 *A lovely room availability tracker for [Toyoko Inn](https://www.toyoko-inn.com/), powered by Flask + Selenium.*
 
