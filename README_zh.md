@@ -79,7 +79,7 @@ toyoko-tracker
 ### 1.4 版本信息
 
 - **当前版本：** `v0.4.18`  
-- **作者：** JellyNeko (bilibili @果冻猫猫丶)  
+- **作者：** JellyNeko (bilibili @果冻猫猫丶) (https://www.toyoko-inn.com/)  
 - **许可证：** MIT  
 
 ---
