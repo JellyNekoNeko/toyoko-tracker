@@ -4,6 +4,7 @@ pyproject.toml
 src/toyoko_tracker/__init__.py
 src/toyoko_tracker/__main__.py
 src/toyoko_tracker/app.py
+src/toyoko_tracker/hotel_scan.py
 src/toyoko_tracker.egg-info/PKG-INFO
 src/toyoko_tracker.egg-info/SOURCES.txt
 src/toyoko_tracker.egg-info/dependency_links.txt
