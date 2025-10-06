@@ -79,7 +79,7 @@ Once started:
 
 ### 1.4 Version Info
 
-- **Current version:** `v0.6.30`  
+- **Current version:** `v0.4.18`  
 - **Author:** JellyNeko (bilibili @果冻猫猫丶)  
 - **License:** MIT  
 
