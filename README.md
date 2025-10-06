@@ -54,7 +54,11 @@ Supported features:
 #### Installation Command
 ```bash
 pip install --upgrade pip
+```
+```bash
 pip install toyoko-tracker
+```
+```bash
 playwright install chromium
 ```
 
