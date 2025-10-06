@@ -80,7 +80,7 @@ Once started:
 ### 1.4 Version Info
 
 - **Current version:** `v0.4.18`  
-- **Author:** JellyNeko (bilibili @果冻猫猫丶)  
+- **Author:** JellyNekoNeko (bilibili @果冻猫猫丶) ([https://space.bilibili.com/4955287])  
 - **License:** MIT  
 
 ---
