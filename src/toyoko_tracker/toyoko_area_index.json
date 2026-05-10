@@ -1,0 +1,724 @@
+{
+  "source": "https://www.toyoko-inn.com/eng/search/",
+  "generated_at": "2026-05-09T22:28:17+0800",
+  "regions": [
+    {
+      "id": 1,
+      "key": "hokkaido",
+      "name": "Hokkaido",
+      "label_zh": "北海道",
+      "prefectures": [
+        {
+          "id": 1,
+          "name": "Hokkaido",
+          "areas": [
+            {
+              "id": 427,
+              "name": "Abashiri / Kitami / Kushiro",
+              "name_zh": "网走、北见、钏路"
+            },
+            {
+              "id": 429,
+              "name": "Sapporo",
+              "name_zh": "札幌"
+            },
+            {
+              "id": 428,
+              "name": "Asahikawa",
+              "name_zh": "旭川"
+            },
+            {
+              "id": 430,
+              "name": "Obihiro / Tomakomai",
+              "name_zh": "带广、苫小牧"
+            },
+            {
+              "id": 431,
+              "name": "Hakodate",
+              "name_zh": "函馆"
+            }
+          ],
+          "name_zh": "北海道"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "key": "tohoku",
+      "name": "Tohoku",
+      "label_zh": "东北",
+      "prefectures": [
+        {
+          "id": 2,
+          "name": "Aomori",
+          "areas": [],
+          "name_zh": "青森"
+        },
+        {
+          "id": 3,
+          "name": "Iwate",
+          "areas": [
+            {
+              "id": 435,
+              "name": "Morioka",
+              "name_zh": "盛冈"
+            },
+            {
+              "id": 436,
+              "name": "Kitakami / Ichinoseki",
+              "name_zh": "北上、一关"
+            }
+          ],
+          "name_zh": "岩手"
+        },
+        {
+          "id": 4,
+          "name": "Miyagi",
+          "areas": [
+            {
+              "id": 439,
+              "name": "Sendai (Miyagi)",
+              "name_zh": "仙台"
+            }
+          ],
+          "name_zh": "宫城"
+        },
+        {
+          "id": 5,
+          "name": "Akita",
+          "areas": [],
+          "name_zh": "秋田"
+        },
+        {
+          "id": 6,
+          "name": "Yamagata",
+          "areas": [],
+          "name_zh": "山形"
+        },
+        {
+          "id": 7,
+          "name": "Fukushima",
+          "areas": [
+            {
+              "id": 442,
+              "name": "Fukushima",
+              "name_zh": "福岛"
+            },
+            {
+              "id": 443,
+              "name": "Aizu / Koriyama",
+              "name_zh": "会津、郡山"
+            },
+            {
+              "id": 444,
+              "name": "Shirakawa / Iwaki",
+              "name_zh": "白河、磐城"
+            }
+          ],
+          "name_zh": "福岛"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "key": "kanto",
+      "name": "Kanto",
+      "label_zh": "关东",
+      "prefectures": [
+        {
+          "id": 8,
+          "name": "Ibaraki",
+          "areas": [],
+          "name_zh": "茨城"
+        },
+        {
+          "id": 9,
+          "name": "Tochigi",
+          "areas": [
+            {
+              "id": 447,
+              "name": "Utsunomiya",
+              "name_zh": "宇都宫"
+            },
+            {
+              "id": 448,
+              "name": "Oyama / Ashikaga",
+              "name_zh": "小山、足利"
+            },
+            {
+              "id": 5100,
+              "name": "Nasushiobara",
+              "name_zh": "那须盐原"
+            }
+          ],
+          "name_zh": "栃木"
+        },
+        {
+          "id": 10,
+          "name": "Gunma",
+          "areas": [],
+          "name_zh": "群马"
+        },
+        {
+          "id": 11,
+          "name": "Saitama",
+          "areas": [
+            {
+              "id": 451,
+              "name": "Saitama / Kasukabe",
+              "name_zh": "埼玉、春日部"
+            },
+            {
+              "id": 453,
+              "name": "Misato / Soka / Yashio",
+              "name_zh": "三乡、草加、八潮"
+            },
+            {
+              "id": 454,
+              "name": "Kawaguchi / Warabi / Wako / Toda / Shiki / Asaka",
+              "name_zh": "川口、蕨、和光、户田、志木、朝霞"
+            },
+            {
+              "id": 5003,
+              "name": "Tokorozawa",
+              "name_zh": "所泽"
+            },
+            {
+              "id": 452,
+              "name": "Kumagaya",
+              "name_zh": "熊谷"
+            }
+          ],
+          "name_zh": "埼玉"
+        },
+        {
+          "id": 12,
+          "name": "Chiba",
+          "areas": [
+            {
+              "id": 456,
+              "name": "Chiba",
+              "name_zh": "千叶"
+            },
+            {
+              "id": 457,
+              "name": "Ichikawa / Funabashi",
+              "name_zh": "市川、船桥"
+            },
+            {
+              "id": 458,
+              "name": "Kamagaya / Kashiwa / Matsudo / Nagareyama",
+              "name_zh": "镰谷、柏、松户、流山"
+            },
+            {
+              "id": 460,
+              "name": "Narita / Inzai",
+              "name_zh": "成田、印西"
+            },
+            {
+              "id": 459,
+              "name": "Sodegaura",
+              "name_zh": "袖浦"
+            }
+          ],
+          "name_zh": "千叶"
+        },
+        {
+          "id": 13,
+          "name": "Tokyo",
+          "areas": [
+            {
+              "id": 5287,
+              "name": "Within Tokyo's 23 wards",
+              "name_zh": "东京23区内"
+            },
+            {
+              "id": 463,
+              "name": "Tokyo / Nihonbashi areas",
+              "name_zh": "东京、日本桥周边"
+            },
+            {
+              "id": 464,
+              "name": "Korakuen / Tameike Sanno areas",
+              "name_zh": "后乐园、溜池山王周边"
+            },
+            {
+              "id": 462,
+              "name": "Ueno / Asakusa areas",
+              "name_zh": "浅草、上野周边"
+            },
+            {
+              "id": 465,
+              "name": "Ikebukuro / Akabane areas",
+              "name_zh": "池袋、赤羽周边"
+            },
+            {
+              "id": 466,
+              "name": "Shinjuku area",
+              "name_zh": "新宿周边"
+            },
+            {
+              "id": 467,
+              "name": "Shinagawa area",
+              "name_zh": "品川周边"
+            },
+            {
+              "id": 468,
+              "name": "Kamata / Omori / Haneda areas",
+              "name_zh": "蒲田、大森、羽田周边"
+            },
+            {
+              "id": 461,
+              "name": "Kiba / Kasai areas",
+              "name_zh": "木场、葛西周边"
+            },
+            {
+              "id": 469,
+              "name": "Outside Tokyo's 23 wards",
+              "name_zh": "东京23区外"
+            }
+          ],
+          "name_zh": "东京"
+        },
+        {
+          "id": 14,
+          "name": "Kanagawa",
+          "areas": [
+            {
+              "id": 473,
+              "name": "Kawasaki",
+              "name_zh": "川崎"
+            },
+            {
+              "id": 475,
+              "name": "Yokohama",
+              "name_zh": "横滨"
+            },
+            {
+              "id": 477,
+              "name": "Sagamihara / Yamato / Atsugi / Ebina",
+              "name_zh": "相模原、大和、厚木、海老名"
+            },
+            {
+              "id": 3232,
+              "name": "Fujisawa / Chigasaki / Hiratsuka",
+              "name_zh": "藤泽、茅崎、平塚"
+            },
+            {
+              "id": 480,
+              "name": "Odawara",
+              "name_zh": "小田原"
+            }
+          ],
+          "name_zh": "神奈川"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "key": "tokai",
+      "name": "Tokai / Koshinetsu / Hokuriku",
+      "label_zh": "东海 / 甲信越 / 北陆",
+      "prefectures": [
+        {
+          "id": 15,
+          "name": "Niigata",
+          "areas": [],
+          "name_zh": "新潟"
+        },
+        {
+          "id": 16,
+          "name": "Toyama",
+          "areas": [],
+          "name_zh": "富山"
+        },
+        {
+          "id": 17,
+          "name": "Ishikawa",
+          "areas": [],
+          "name_zh": "石川"
+        },
+        {
+          "id": 18,
+          "name": "Fukui",
+          "areas": [],
+          "name_zh": "福井"
+        },
+        {
+          "id": 19,
+          "name": "Yamanashi",
+          "areas": [],
+          "name_zh": "山梨"
+        },
+        {
+          "id": 20,
+          "name": "Nagano",
+          "areas": [],
+          "name_zh": "长野"
+        },
+        {
+          "id": 21,
+          "name": "Gifu",
+          "areas": [],
+          "name_zh": "岐阜"
+        },
+        {
+          "id": 22,
+          "name": "Shizuoka",
+          "areas": [
+            {
+              "id": 496,
+              "name": "Atami / Gotemba / Mishima / Numazu / Fuji",
+              "name_zh": "热海、御殿场、三岛、沼津、富士"
+            },
+            {
+              "id": 497,
+              "name": "Shizuoka / Fujieda",
+              "name_zh": "静岡、藤枝"
+            },
+            {
+              "id": 498,
+              "name": "Kakegawa / Hamamatsu",
+              "name_zh": "挂川、滨松"
+            }
+          ],
+          "name_zh": "静冈"
+        },
+        {
+          "id": 23,
+          "name": "Aichi",
+          "areas": [
+            {
+              "id": 499,
+              "name": "Nagoya / Ichinomiya",
+              "name_zh": "名古屋、一宫"
+            },
+            {
+              "id": 501,
+              "name": "Toyota / Chiryu / Anjo / Toyohashi",
+              "name_zh": "丰田、知立、安城、丰桥"
+            },
+            {
+              "id": 503,
+              "name": "Centrair (Chubu International Airport)",
+              "name_zh": "新特丽亚（中部国际机场）"
+            }
+          ],
+          "name_zh": "爱知"
+        },
+        {
+          "id": 24,
+          "name": "Mie",
+          "areas": [],
+          "name_zh": "三重"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "key": "kinki",
+      "name": "Kinki",
+      "label_zh": "近畿",
+      "prefectures": [
+        {
+          "id": 25,
+          "name": "Shiga",
+          "areas": [],
+          "name_zh": "滋贺"
+        },
+        {
+          "id": 26,
+          "name": "Kyoto",
+          "areas": [
+            {
+              "id": 510,
+              "name": "Kyoto",
+              "name_zh": "京都"
+            }
+          ],
+          "name_zh": "京都"
+        },
+        {
+          "id": 27,
+          "name": "Osaka",
+          "areas": [
+            {
+              "id": 512,
+              "name": "Shin-Osaka / Higashi-Mikuni / Juso areas",
+              "name_zh": "新大阪、东三国、十三周边"
+            },
+            {
+              "id": 3230,
+              "name": "Umeda / Noda / Tenroku / Bentencho / Taisho areas",
+              "name_zh": "梅田、野田、天六、弁天町、大正周边"
+            },
+            {
+              "id": 514,
+              "name": "Sakuranomiya / Kyobashi areas",
+              "name_zh": "樱之宫、京桥周边"
+            },
+            {
+              "id": 515,
+              "name": "Yodoyabashi / Tenmabashi / Hommachi / Senba areas",
+              "name_zh": "淀屋桥、天满桥、本町、船场周边"
+            },
+            {
+              "id": 516,
+              "name": "Shinsaibashi / Namba / Nihonbashi areas",
+              "name_zh": "心斋桥、难波、日本桥周边"
+            },
+            {
+              "id": 517,
+              "name": "Tsuruhashi / Tsutenkaku / Tennoji areas",
+              "name_zh": "鹤桥、通天阁、天王寺周边"
+            },
+            {
+              "id": 519,
+              "name": "Itami Airport",
+              "name_zh": "伊丹机场"
+            },
+            {
+              "id": 520,
+              "name": "Kadoma / Higashi Osaka",
+              "name_zh": "门真、东大阪"
+            },
+            {
+              "id": 521,
+              "name": "Sakai",
+              "name_zh": "堺"
+            }
+          ],
+          "name_zh": "大阪"
+        },
+        {
+          "id": 28,
+          "name": "Hyogo",
+          "areas": [
+            {
+              "id": 523,
+              "name": "Kobe",
+              "name_zh": "神户"
+            },
+            {
+              "id": 524,
+              "name": "Amagasaki",
+              "name_zh": "尼崎"
+            },
+            {
+              "id": 525,
+              "name": "Himeji / Aioi / Ako",
+              "name_zh": "姬路、相生、赤穗"
+            }
+          ],
+          "name_zh": "兵库"
+        },
+        {
+          "id": 29,
+          "name": "Nara",
+          "areas": [],
+          "name_zh": "奈良"
+        },
+        {
+          "id": 30,
+          "name": "Wakayama",
+          "areas": [],
+          "name_zh": "和歌山"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "key": "chugoku_shikoku",
+      "name": "Chugoku / Shikoku",
+      "label_zh": "中国 / 四国",
+      "prefectures": [
+        {
+          "id": 31,
+          "name": "Tottori",
+          "areas": [],
+          "name_zh": "鸟取"
+        },
+        {
+          "id": 32,
+          "name": "Shimane",
+          "areas": [],
+          "name_zh": "岛根"
+        },
+        {
+          "id": 33,
+          "name": "Okayama",
+          "areas": [
+            {
+              "id": 527,
+              "name": "Okayama",
+              "name_zh": "冈山"
+            },
+            {
+              "id": 528,
+              "name": "Kurashiki",
+              "name_zh": "仓敷"
+            }
+          ],
+          "name_zh": "冈山"
+        },
+        {
+          "id": 34,
+          "name": "Hiroshima",
+          "areas": [
+            {
+              "id": 529,
+              "name": "Hiroshima",
+              "name_zh": "广岛"
+            },
+            {
+              "id": 530,
+              "name": "Higashi-Hiroshima / Kure",
+              "name_zh": "东广岛、吳"
+            },
+            {
+              "id": 3233,
+              "name": "Fukuyama",
+              "name_zh": "福山"
+            }
+          ],
+          "name_zh": "广岛"
+        },
+        {
+          "id": 35,
+          "name": "Yamaguchi",
+          "areas": [],
+          "name_zh": "山口"
+        },
+        {
+          "id": 36,
+          "name": "Tokushima",
+          "areas": [],
+          "name_zh": "德岛"
+        },
+        {
+          "id": 37,
+          "name": "Kagawa",
+          "areas": [],
+          "name_zh": "香川"
+        },
+        {
+          "id": 38,
+          "name": "Ehime",
+          "areas": [],
+          "name_zh": "爱媛"
+        },
+        {
+          "id": 39,
+          "name": "Kochi",
+          "areas": [],
+          "name_zh": "高知"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "key": "kyushu_okinawa",
+      "name": "Kyushu / Okinawa",
+      "label_zh": "九州 / 冲绳",
+      "prefectures": [
+        {
+          "id": 40,
+          "name": "Fukuoka",
+          "areas": [
+            {
+              "id": 543,
+              "name": "Hakata / Tenjin areas",
+              "name_zh": "博多、天神周边"
+            },
+            {
+              "id": 544,
+              "name": "Kitakyushu / Kokura",
+              "name_zh": "北九州、小仓"
+            },
+            {
+              "id": 546,
+              "name": "Kurume",
+              "name_zh": "久留米"
+            }
+          ],
+          "name_zh": "福冈"
+        },
+        {
+          "id": 41,
+          "name": "Saga",
+          "areas": [],
+          "name_zh": "佐贺"
+        },
+        {
+          "id": 42,
+          "name": "Nagasaki",
+          "areas": [],
+          "name_zh": "长崎"
+        },
+        {
+          "id": 43,
+          "name": "Kumamoto",
+          "areas": [
+            {
+              "id": 553,
+              "name": "Kumamoto",
+              "name_zh": "熊本"
+            },
+            {
+              "id": 554,
+              "name": "Yatsushiro",
+              "name_zh": "八代"
+            }
+          ],
+          "name_zh": "熊本"
+        },
+        {
+          "id": 44,
+          "name": "Oita",
+          "areas": [],
+          "name_zh": "大分"
+        },
+        {
+          "id": 45,
+          "name": "Miyazaki",
+          "areas": [],
+          "name_zh": "宫崎"
+        },
+        {
+          "id": 46,
+          "name": "Kagoshima",
+          "areas": [
+            {
+              "id": 557,
+              "name": "Kagoshima",
+              "name_zh": "鹿儿岛"
+            },
+            {
+              "id": 556,
+              "name": "Satsumasendai",
+              "name_zh": "萨摩川内"
+            }
+          ],
+          "name_zh": "鹿儿岛"
+        },
+        {
+          "id": 47,
+          "name": "Okinawa",
+          "areas": [
+            {
+              "id": 558,
+              "name": "Naha",
+              "name_zh": "那霸"
+            },
+            {
+              "id": 559,
+              "name": "Ishigaki",
+              "name_zh": "石垣"
+            }
+          ],
+          "name_zh": "冲绳"
+        }
+      ]
+    }
+  ]
+}

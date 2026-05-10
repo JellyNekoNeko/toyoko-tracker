@@ -1,0 +1,71 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "toyoko-tracker"
+version = "0.4.18"
+description = "Toyoko Inn Vacancy Tracker"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+
+authors = [
+  { name = "bilibili @果冻猫猫丶" }
+]
+
+keywords = ["toyoko-inn", "hotel", "vacancy", "flask", "playwright", "tracker"]
+
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Environment :: Web Environment",
+  "Framework :: Flask",
+  "Topic :: Internet :: WWW/HTTP",
+  "Topic :: Internet :: WWW/HTTP :: Dynamic Content",
+  "Topic :: Utilities"
+]
+
+# ---- Runtime dependencies ----
+dependencies = [
+  "Flask>=2.2",
+  "requests>=2.31",
+  "beautifulsoup4>=4.12",
+  "playwright>=1.45",         # remember to run: `playwright install chromium`
+  "tqdm>=4.66"
+]
+
+# ---- Optional / extra dependencies (PEP 621 compliant) ----
+[project.optional-dependencies]
+dev = [
+  "build>=1.2.1",
+  "twine>=4.0.2",
+  "wheel",
+  "setuptools>=68",
+  "ruff",
+  "pytest"
+]
+
+[project.scripts]
+toyoko-tracker = "toyoko_tracker.app:main"
+
+[project.urls]
+Homepage = "https://github.com/JellyNekoNeko/toyoko-tracker"
+Source = "https://github.com/JellyNekoNeko/toyoko-tracker"
+Issues = "https://github.com/JellyNekoNeko/toyoko-tracker/issues"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["toyoko_tracker*"]
+exclude = ["tests*"]
+
+[tool.setuptools.package-data]
+"toyoko_tracker" = ["*.json"]
