@@ -44,7 +44,7 @@ pip install --upgrade pip
 pip install toyoko-tracker
 ```
 
-#### Install **chromium** from from playwright (Required)
+#### Install **chromium** from from playwright (Optional)
 
 ```bash
 playwright install chromium
