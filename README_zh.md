@@ -113,10 +113,11 @@ toyoko-tracker
 
 ### 1.6 版本信息
 
-- 当前版本：`v0.5.0`
+- 当前版本：`v0.6.0`
 - App 名称：`东横酱 Toyoko Chan`
 - 作者：JellyNeko / bilibili @果冻猫猫丶
 - 许可证：MIT
+- 架构说明：[docs/architecture-v0.6.md](docs/architecture-v0.6.md)
 
 ---
 
@@ -124,8 +125,8 @@ toyoko-tracker
 
 Toyoko Tracker 支持两种选择酒店的方式：
 
-1. 使用内置 **地区酒店选择器**
-2. 手动输入东横INN 5位酒店代码
+1. **区域模式**：选择大区域和可选的详细区域
+2. **方圆模式**：输入地名、地址或坐标，并选择 1–50 公里半径
 
 ---
 
@@ -145,49 +146,21 @@ Toyoko Tracker 支持两种选择酒店的方式：
 - 点击 **Select None** 清空选择
 - 使用过滤框按中文名、英文名或酒店代码搜索
 
-选择的酒店会保存到搜索历史中。
+选择的酒店会显示在地图上，并保存到搜索历史中。
 
 ---
 
-### 2.2 通过 Google 搜索酒店代码
+### 2.2 方圆模式
 
-你也可以手动查找 5 位酒店代码。
+在 WebUI 中：
 
-例如搜索：
+1. 将酒店选择方式切换为 **方圆模式**
+2. 输入地名、地址或经纬度坐标
+3. 选择 1–50 公里的检索半径
+4. 点击 **查找附近酒店 / Load Nearby**
+5. 在地图中确认并勾选需要监控的酒店
 
-```text
-Toyoko Inn Shin-yokohama Ekimae Shinkan
-```
-
-你可能会找到东横INN官方页面：
-
-```text
-https://www.toyoko-inn.com/eng/search/detail/00061/
-```
-
-其中 `00061` 就是酒店代码。
-
----
-
-### 2.3 从预订链接获取酒店代码
-
-在东横INN官网搜索时，结果页面链接可能类似：
-
-```text
-https://www.toyoko-inn.com/eng/search/result/room_plan/?hotel=00061&start=2025-10-13&end=2025-10-14&room=1&people=1
-```
-
-其中：
-
-```text
-hotel=00061
-```
-
-表示酒店代码为：
-
-```text
-00061
-```
+坐标会在本地直接解析；地名和地址通过 OpenStreetMap/Nominatim 转换为坐标。
 
 ---
 

@@ -20,3 +20,16 @@ dist/
 
 # Logs / temp
 *.log
+
+# Local runtime state and credentials
+save.json
+auto_save.json
+search_history.json
+radius_hotels_cache.json
+instance.json
+*.db
+*.sqlite
+*.sqlite3
+.env
+.env.*
+!.env.example

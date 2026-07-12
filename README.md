@@ -114,10 +114,11 @@ After launching:
 
 ### 1.6 Version Info
 
-- Current version: `v0.5.0`
+- Current version: `v0.6.0`
 - App name: `东横酱 Toyoko Chan`
 - Author: JellyNeko / bilibili @果冻猫猫丶
 - License: MIT
+- Architecture: [docs/architecture-v0.6.md](docs/architecture-v0.6.md)
 
 ---
 
@@ -125,8 +126,8 @@ After launching:
 
 Toyoko Tracker supports two ways to choose hotels:
 
-1. Use the built-in **Area Hotel Picker**
-2. Use Toyoko Inn 5-digit hotel codes
+1. **Area mode**: choose a region and optional detail area
+2. **Radius mode**: enter a place, address, or coordinates and choose a 1–50 km radius
 
 ---
 
@@ -146,49 +147,21 @@ You can also:
 - Click **Select None** to clear selection
 - Use the filter box to search by Chinese name, English name, or hotel code
 
-The selected hotels will be saved into the search history.
+The selected hotels are shown on the map and saved into the search history.
 
 ---
 
-### 2.2 Search by Hotel Name on Google
+### 2.2 Radius Mode
 
-You can also manually find the 5-digit hotel code.
+In the WebUI:
 
-For example, search:
+1. Switch the hotel picker to **Radius**
+2. Enter a place, address, or latitude/longitude pair
+3. Select a radius from 1 to 50 km
+4. Click **Load Nearby**
+5. Review the map and select the hotels to monitor
 
-```text
-Toyoko Inn Shin-yokohama Ekimae Shinkan
-```
-
-You may find an official Toyoko Inn page like:
-
-```text
-https://www.toyoko-inn.com/eng/search/detail/00061/
-```
-
-Here, `00061` is the hotel code.
-
----
-
-### 2.3 From the Booking URL
-
-When using Toyoko Inn official search, the result URL may look like:
-
-```text
-https://www.toyoko-inn.com/eng/search/result/room_plan/?hotel=00061&start=2025-10-13&end=2025-10-14&room=1&people=1
-```
-
-Here:
-
-```text
-hotel=00061
-```
-
-means the hotel code is:
-
-```text
-00061
-```
+Coordinates are parsed locally. Place names and addresses use OpenStreetMap/Nominatim for geocoding.
 
 ---
 

@@ -1,14 +1,15 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "toyoko-tracker"
-version = "0.5.0"
+version = "0.6.0"
 description = "Toyoko Inn Vacancy Tracker"
 readme = "README.md"
 requires-python = ">=3.9"
-license = { file = "LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
 
 authors = [
   { name = "bilibili @果冻猫猫丶" }
@@ -22,7 +23,6 @@ classifiers = [
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
-  "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
   "Environment :: Web Environment",
   "Framework :: Flask",
@@ -46,7 +46,7 @@ dev = [
   "build>=1.2.1",
   "twine>=4.0.2",
   "wheel",
-  "setuptools>=68",
+  "setuptools>=77",
   "ruff",
   "pytest"
 ]
@@ -68,4 +68,4 @@ include = ["toyoko_tracker*"]
 exclude = ["tests*"]
 
 [tool.setuptools.package-data]
-"toyoko_tracker" = ["*.json"]
+"toyoko_tracker" = ["*.json", "static/*.css", "static/*.js"]
