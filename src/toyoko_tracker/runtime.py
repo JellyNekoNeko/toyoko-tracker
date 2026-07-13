@@ -33,6 +33,7 @@ from flask import request, jsonify, Response
 from bs4 import BeautifulSoup
 
 from .i18n import LANGUAGE_OPTIONS, normalize_primary_language as _normalize_primary_language
+from .http_client import get as _http_get
 from .hotel_info import (
     get_hotel_info as _get_hotel_info,
     get_provider_hotel_info as _get_provider_hotel_info,
@@ -854,7 +855,7 @@ def _hotel_result_from_offers(
 def check_hotel_http(cfg: AppConfig, code: str, start: str, end: str) -> HotelResult:
     url = build_url(cfg, code, start, end)
     try:
-        resp = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
+        resp = _http_get(url, headers=HEADERS, timeout=TIMEOUT)
         resp.raise_for_status()
         next_data = _extract_next_data(resp.text)
         if not next_data:
@@ -1054,6 +1055,51 @@ def _jittered_delay(base_seconds: int, jitter_percent: int) -> float:
     return max(1.0, random.uniform(low, high))
 
 
+class _HotelStartLimiter:
+    def __init__(self, base_delay: int, jitter_percent: int) -> None:
+        self.base_delay = max(1, min(60, int(base_delay)))
+        self.jitter_percent = max(0, min(100, int(jitter_percent)))
+        self._lock = threading.Lock()
+        self._next_start = 0.0
+
+    def wait(self) -> bool:
+        while not _stop_event.is_set():
+            with self._lock:
+                now = _now_mono()
+                if now >= self._next_start:
+                    self._next_start = now + _jittered_delay(self.base_delay, self.jitter_percent)
+                    return True
+                remaining = self._next_start - now
+            if _stop_event.wait(timeout=max(0.01, remaining)):
+                return False
+        return False
+
+
+def _publish_partial_result(result: HotelResult, ordered_codes: List[str]) -> None:
+    global _LAST_RESULTS
+    with _RESULTS_LOCK:
+        by_code = {item.code: item for item in _LAST_RESULTS}
+        by_code[result.code] = result
+        _LAST_RESULTS = [by_code[code] for code in ordered_codes if code in by_code]
+
+
+def _round_wait_seconds(
+    target_interval_sec: int,
+    round_started_mono: float,
+    jitter_percent: int,
+    now_mono: Optional[float] = None,
+    minimum_pause_sec: float = 3.0,
+) -> Tuple[float, float, float]:
+    target_period = min(
+        3600.0,
+        _jittered_delay(max(30, int(target_interval_sec)), max(0, min(50, int(jitter_percent)))),
+    )
+    current = _now_mono() if now_mono is None else float(now_mono)
+    scan_elapsed = max(0.0, current - float(round_started_mono))
+    wait_seconds = min(3600.0, max(float(minimum_pause_sec), target_period - scan_elapsed))
+    return wait_seconds, target_period, scan_elapsed
+
+
 def _parallel_allowed(cfg: AppConfig) -> bool:
     return bool(
         getattr(cfg, "smart_parallel_enabled", False)
@@ -1068,38 +1114,34 @@ def _check_hotels_parallel_http(cfg: AppConfig, codes: List[str], start: str, en
     jitter = getattr(cfg, "request_jitter_percent", DEFAULT_REQUEST_JITTER_PERCENT)
     results: List[Optional[HotelResult]] = [None] * len(codes)
 
-    _log(f"[parallel] Smart Parallel enabled: workers={workers}, global-ish delay={base_delay}s")
+    limiter = _HotelStartLimiter(base_delay, jitter)
+    _log(f"[parallel] Dynamic Smart Parallel enabled: workers={workers}, global start delay={base_delay}s")
 
-    def _run_slot(slot: int, indexed_codes: List[Tuple[int, str]]) -> None:
-        if slot > 0:
-            if _stop_event.wait(timeout=_jittered_delay(base_delay * slot, jitter)):
-                return
-        for idx, code in indexed_codes:
-            if _stop_event.is_set():
-                return
-            _set_action(f"[search:{slot + 1}/{workers}] Checking hotel {code} for {start} → {end}...")
-            _log(f"[search:{slot + 1}/{workers}] Checking hotel {code} for {start} → {end}...")
-            try:
-                results[idx] = check_hotel(cfg, None, code, start, end)
-            except Exception as e:
-                _log(f"[error] check {code}: {e}")
-                results[idx] = HotelResult(code=code, url=build_url(cfg, code, start, end), name=None, available=None)
-            with _PROGRESS_LOCK:
-                _PROGRESS["done"] = min(_PROGRESS["done"] + 1, _PROGRESS["total"])
-            if _stop_event.wait(timeout=_jittered_delay(base_delay * workers, jitter)):
-                return
+    def _run_one(idx: int, code: str) -> Tuple[int, Optional[HotelResult]]:
+        if not limiter.wait():
+            return idx, None
+        _set_action(f"[search] Checking hotel {code} for {start} → {end}...")
+        _log(f"[search] Checking hotel {code} for {start} → {end}...")
+        try:
+            return idx, check_hotel(cfg, None, code, start, end)
+        except Exception as e:
+            _log(f"[error] check {code}: {e}")
+            return idx, HotelResult(code=code, url=build_url(cfg, code, start, end), name=None, available=None)
 
-    slots: List[List[Tuple[int, str]]] = [[] for _ in range(workers)]
-    for idx, code in enumerate(codes):
-        slots[idx % workers].append((idx, code))
-
-    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="smart-search") as executor:
-        futures = [executor.submit(_run_slot, slot, indexed) for slot, indexed in enumerate(slots) if indexed]
+    with ThreadPoolExecutor(max_workers=min(workers, max(1, len(codes))), thread_name_prefix="smart-search") as executor:
+        futures = [executor.submit(_run_one, idx, code) for idx, code in enumerate(codes)]
         for fut in as_completed(futures):
             try:
-                fut.result()
+                idx, result = fut.result()
             except Exception as e:
                 _log(f"[parallel] worker exception: {e}")
+                continue
+            if result is None:
+                continue
+            results[idx] = result
+            with _PROGRESS_LOCK:
+                _PROGRESS["done"] = min(_PROGRESS["done"] + 1, _PROGRESS["total"])
+            _publish_partial_result(result, codes)
 
     return [
         r if r is not None else HotelResult(code=codes[idx], url=build_url(cfg, codes[idx], start, end), name=None, available=None)
@@ -1149,13 +1191,14 @@ def _worker_loop(run_once: bool = False):
             _PROGRESS["round_started"] = _now_wall()
             _PROGRESS["round_started_mono"] = _now_mono()
         current_round = _PROGRESS["round"]
+        round_started_mono = _PROGRESS["round_started_mono"]
         results: List[HotelResult] = []
         if _parallel_allowed(cfg):
             results = _check_hotels_parallel_http(cfg, list(cfg.hotel_codes), start, end)
         else:
             if getattr(cfg, "smart_parallel_enabled", False) and getattr(cfg, "engine", "http") != "http":
                 _log("[parallel] Smart Parallel is only used with HTTP/API engine; running single-line search.")
-            for code in cfg.hotel_codes:
+            for index, code in enumerate(cfg.hotel_codes):
                 if _stop_event.is_set():
                     break
                 _set_action(f"[search] Checking hotel {code} for {start} → {end}...")
@@ -1168,12 +1211,14 @@ def _worker_loop(run_once: bool = False):
                 results.append(result)
                 with _PROGRESS_LOCK:
                     _PROGRESS["done"] = min(_PROGRESS["done"] + 1, _PROGRESS["total"])
-                per_hotel_delay = _jittered_delay(
-                    max(1, min(60, int(cfg.per_hotel_delay_seconds))),
-                    getattr(cfg, "request_jitter_percent", DEFAULT_REQUEST_JITTER_PERCENT),
-                )
-                if _stop_event.wait(timeout=per_hotel_delay):
-                    break
+                _publish_partial_result(result, list(cfg.hotel_codes))
+                if index < len(cfg.hotel_codes) - 1:
+                    per_hotel_delay = _jittered_delay(
+                        max(1, min(60, int(cfg.per_hotel_delay_seconds))),
+                        getattr(cfg, "request_jitter_percent", DEFAULT_REQUEST_JITTER_PERCENT),
+                    )
+                    if _stop_event.wait(timeout=per_hotel_delay):
+                        break
 
         newly_available_codes: List[str] = []
         try:
@@ -1232,21 +1277,22 @@ def _worker_loop(run_once: bool = False):
             _log("Single scan complete; worker is stopping.")
             break
 
-        # Post-wait model: after a loop finishes, always wait the full interval
-        wait_s = min(
-            3600.0,
-            _jittered_delay(
-                effective_base_interval,
-                max(0, min(50, int(getattr(cfg, "request_jitter_percent", DEFAULT_REQUEST_JITTER_PERCENT)) // 2)),
-            ),
+        # Target-start cadence: scan time counts toward the requested round interval.
+        wait_s, target_period, scan_elapsed = _round_wait_seconds(
+            effective_base_interval,
+            round_started_mono,
+            max(0, min(50, int(getattr(cfg, "request_jitter_percent", DEFAULT_REQUEST_JITTER_PERCENT)) // 2)),
         )
         with _PROGRESS_LOCK:
             _PROGRESS["phase"] = "waiting"
             _PROGRESS["wait_started_mono"] = _now_mono()
             _PROGRESS["wait_total_sec"] = int(round(wait_s))
             _PROGRESS["wait_elapsed_sec"] = 0
-            _PROGRESS["effective_interval_sec"] = int(round(wait_s))
-        _set_action(f"Round {current_round} complete. Waiting {wait_s:.1f}s...")
+            _PROGRESS["effective_interval_sec"] = int(round(target_period))
+        _set_action(
+            f"Round {current_round} complete in {scan_elapsed:.1f}s. "
+            f"Next target cycle {target_period:.1f}s; waiting {wait_s:.1f}s..."
+        )
         watch_codes = set(newly_available_codes or [])
         if watch_codes:
             _log(f"[enhanced] New availability detected; confirming every 5s during wait: {', '.join(sorted(watch_codes))}")

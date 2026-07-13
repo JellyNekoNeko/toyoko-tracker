@@ -15,8 +15,8 @@ from urllib.parse import parse_qs, urlencode, urljoin, urlsplit
 import requests
 from bs4 import BeautifulSoup
 
+from .http_client import get as _http_get
 from .routeinn import _api_get as _tripla_api_get
-from .routeinn import _localized_hotel_name as _tripla_hotel_name
 from .settings import CHAIN_PROVIDER_CACHE_PATH, HEADERS
 
 DORMY_API_URL = "https://dormy-hotels.com/reserve/api"
@@ -150,7 +150,7 @@ def _dormy_get(path: str, locale: str = "ja", params: Optional[Dict[str, Any]] =
     last_error = None
     for attempt in range(3):
         try:
-            response = requests.get(
+            response = _http_get(
                 f"{DORMY_API_URL}{path}",
                 headers={**_DORMY_HEADERS, "X-localization": locale},
                 params=params,
@@ -441,9 +441,16 @@ def fetch_tripla_offers(
     locale = primary_language if primary_language in locale_map else "zh_cn"
     params = {"checkin_date": start, "checkout_date": end, "adults": max(1, int(adults)), "children": 0, "rooms": max(1, int(rooms))}
     primary_payload = _tripla_api_get(f"/hotels/{booking_code}/rooms", locale, params)
-    english_payload = primary_payload if locale == "en" else _tripla_api_get(f"/hotels/{booking_code}/rooms", "en", params)
     primary_rooms = _tripla_room_map(primary_payload)
-    english_rooms = _tripla_room_map(english_payload)
+    has_available_room = any(
+        str(room.get("availability") or "").lower() == "available"
+        for room in primary_rooms.values()
+    )
+    english_rooms: Dict[str, Dict[str, Any]] = {}
+    if locale == "en":
+        english_rooms = primary_rooms
+    elif has_available_room:
+        english_rooms = _tripla_room_map(_tripla_api_get(f"/hotels/{booking_code}/rooms", "en", params))
     offers = []
     for key, room in primary_rooms.items():
         if str(room.get("availability") or "").lower() != "available":
@@ -470,12 +477,8 @@ def fetch_tripla_offers(
             "room_smoking": "smoking" if room.get("is_smoking") is True else "non_smoking" if room.get("is_smoking") is False else None,
             "plan_name": english.get("room_plan_name") or room.get("room_plan_name") or "",
         })
-    try:
-        name_primary = _tripla_hotel_name(booking_code, locale) or hotel.get("name_primary") or hotel.get("name") or ""
-        name_en = _tripla_hotel_name(booking_code, "en") or hotel.get("name_en") or name_primary
-    except Exception:
-        name_primary = hotel.get("name_primary") or hotel.get("name") or ""
-        name_en = hotel.get("name_en") or name_primary
+    name_primary = hotel.get(f"name_{primary_language}") or hotel.get("name_primary") or hotel.get("name_ja") or hotel.get("name") or ""
+    name_en = hotel.get("name_en") or name_primary
     return name_primary, name_en, build_booking_url(hotel, start, end, adults, rooms), offers, {
         "had_any_offer": bool(primary_rooms), "had_any_non_ignored_offer": bool(primary_rooms), "had_any_ignored_offer": False,
     }

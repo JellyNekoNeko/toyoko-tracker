@@ -114,6 +114,30 @@ class AppParserTests(unittest.TestCase):
         self.assertEqual(offers[0]["room_smoking"], "non_smoking")
         self.assertTrue(stats["had_any_offer"])
 
+    def test_routeinn_unavailable_scan_skips_english_rooms_request(self):
+        from toyoko_tracker import routeinn
+
+        hotel = {
+            "code": "routeinn:241", "provider": "routeinn", "brand": "routeinn",
+            "name_primary": "露樱酒店 札幌站前北口", "name_en": "Hotel Route-Inn Sapporo Ekimae Kitaguchi",
+            "reservation_url": "https://reserve.example.test/?code=booking-code",
+        }
+        payload = {"plans": [{"rooms": [{
+            "room_plan_code": "single-basic",
+            "availability": "unavailable",
+            "room_type_name": "本馆禁烟单人房",
+        }]}]}
+
+        with patch.object(routeinn, "_api_get", return_value=payload) as mock_api:
+            _, _, _, offers, stats = routeinn.fetch_offers(
+                hotel, "2026-07-20", "2026-07-21", 1, 1, "zh_cn"
+            )
+
+        self.assertEqual(offers, [])
+        self.assertTrue(stats["had_any_offer"])
+        self.assertEqual(mock_api.call_count, 1)
+        self.assertEqual(mock_api.call_args.args[1], "zh_cn")
+
     def test_dormy_offer_adapter_keeps_room_smoking_and_inventory(self):
         from toyoko_tracker import chain_providers
 
@@ -534,7 +558,9 @@ class AppParserTests(unittest.TestCase):
             def raise_for_status(self):
                 return None
 
-        with patch.object(tracker_app.requests, "get", lambda *args, **kwargs: FakeResponse()):
+        from toyoko_tracker import runtime
+
+        with patch.object(runtime, "_http_get", lambda *args, **kwargs: FakeResponse()):
             cfg = tracker_app.AppConfig()
             cfg.engine = "http"
             cfg.smoking = "noSmoking"
@@ -591,7 +617,9 @@ class AppParserTests(unittest.TestCase):
             def raise_for_status(self):
                 return None
 
-        with patch.object(tracker_app.requests, "get", lambda *args, **kwargs: FakeResponse()):
+        from toyoko_tracker import runtime
+
+        with patch.object(runtime, "_http_get", lambda *args, **kwargs: FakeResponse()):
             cfg = tracker_app.AppConfig()
             cfg.engine = "http"
             cfg.smoking = "all"
@@ -655,7 +683,7 @@ class AppParserTests(unittest.TestCase):
         cfg.engine = "http"
 
         with patch.object(runtime, "_HAS_PLAYWRIGHT", False), \
-             patch.object(runtime.requests, "get", side_effect=RuntimeError("network unavailable")):
+             patch.object(runtime, "_http_get", side_effect=RuntimeError("network unavailable")):
             result = tracker_app.check_hotel(cfg, None, "00001", "2026-07-17", "2026-07-18")
 
         self.assertIsNone(result.available)
@@ -671,6 +699,62 @@ class AppParserTests(unittest.TestCase):
         runtime._apply_payload_to_config(cfg, {"adaptive_backoff_enabled": False})
 
         self.assertFalse(cfg.adaptive_backoff_enabled)
+
+    def test_round_wait_counts_scan_time_toward_target_cycle(self):
+        from toyoko_tracker import runtime
+
+        wait_seconds, target_period, scan_elapsed = runtime._round_wait_seconds(
+            30,
+            round_started_mono=100.0,
+            jitter_percent=0,
+            now_mono=112.0,
+        )
+
+        self.assertEqual(target_period, 30.0)
+        self.assertEqual(scan_elapsed, 12.0)
+        self.assertEqual(wait_seconds, 18.0)
+
+    def test_round_wait_keeps_short_pause_after_slow_scan(self):
+        from toyoko_tracker import runtime
+
+        wait_seconds, target_period, scan_elapsed = runtime._round_wait_seconds(
+            30,
+            round_started_mono=100.0,
+            jitter_percent=0,
+            now_mono=135.0,
+        )
+
+        self.assertEqual(target_period, 30.0)
+        self.assertEqual(scan_elapsed, 35.0)
+        self.assertEqual(wait_seconds, 3.0)
+
+    def test_parallel_http_preserves_order_and_publishes_each_result(self):
+        from toyoko_tracker import runtime
+
+        cfg = tracker_app.AppConfig()
+        cfg.engine = "http"
+        cfg.smart_parallel_enabled = True
+        cfg.smart_parallel_workers = 3
+        cfg.per_hotel_delay_seconds = 1
+        cfg.request_jitter_percent = 0
+        codes = ["00003", "00001", "00002"]
+
+        def fake_check(_cfg, _page, code, _start, _end):
+            return tracker_app.HotelResult(code=code, url=f"https://example.test/{code}", name=code, available=False)
+
+        with runtime._PROGRESS_LOCK:
+            runtime._PROGRESS["done"] = 0
+            runtime._PROGRESS["total"] = len(codes)
+        runtime._stop_event.clear()
+        with patch.object(runtime._HotelStartLimiter, "wait", return_value=True), \
+             patch.object(runtime, "check_hotel", side_effect=fake_check), \
+             patch.object(runtime, "_publish_partial_result") as mock_publish:
+            results = runtime._check_hotels_parallel_http(cfg, codes, "2026-07-18", "2026-07-19")
+
+        self.assertEqual([result.code for result in results], codes)
+        self.assertEqual(mock_publish.call_count, len(codes))
+        with runtime._PROGRESS_LOCK:
+            self.assertEqual(runtime._PROGRESS["done"], len(codes))
 
     def test_available_notification_switch_still_returns_watch_code(self):
         from toyoko_tracker import notifications

@@ -10,6 +10,7 @@ from urllib.parse import parse_qs, urlencode, urljoin, urlsplit, urlunsplit
 import requests
 from bs4 import BeautifulSoup
 
+from .http_client import get as _http_get, post as _http_post
 from .settings import HEADERS
 
 ROUTEINN_HOTEL_LIST_URL = "https://www.route-inn.co.jp/hotel_list/"
@@ -303,7 +304,7 @@ def _tripla_session_token(force: bool = False) -> str:
     with _TOKEN_LOCK:
         if _SESSION_TOKEN and not force and time.time() - _SESSION_TOKEN_AT < 6 * 60 * 60:
             return _SESSION_TOKEN
-        response = requests.post(
+        response = _http_post(
             TRIPLA_IDP_URL,
             headers={
                 **HEADERS,
@@ -325,9 +326,9 @@ def _tripla_session_token(force: bool = False) -> str:
 
 def _api_get(path: str, locale: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     url = f"{TRIPLA_API_URL}{path}"
-    response = requests.get(url, headers=_tripla_headers(locale), params=params, timeout=25)
+    response = _http_get(url, headers=_tripla_headers(locale), params=params, timeout=25)
     if response.status_code == 401:
-        response = requests.get(url, headers=_tripla_headers(locale, refresh_token=True), params=params, timeout=25)
+        response = _http_get(url, headers=_tripla_headers(locale, refresh_token=True), params=params, timeout=25)
     response.raise_for_status()
     payload = response.json()
     if isinstance(payload, dict) and payload.get("errors"):
@@ -345,7 +346,7 @@ def resolve_booking_code(hotel: Dict[str, Any]) -> str:
     query = parse_qs(urlsplit(reservation_url).query)
     booking_code = str((query.get("code") or [""])[0])
     if not booking_code:
-        response = requests.get(reservation_url, headers=HEADERS, timeout=20, allow_redirects=True)
+        response = _http_get(reservation_url, headers=HEADERS, timeout=20, allow_redirects=True)
         response.raise_for_status()
         booking_code = str((parse_qs(urlsplit(response.url).query).get("code") or [""])[0])
     if not booking_code:
@@ -436,9 +437,16 @@ def fetch_offers(
         "rooms": max(1, int(rooms)),
     }
     primary_payload = _api_get(f"/hotels/{booking_code}/rooms", locale, params)
-    english_payload = primary_payload if locale == "en" else _api_get(f"/hotels/{booking_code}/rooms", "en", params)
     primary_rooms = _room_map(primary_payload)
-    english_rooms = _room_map(english_payload)
+    has_available_room = any(
+        str(room.get("availability") or "").lower() == "available"
+        for room in primary_rooms.values()
+    )
+    english_rooms: Dict[str, Dict[str, Any]] = {}
+    if locale == "en":
+        english_rooms = primary_rooms
+    elif has_available_room:
+        english_rooms = _room_map(_api_get(f"/hotels/{booking_code}/rooms", "en", params))
     offers: List[Dict[str, Any]] = []
     for key, room in primary_rooms.items():
         if str(room.get("availability") or "").lower() != "available":
@@ -473,8 +481,14 @@ def fetch_offers(
             "plan_name": english.get("_plan_name") or room.get("_plan_name") or "",
         })
     brand = str(hotel.get("brand") or "routeinn")
-    raw_primary = _localized_hotel_name(booking_code, locale) or str(hotel.get("name_primary") or hotel.get("name") or "")
-    raw_english = _localized_hotel_name(booking_code, "en") or str(hotel.get("name_en") or raw_primary)
+    raw_primary = str(
+        hotel.get(f"name_{primary_language}")
+        or hotel.get("name_primary")
+        or hotel.get("name_ja")
+        or hotel.get("name")
+        or ""
+    )
+    raw_english = str(hotel.get("name_en") or raw_primary)
     name_primary = _normalized_hotel_name(raw_primary, brand, locale)
     name_en = _normalized_hotel_name(raw_english, brand, "en")
     booking_url = build_booking_url(hotel, start, end, adults, rooms)
