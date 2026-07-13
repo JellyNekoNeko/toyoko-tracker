@@ -36,12 +36,23 @@ dependencies = [
   "Flask>=2.2",
   "requests>=2.31",
   "beautifulsoup4>=4.12",
-  "playwright>=1.45",         # remember to run: `playwright install chromium`
   "tqdm>=4.66"
 ]
 
 # ---- Optional / extra dependencies (PEP 621 compliant) ----
 [project.optional-dependencies]
+playwright = [
+  "playwright>=1.45"
+]
+mobile = [
+  "waitress>=3.0,<4",
+  "segno>=1.6,<2"
+]
+all = [
+  "playwright>=1.45",
+  "waitress>=3.0,<4",
+  "segno>=1.6,<2"
+]
 dev = [
   "build>=1.2.1",
   "twine>=4.0.2",
@@ -68,4 +79,4 @@ include = ["toyoko_tracker*"]
 exclude = ["tests*"]
 
 [tool.setuptools.package-data]
-"toyoko_tracker" = ["*.json", "static/*.css", "static/*.js"]
+"toyoko_tracker" = ["*.json", "static/*.css", "static/*.js", "static/*.png"]

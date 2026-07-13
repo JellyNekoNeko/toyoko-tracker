@@ -168,6 +168,11 @@ def _room_title_primary(title: Optional[str], primary_language: Optional[str] = 
             "economy_double": "이코노미 더블", "double": "더블",
             "economy_twin": "이코노미 트윈", "twin": "트윈", "accessible": "배리어프리룸",
         },
+        "en": {
+            "economy_single": "Economy Single", "single": "Single",
+            "economy_double": "Economy Double", "double": "Double",
+            "economy_twin": "Economy Twin", "twin": "Twin", "accessible": "Accessible Room",
+        },
     }
     return labels.get(lang, labels["zh_cn"]).get(room_key, "")
 
@@ -669,19 +674,38 @@ PUSH_I18N = {
     "hotel_name_unknown": {"zh_cn": "酒店名未知", "zh_tw": "飯店名未知", "ja": "ホテル名不明", "ko": "호텔명 알 수 없음", "en": "hotel name unknown"},
     "all_unspecified": {"zh_cn": "全部/未指定", "zh_tw": "全部/未指定", "ja": "すべて/未指定", "ko": "전체/미지정", "en": "All/Unspecified"},
     "preferred": {"zh_cn": "优先", "zh_tw": "優先", "ja": "優先", "ko": "우선", "en": "preferred"},
+    "guest_unit": {"zh_cn": "人", "zh_tw": "人", "ja": "名", "ko": "명", "en": "guest(s)"},
+    "room_unit": {"zh_cn": "间", "zh_tw": "間", "ja": "室", "ko": "실", "en": "room(s)"},
+    "worker_lines": {"zh_cn": "条线路", "zh_tw": "條線路", "ja": "ライン", "ko": "개 라인", "en": "lines"},
+    "off": {"zh_cn": "关闭", "zh_tw": "關閉", "ja": "オフ", "ko": "꺼짐", "en": "OFF"},
+    "none": {"zh_cn": "无", "zh_tw": "無", "ja": "なし", "ko": "없음", "en": "none"},
 }
 
 
 def _push_label(cfg: AppConfig, key: str) -> str:
     lang = _normalize_primary_language(getattr(cfg, "primary_language", DEFAULT_PRIMARY_LANGUAGE))
     data = PUSH_I18N.get(key, {})
-    primary = data.get(lang) or data.get("zh_cn") or key
-    en = data.get("en") or key
-    return f"{primary} / {en}" if primary != en else en
+    return data.get(lang) or data.get("en") or data.get("zh_cn") or key
 
 
 def _push_title(cfg: AppConfig, icon: str, key: str) -> str:
     return f"{icon} {_push_label(cfg, key)}"
+
+
+def _primary_or_english(cfg: AppConfig, primary: Optional[str], english: Optional[str]) -> str:
+    lang = _normalize_primary_language(getattr(cfg, "primary_language", DEFAULT_PRIMARY_LANGUAGE))
+    if lang == "en":
+        return str(english or primary or "")
+    return str(primary or english or "")
+
+
+def _display_hotel_codes(cfg: AppConfig) -> str:
+    selected = {
+        str(hotel.get("code") or ""): str(hotel.get("display_code") or hotel.get("code") or "")
+        for hotel in (getattr(cfg, "selected_hotels", []) or [])
+    }
+    values = [selected.get(str(code), str(code)) for code in (cfg.hotel_codes or [])]
+    return ", ".join(values) if values else f"({_push_label(cfg, 'none')})"
 
 
 def send_start_notifications(cfg: AppConfig) -> None:
@@ -689,19 +713,19 @@ def send_start_notifications(cfg: AppConfig) -> None:
         if not getattr(cfg, "notify_start", True):
             _log("[start] start notification skipped by settings")
             return
-        codes = ", ".join(cfg.hotel_codes) if cfg.hotel_codes else "(none)"
+        codes = _display_hotel_codes(cfg)
         area = _format_area_for_push(cfg)
         parallel = (
-            f"{getattr(cfg, 'smart_parallel_workers', DEFAULT_SMART_PARALLEL_WORKERS)} lines"
+            f"{getattr(cfg, 'smart_parallel_workers', DEFAULT_SMART_PARALLEL_WORKERS)} {_push_label(cfg, 'worker_lines')}"
             if getattr(cfg, "smart_parallel_enabled", False)
-            else "OFF"
+            else _push_label(cfg, "off")
         )
         summary_lines = [
             _push_title(cfg, "🟢", "tracking_started"),
             f"{_push_label(cfg, 'time')}: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
             f"{_push_label(cfg, 'dates')}: {cfg.start_date} → {cfg.end_date}",
             f"{_push_label(cfg, 'area')}: {area}",
-            f"{_push_label(cfg, 'guests_rooms')}: {cfg.people} guest(s) / {cfg.rooms} room(s)",
+            f"{_push_label(cfg, 'guests_rooms')}: {cfg.people} {_push_label(cfg, 'guest_unit')} / {cfg.rooms} {_push_label(cfg, 'room_unit')}",
             f"{_push_label(cfg, 'smoking_pref')}: {_smoking_preference_label(getattr(cfg, 'smoking', DEFAULT_SMOKING), cfg)}",
             f"{_push_label(cfg, 'room_type_pref')}: {_room_requirement_label(getattr(cfg, 'om_requirement', DEFAULT_ROOM_REQUIREMENT), cfg)}",
             f"{_push_label(cfg, 'membership')}: {_membership_label(getattr(cfg, 'membership_status', DEFAULT_MEMBERSHIP_STATUS), cfg)}",
@@ -726,7 +750,7 @@ def send_stop_notifications(cfg: AppConfig) -> None:
             f"{_push_label(cfg, 'time')}: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
             f"{_push_label(cfg, 'dates')}: {cfg.start_date} → {cfg.end_date}",
             f"{_push_label(cfg, 'area')}: {_format_area_for_push(cfg)}",
-            f"{_push_label(cfg, 'hotels')} ({len(cfg.hotel_codes)}): {', '.join(cfg.hotel_codes) if cfg.hotel_codes else '(none)'}",
+            f"{_push_label(cfg, 'hotels')} ({len(cfg.hotel_codes)}): {_display_hotel_codes(cfg)}",
         ]
         notify_push_channels(cfg, title, "\n".join(lines))
         _log("[stop] stop notifications sent (enabled channels)")
@@ -751,7 +775,7 @@ def _membership_label(value: str, cfg: Optional[AppConfig] = None) -> str:
         "unknown": {"zh_cn": "未知/同时显示", "zh_tw": "未知/同時顯示", "ja": "不明/両方表示", "ko": "알 수 없음/둘 다 표시", "en": "Unknown/Both"},
     }
     item = labels.get(value, labels["unknown"])
-    return f"{item.get(lang, item['zh_cn'])} / {item['en']}"
+    return item.get(lang, item["en"])
 
 
 def _smoking_preference_label(value: str, cfg: Optional[AppConfig] = None) -> str:
@@ -762,7 +786,7 @@ def _smoking_preference_label(value: str, cfg: Optional[AppConfig] = None) -> st
         "all": {"zh_cn": "不限制", "zh_tw": "不限制", "ja": "指定なし", "ko": "제한 없음", "en": "Any"},
     }
     item = labels.get(value, labels["all"])
-    return f"{item.get(lang, item['zh_cn'])} / {item['en']}"
+    return item.get(lang, item["en"])
 
 
 def _room_requirement_label(value: str, cfg: Optional[AppConfig] = None) -> str:
@@ -776,7 +800,7 @@ def _room_requirement_label(value: str, cfg: Optional[AppConfig] = None) -> str:
     item = labels.get((value or "any").lower())
     if not item:
         return str(value or "any")
-    return f"{item.get(lang, item['zh_cn'])} / {item['en']}"
+    return item.get(lang, item["en"])
 
 
 def _room_smoking_label(value: Optional[str], cfg: Optional[AppConfig] = None) -> str:
@@ -788,7 +812,7 @@ def _room_smoking_label(value: Optional[str], cfg: Optional[AppConfig] = None) -
     }
     icon = "🚬" if value == "smoking" else "🚭" if value == "non_smoking" else ""
     item = labels.get(value or "unknown", labels["unknown"])
-    return f"{icon} {item.get(lang, item['zh_cn'])} / {item['en']}".strip()
+    return f"{icon} {item.get(lang, item['en'])}".strip()
 
 
 def _legacy_membership_label(value: str) -> str:
@@ -861,7 +885,7 @@ def _format_offer_lines_for_push(cfg: AppConfig, r: HotelResult) -> List[str]:
             room_zh = o.get("room_title_primary") or o.get("room_title_zh") or _room_title_primary(room_en, getattr(cfg, "primary_language", DEFAULT_PRIMARY_LANGUAGE)) or _push_label(cfg, "room_type_unknown")
             smoking = _room_smoking_label(o.get("room_smoking"), cfg)
             left = o.get("remaining_norm") or "-"
-            lines.append(f"{idx}. {room_zh} / {room_en} | {smoking}")
+            lines.append(f"{idx}. {_primary_or_english(cfg, room_zh, room_en)} | {smoking}")
             lines.extend(_price_lines_for_push(cfg, o.get("price_text"), o.get("member_price_text")))
             lines.append(f"   {_push_label(cfg, 'left')}: {left}")
         return lines
@@ -869,7 +893,7 @@ def _format_offer_lines_for_push(cfg: AppConfig, r: HotelResult) -> List[str]:
     room_en = r.min_price_room or "-"
     room_zh = _room_title_primary(room_en, getattr(cfg, "primary_language", DEFAULT_PRIMARY_LANGUAGE)) or (_push_label(cfg, "room_type_unknown") if room_en != "-" else "-")
     left = r.min_remaining or "-"
-    lines.append(f"1. {room_zh} / {room_en}")
+    lines.append(f"1. {_primary_or_english(cfg, room_zh, room_en)}")
     lines.extend(_price_lines_for_push(cfg, r.min_price_text, r.min_member_price_text))
     lines.append(f"   {_push_label(cfg, 'left')}: {left}")
     return lines
@@ -907,14 +931,14 @@ def _log_room_summary(cfg: AppConfig, r: HotelResult) -> tuple[str, str, str]:
         for o in offers[:3]:
             room_en = o.get("room_title") or "-"
             room_primary = o.get("room_title_primary") or _room_title_primary(room_en, getattr(cfg, "primary_language", DEFAULT_PRIMARY_LANGUAGE)) or ""
-            parts.append(f"{room_primary} / {room_en}" if room_primary and room_primary != room_en else room_en)
+            parts.append(_primary_or_english(cfg, room_primary, room_en))
             price = o.get("member_price_text") or o.get("price_text") or "-"
             prices.append(price)
         suffix = "..." if len(offers) > 3 else ""
         return " / ".join(prices) + suffix, " | ".join(parts) + suffix, parts[0] if parts else "-"
     room_en = r.min_price_room or "-"
     room_primary = _room_title_primary(room_en, getattr(cfg, "primary_language", DEFAULT_PRIMARY_LANGUAGE)) or ""
-    room = f"{room_primary} / {room_en}" if room_primary and room_primary != room_en else room_en
+    room = _primary_or_english(cfg, room_primary, room_en)
     return r.min_member_price_text or r.min_price_text or "-", room, room
 
 
@@ -922,7 +946,7 @@ def _hotel_name_for_log(cfg: AppConfig, r: HotelResult) -> str:
     selected = _selected_hotel_info(cfg, r.code)
     primary = r.name_primary or selected.get("name_primary") or selected.get("name_zh") or r.name_zh or r.name or f"({_push_label(cfg, 'hotel_name_unknown')})"
     english = r.name_en or selected.get("name_en") or r.name or "(hotel name unknown)"
-    return f"{primary} / {english}" if primary != english else str(primary)
+    return _primary_or_english(cfg, primary, english)
 
 
 def _upsert_availability_log(cfg: AppConfig, r: HotelResult, start_date: str, end_date: str, key: str, now: float, count: int) -> None:
@@ -940,7 +964,7 @@ def _upsert_availability_log(cfg: AppConfig, r: HotelResult, start_date: str, en
                 return
         _AVAILABILITY_LOGS.append({
             "key": key,
-            "code": r.code,
+            "code": r.display_code or _selected_hotel_info(cfg, r.code).get("display_code") or r.code,
             "hotel": _hotel_name_for_log(cfg, r),
             "appeared_ts": now,
             "appeared_at": datetime.fromtimestamp(now).strftime("%Y-%m-%d %H:%M:%S"),
@@ -980,14 +1004,16 @@ def _build_result_push_message(
     name_zh = r.name_primary or selected.get("name_primary") or selected.get("name_zh") or r.name_zh or r.name or f"({_push_label(cfg, 'hotel_name_unknown')})"
     name_en = r.name_en or selected.get("name_en") or r.name or "(hotel name unknown)"
     map_url = selected.get("map_url") or ""
+    heading = _primary_or_english(cfg, heading_zh, heading_en or heading_zh)
+    hotel_name = _primary_or_english(cfg, name_zh, name_en)
     lines = [
-        f"{heading_zh}" if not heading_en else f"{heading_zh} / {heading_en}",
+        heading,
         f"{_push_label(cfg, 'time')}: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-        f"{_push_label(cfg, 'hotel_code')}: {r.code}",
-        f"{_push_label(cfg, 'hotel')}: {name_zh} / {name_en}",
+        f"{_push_label(cfg, 'hotel_code')}: {r.display_code or selected.get('display_code') or r.code}",
+        f"{_push_label(cfg, 'hotel')}: {hotel_name}",
         f"{_push_label(cfg, 'area')}: {_format_area_for_push(cfg)}",
         f"{_push_label(cfg, 'dates')}: {start_date} → {end_date}",
-        f"{_push_label(cfg, 'guests_rooms')}: {cfg.people} guest(s) / {cfg.rooms} room(s)",
+        f"{_push_label(cfg, 'guests_rooms')}: {cfg.people} {_push_label(cfg, 'guest_unit')} / {cfg.rooms} {_push_label(cfg, 'room_unit')}",
         f"{_push_label(cfg, 'smoking_pref')}: {_smoking_preference_label(getattr(cfg, 'smoking', DEFAULT_SMOKING), cfg)}",
         f"{_push_label(cfg, 'room_type_pref')}: {_room_requirement_label(getattr(cfg, 'om_requirement', DEFAULT_ROOM_REQUIREMENT), cfg)}",
         f"{_push_label(cfg, 'membership')}: {_membership_label(getattr(cfg, 'membership_status', DEFAULT_MEMBERSHIP_STATUS), cfg)}",

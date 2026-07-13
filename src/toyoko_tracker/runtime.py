@@ -33,7 +33,41 @@ from flask import request, jsonify, Response
 from bs4 import BeautifulSoup
 
 from .i18n import LANGUAGE_OPTIONS, normalize_primary_language as _normalize_primary_language
+from .hotel_info import (
+    get_hotel_info as _get_hotel_info,
+    get_provider_hotel_info as _get_provider_hotel_info,
+)
+from .hotel_catalog import (
+    acknowledge_new_hotels as _acknowledge_new_hotels,
+    catalog_status_snapshot as _catalog_status_snapshot,
+    load_coordinate_cache as _load_catalog_coordinate_cache,
+    request_catalog_refresh as _request_catalog_refresh,
+    set_catalog_hooks as _set_catalog_hooks,
+    start_catalog_scheduler as _catalog_start_scheduler,
+    stop_catalog_scheduler as _catalog_stop_scheduler,
+)
 from .models import AppConfig, HotelResult
+from .routeinn import (
+    build_booking_url as _build_routeinn_booking_url,
+    fetch_coordinate_hotels as _fetch_routeinn_coordinate_hotels,
+    fetch_offers as _fetch_routeinn_offers,
+)
+from .chain_providers import (
+    build_booking_url as _build_chain_booking_url,
+    fetch_dormy_offers as _fetch_dormy_offers,
+    fetch_provider_hotels as _fetch_chain_provider_hotels,
+    fetch_tripla_offers as _fetch_chain_tripla_offers,
+    prefecture_id_from_text as _prefecture_id_from_text,
+    region_id_for_prefecture_id as _region_id_for_prefecture_id,
+)
+from .hotel_database import (
+    load_hotel as _db_load_hotel,
+    load_hotels as _db_load_hotels,
+    provider_count as _db_provider_count,
+    record_sync_error as _db_record_sync_error,
+    status_snapshot as _db_status_snapshot,
+    sync_provider as _db_sync_provider,
+)
 from .notifications import (
     availability_log_snapshot,
     clear_alert_state,
@@ -61,6 +95,8 @@ from .renderer import (
     set_renderer_hooks,
 )
 from .settings import (
+    ADAPTIVE_BACKOFF_MAX_MULTIPLIER,
+    ADAPTIVE_BACKOFF_THRESHOLD_PERCENT,
     APP_AUTHOR,
     APP_NAME,
     APP_VERSION,
@@ -72,6 +108,7 @@ from .settings import (
     DEFAULT_BARK_CRITICAL_ENABLED,
     DEFAULT_BARK_CRITICAL_SOUND,
     DEFAULT_BARK_CRITICAL_VOLUME,
+    DEFAULT_ADAPTIVE_BACKOFF_ENABLED,
     DEFAULT_BUDGET_ENABLED,
     DEFAULT_BUDGET_LIMIT,
     DEFAULT_ENGINE,
@@ -93,6 +130,8 @@ from .settings import (
     DEFAULT_SMOKING,
     DEFAULT_START_DATE,
     DEFAULT_END_DATE,
+    DEFAULT_ENABLED_PROVIDERS,
+    SUPPORTED_PROVIDERS,
     HEADERS,
     RADIUS_HOTELS_CACHE_PATH,
     SEARCH_HISTORY_PATH,
@@ -112,7 +151,17 @@ _LOG_LOCK = threading.Lock()
 _LAST_RESULTS: List[HotelResult] = []
 _RESULTS_LOCK = threading.Lock()
 _START_TIME = _now_wall()
-_PROGRESS = {"round": 0, "done": 0, "total": 0, "round_started": 0.0, "round_started_mono": 0.0}
+_PROGRESS = {
+    "round": 0,
+    "done": 0,
+    "total": 0,
+    "round_started": 0.0,
+    "round_started_mono": 0.0,
+    "backoff_multiplier": 1,
+    "unknown_ratio_percent": 0,
+    "consecutive_unhealthy_rounds": 0,
+    "effective_interval_sec": 0,
+}
 _UPTIME_STARTED: Optional[float] = None        # wall-clock (for display)
 _UPTIME_STARTED_MONO: Optional[float] = None   # monotonic (for precise deltas)
 _PROGRESS_LOCK = threading.Lock()
@@ -276,7 +325,10 @@ def _clean_selected_hotels(value: Any) -> List[Dict[str, str]]:
         if not code:
             continue
         clean.append({
-            "code": code.zfill(5),
+            "code": code.zfill(5) if code.isdigit() else code,
+            "display_code": str(h.get("display_code") or ""),
+            "provider": str(h.get("provider") or (code.split(":", 1)[0] if ":" in code else "toyoko")),
+            "brand": str(h.get("brand") or ""),
             "name": str(h.get("name") or ""),
             "name_primary": str(h.get("name_primary") or ""),
             "name_zh": str(h.get("name_zh") or ""),
@@ -287,9 +339,18 @@ def _clean_selected_hotels(value: Any) -> List[Dict[str, str]]:
             "name_en": str(h.get("name_en") or h.get("name") or ""),
             "url": str(h.get("url") or ""),
             "map_url": str(h.get("map_url") or ""),
+            "reservation_url": str(h.get("reservation_url") or ""),
+            "address": str(h.get("address") or ""),
+            "access": str(h.get("access") or ""),
             "lat": h.get("lat"),
             "lng": h.get("lng"),
             "distance_km": h.get("distance_km"),
+            "booking_code": str(h.get("booking_code") or ""),
+            "provider_hotel_id": str(h.get("provider_hotel_id") or ""),
+            "search_keyword": str(h.get("search_keyword") or ""),
+            "prefecture": str(h.get("prefecture") or ""),
+            "region_id": h.get("region_id"),
+            "prefecture_id": h.get("prefecture_id"),
         })
     return clean
 
@@ -297,8 +358,17 @@ def _clean_selected_hotels(value: Any) -> List[Dict[str, str]]:
 def _localize_selected_hotels(hotels: List[Dict[str, str]], primary_language: Optional[str]) -> List[Dict[str, str]]:
     localized: List[Dict[str, str]] = []
     for h in hotels or []:
-        code = str(h.get("code") or "").zfill(5)
+        raw_code = str(h.get("code") or "")
+        code = raw_code.zfill(5) if raw_code.isdigit() else raw_code
         if not code:
+            continue
+        if str(h.get("provider") or "toyoko") != "toyoko" or ":" in code:
+            item = dict(h)
+            lang = _normalize_primary_language(primary_language)
+            item["provider"] = str(h.get("provider") or code.split(":", 1)[0])
+            item["name_primary"] = h.get(f"name_{lang}") or h.get("name_primary") or h.get("name_ja") or h.get("name") or ""
+            item["name_en"] = h.get("name_en") or item["name_primary"]
+            localized.append(item)
             continue
         names = _hotel_names_by_code(code, h.get("name_en") or h.get("name"), primary_language)
         item = dict(h)
@@ -332,6 +402,11 @@ def _load_config_from_file(path: str) -> bool:
             cfg.search_mode = str(data.get("search_mode", getattr(cfg, "search_mode", DEFAULT_SEARCH_MODE)) or DEFAULT_SEARCH_MODE)
             if cfg.search_mode not in {"area", "radius"}:
                 cfg.search_mode = DEFAULT_SEARCH_MODE
+            providers = data.get("enabled_providers", getattr(cfg, "enabled_providers", DEFAULT_ENABLED_PROVIDERS))
+            if isinstance(providers, list):
+                cfg.enabled_providers = [provider for provider in providers if provider in SUPPORTED_PROVIDERS]
+            if not cfg.enabled_providers:
+                cfg.enabled_providers = list(DEFAULT_ENABLED_PROVIDERS)
             cfg.radius_query = str(data.get("radius_query", getattr(cfg, "radius_query", "")) or "")
             cfg.radius_lat = _optional_float(data.get("radius_lat", getattr(cfg, "radius_lat", None)))
             cfg.radius_lng = _optional_float(data.get("radius_lng", getattr(cfg, "radius_lng", None)))
@@ -403,6 +478,10 @@ def _load_config_from_file(path: str) -> bool:
                 'smart_parallel_workers',
                 getattr(cfg, 'smart_parallel_workers', DEFAULT_SMART_PARALLEL_WORKERS)
             ))))
+            cfg.adaptive_backoff_enabled = bool(data.get(
+                'adaptive_backoff_enabled',
+                getattr(cfg, 'adaptive_backoff_enabled', DEFAULT_ADAPTIVE_BACKOFF_ENABLED),
+            ))
             eng = str(data.get('engine', getattr(cfg, 'engine', DEFAULT_ENGINE)))
             if eng == "selenium":
                 eng = DEFAULT_ENGINE
@@ -464,6 +543,7 @@ def _save_config_to_file(path: str) -> bool:
                 'area_region_label': getattr(cfg, 'area_region_label', ""),
                 'area_detail_label': getattr(cfg, 'area_detail_label', ""),
                 'search_mode': getattr(cfg, 'search_mode', DEFAULT_SEARCH_MODE),
+                'enabled_providers': list(getattr(cfg, 'enabled_providers', DEFAULT_ENABLED_PROVIDERS)),
                 'radius_query': getattr(cfg, 'radius_query', ""),
                 'radius_lat': getattr(cfg, 'radius_lat', None),
                 'radius_lng': getattr(cfg, 'radius_lng', None),
@@ -512,6 +592,7 @@ def _save_config_to_file(path: str) -> bool:
                 'engine': cfg.engine,
                 'smart_parallel_enabled': getattr(cfg, 'smart_parallel_enabled', DEFAULT_SMART_PARALLEL_ENABLED),
                 'smart_parallel_workers': getattr(cfg, 'smart_parallel_workers', DEFAULT_SMART_PARALLEL_WORKERS),
+                'adaptive_backoff_enabled': getattr(cfg, 'adaptive_backoff_enabled', DEFAULT_ADAPTIVE_BACKOFF_ENABLED),
                 'budget_enabled': getattr(cfg, 'budget_enabled', DEFAULT_BUDGET_ENABLED),
                 'budget_limit': getattr(cfg, 'budget_limit', DEFAULT_BUDGET_LIMIT),
             }
@@ -576,6 +657,7 @@ def _search_history_record(payload: Dict[str, Any], cfg: AppConfig) -> Dict[str,
         "request_jitter_percent": getattr(cfg, "request_jitter_percent", DEFAULT_REQUEST_JITTER_PERCENT),
         "smart_parallel_enabled": getattr(cfg, "smart_parallel_enabled", DEFAULT_SMART_PARALLEL_ENABLED),
         "smart_parallel_workers": getattr(cfg, "smart_parallel_workers", DEFAULT_SMART_PARALLEL_WORKERS),
+        "adaptive_backoff_enabled": getattr(cfg, "adaptive_backoff_enabled", DEFAULT_ADAPTIVE_BACKOFF_ENABLED),
         "available_alert_repeat": cfg.available_alert_repeat,
         "available_alert_repeat_interval_sec": cfg.available_alert_repeat_interval_sec,
         "area_region": str(payload.get("area_region") or ""),
@@ -583,6 +665,7 @@ def _search_history_record(payload: Dict[str, Any], cfg: AppConfig) -> Dict[str,
         "area_region_label": str(payload.get("area_region_label") or ""),
         "area_detail_label": str(payload.get("area_detail_label") or ""),
         "search_mode": getattr(cfg, "search_mode", DEFAULT_SEARCH_MODE),
+        "enabled_providers": list(getattr(cfg, "enabled_providers", DEFAULT_ENABLED_PROVIDERS)),
         "radius_query": getattr(cfg, "radius_query", ""),
         "radius_lat": getattr(cfg, "radius_lat", None),
         "radius_lng": getattr(cfg, "radius_lng", None),
@@ -599,8 +682,8 @@ def _remember_search(payload: Dict[str, Any], cfg: AppConfig) -> None:
         signature_keys = (
             "start_date", "end_date", "people", "rooms", "smoking", "room_requirement",
             "membership_status", "primary_language", "engine", "loop_interval_seconds", "per_hotel_delay_seconds", "request_jitter_percent",
-            "smart_parallel_enabled", "smart_parallel_workers", "available_alert_repeat",
-            "available_alert_repeat_interval_sec", "area_region", "area_detail", "hotel_codes",
+            "smart_parallel_enabled", "smart_parallel_workers", "adaptive_backoff_enabled", "available_alert_repeat",
+            "available_alert_repeat_interval_sec", "area_region", "area_detail", "enabled_providers", "hotel_codes",
         )
         signature = json.dumps({k: record.get(k) for k in signature_keys}, ensure_ascii=False, sort_keys=True)
         records = _load_search_history()
@@ -615,7 +698,20 @@ def _remember_search(payload: Dict[str, Any], cfg: AppConfig) -> None:
 
 
 # ========= Page Fetching / Parsing =========
+def _selected_hotel_for_code(cfg: AppConfig, code: str) -> Dict[str, Any]:
+    return next(
+        (hotel for hotel in (getattr(cfg, "selected_hotels", []) or []) if str(hotel.get("code") or "") == str(code)),
+        {},
+    )
+
+
 def build_url(cfg: AppConfig, code: str, start: str, end: str) -> str:
+    hotel = _selected_hotel_for_code(cfg, code)
+    provider = str(hotel.get("provider") or (str(code).split(":", 1)[0] if ":" in str(code) else "toyoko"))
+    if provider == "routeinn":
+        return _build_routeinn_booking_url(hotel, start, end, cfg.people, cfg.rooms)
+    if provider in {"dormy", "mystays", "daiwa"}:
+        return _build_chain_booking_url(hotel, start, end, cfg.people, cfg.rooms)
     return (
         f"{BASE_URL}?hotel={code}"
         f"&people={cfg.people}&room={cfg.rooms}&smoking={cfg.smoking}"
@@ -690,6 +786,7 @@ def _hotel_result_from_offers(
             "member_price_text": o.get("member_price_text"),
             "remaining_norm": o.get("remaining_norm"),
             "room_title": room_title,
+            **({"room_title_primary": o.get("room_title_primary")} if o.get("room_title_primary") else {}),
             **({"room_smoking": o.get("room_smoking")} if o.get("room_smoking") else {}),
         })
 
@@ -773,10 +870,116 @@ def check_hotel_http(cfg: AppConfig, code: str, start: str, end: str) -> HotelRe
             or extract_hotel_name(BeautifulSoup(resp.text, "html.parser"))
         )
         offers, offer_stats = _extract_http_offers(plan_response)
-        return _hotel_result_from_offers(cfg, code, url, name, offers, offer_stats, None)
+        result = _hotel_result_from_offers(cfg, code, url, name, offers, offer_stats, None)
+        result.engine_used = "http"
+        return result
     except Exception as e:
         _log(f"[http] failed for {code}: {e}")
-        return HotelResult(code=code, url=url, name=None, available=None)
+        return HotelResult(
+            code=code,
+            url=url,
+            name=None,
+            available=None,
+            engine_used="http",
+            error_summary=" ".join(str(e).split())[:240],
+        )
+
+
+def check_routeinn_hotel(cfg: AppConfig, code: str, start: str, end: str) -> HotelResult:
+    hotel = _selected_hotel_for_code(cfg, code)
+    url = build_url(cfg, code, start, end)
+    if not hotel:
+        return HotelResult(
+            code=code,
+            display_code=code,
+            provider="routeinn",
+            url=url,
+            name=None,
+            available=None,
+            engine_used="routeinn_api",
+            error_summary="Route Inn hotel metadata is missing; reload the hotel picker",
+        )
+    try:
+        name_primary, name_en, url, offers, offer_stats = _fetch_routeinn_offers(
+            hotel,
+            start,
+            end,
+            cfg.people,
+            cfg.rooms,
+            _normalize_primary_language(getattr(cfg, "primary_language", DEFAULT_PRIMARY_LANGUAGE)),
+        )
+        result = _hotel_result_from_offers(cfg, code, url, name_en or name_primary, offers, offer_stats, None)
+        result.provider = "routeinn"
+        result.display_code = str(hotel.get("display_code") or code)
+        result.name = name_en or name_primary
+        result.name_primary = name_primary
+        result.name_en = name_en or name_primary
+        result.name_zh = str(hotel.get("name_zh_cn") or name_primary)
+        result.engine_used = "routeinn_api"
+        return result
+    except Exception as exc:
+        _log(f"[routeinn] failed for {code}: {exc}")
+        return HotelResult(
+            code=code,
+            display_code=str(hotel.get("display_code") or code),
+            provider="routeinn",
+            url=url,
+            name=str(hotel.get("name_en") or hotel.get("name") or "") or None,
+            name_primary=str(hotel.get("name_primary") or hotel.get("name") or "") or None,
+            name_en=str(hotel.get("name_en") or hotel.get("name") or "") or None,
+            available=None,
+            engine_used="routeinn_api",
+            error_summary=" ".join(str(exc).split())[:240],
+        )
+
+
+def check_chain_hotel(cfg: AppConfig, code: str, start: str, end: str, provider: str) -> HotelResult:
+    hotel = _selected_hotel_for_code(cfg, code)
+    url = build_url(cfg, code, start, end)
+    if not hotel:
+        return HotelResult(
+            code=code,
+            display_code=code,
+            provider=provider,
+            url=url,
+            name=None,
+            available=None,
+            engine_used=f"{provider}_api",
+            error_summary=f"{provider} hotel metadata is missing; reload the hotel picker",
+        )
+    try:
+        fetcher = _fetch_dormy_offers if provider == "dormy" else _fetch_chain_tripla_offers
+        name_primary, name_en, url, offers, offer_stats = fetcher(
+            hotel,
+            start,
+            end,
+            cfg.people,
+            cfg.rooms,
+            _normalize_primary_language(getattr(cfg, "primary_language", DEFAULT_PRIMARY_LANGUAGE)),
+        )
+        result = _hotel_result_from_offers(cfg, code, url, name_en or name_primary, offers, offer_stats, None)
+        result.provider = provider
+        result.display_code = str(hotel.get("display_code") or code)
+        result.name = name_en or name_primary
+        result.name_primary = name_primary
+        result.name_en = name_en or name_primary
+        result.name_zh = str(hotel.get("name_zh_cn") or name_primary)
+        result.engine_used = f"{provider}_api"
+        return result
+    except Exception as exc:
+        _log(f"[{provider}] failed for {code}: {exc}")
+        return HotelResult(
+            code=code,
+            display_code=str(hotel.get("display_code") or code),
+            provider=provider,
+            url=url,
+            name=str(hotel.get("name_en") or hotel.get("name") or "") or None,
+            name_primary=str(hotel.get("name_primary") or hotel.get("name") or "") or None,
+            name_en=str(hotel.get("name_en") or hotel.get("name") or "") or None,
+            available=None,
+            engine_used=f"{provider}_api",
+            error_summary=" ".join(str(exc).split())[:240],
+        )
 
 
 def check_hotel_playwright(cfg: AppConfig, renderer: Optional[Any], code: str, start: str, end: str) -> HotelResult:
@@ -785,23 +988,60 @@ def check_hotel_playwright(cfg: AppConfig, renderer: Optional[Any], code: str, s
         rendered = fetch_rendered_any(cfg, renderer, url)
     except Exception as e:
         _log(f"[playwright] failed for {code}: {e}")
-        return HotelResult(code=code, url=url, name=None, available=None)
+        return HotelResult(
+            code=code,
+            url=url,
+            name=None,
+            available=None,
+            engine_used="playwright",
+            error_summary=" ".join(str(e).split())[:240],
+        )
 
     name = extract_hotel_name(rendered.soup)
     offers, offer_stats = extract_offers(rendered.soup)
-    return _hotel_result_from_offers(cfg, code, url, name, offers, offer_stats, rendered.visible_text)
+    result = _hotel_result_from_offers(cfg, code, url, name, offers, offer_stats, rendered.visible_text)
+    result.engine_used = "playwright"
+    return result
 
 
 def check_hotel(cfg: AppConfig, renderer: Optional[Any], code: str, start: str, end: str) -> HotelResult:
-    if getattr(cfg, "engine", "playwright") == "http":
+    started = _now_mono()
+    hotel = _selected_hotel_for_code(cfg, code)
+    provider = str(hotel.get("provider") or (str(code).split(":", 1)[0] if ":" in str(code) else "toyoko"))
+    if provider == "routeinn":
+        result = check_routeinn_hotel(cfg, code, start, end)
+    elif provider in {"dormy", "mystays", "daiwa"}:
+        result = check_chain_hotel(cfg, code, start, end, provider)
+    elif getattr(cfg, "engine", "playwright") == "http":
         result = check_hotel_http(cfg, code, start, end)
-        if result.available is not None:
-            return result
-        if _HAS_PLAYWRIGHT:
+        if result.available is None and _HAS_PLAYWRIGHT:
             _log(f"[http] fallback to Playwright for {code}")
-            return check_hotel_playwright(cfg, renderer, code, start, end)
-        return result
-    return check_hotel_playwright(cfg, renderer, code, start, end)
+            fallback = check_hotel_playwright(cfg, renderer, code, start, end)
+            if fallback.error_summary and result.error_summary:
+                fallback.error_summary = f"HTTP: {result.error_summary}; Playwright: {fallback.error_summary}"[:240]
+            result = fallback
+    else:
+        result = check_hotel_playwright(cfg, renderer, code, start, end)
+    result.checked_at = datetime.now().astimezone().isoformat(timespec="seconds")
+    result.elapsed_ms = max(0, int(round((_now_mono() - started) * 1000)))
+    result.engine_used = result.engine_used or getattr(cfg, "engine", DEFAULT_ENGINE)
+    return result
+
+
+def _adaptive_backoff_state(
+    results: List[HotelResult],
+    consecutive_unhealthy_rounds: int,
+    enabled: bool = True,
+) -> Tuple[int, int, int]:
+    total = len(results)
+    unknown = sum(1 for result in results if result.available is None)
+    ratio_percent = int(round((unknown * 100) / total)) if total else 0
+    unhealthy = total > 0 and ratio_percent >= ADAPTIVE_BACKOFF_THRESHOLD_PERCENT
+    if not enabled or not unhealthy:
+        return 1, 0, ratio_percent
+    consecutive = max(0, int(consecutive_unhealthy_rounds)) + 1
+    multiplier = min(ADAPTIVE_BACKOFF_MAX_MULTIPLIER, 2 ** min(consecutive, 2))
+    return multiplier, consecutive, ratio_percent
 
 
 def _jittered_delay(base_seconds: int, jitter_percent: int) -> float:
@@ -868,8 +1108,8 @@ def _check_hotels_parallel_http(cfg: AppConfig, codes: List[str], start: str, en
 
 
 # ========= Worker Loop =========
-def _worker_loop():
-    global _LAST_RESULTS, _PROGRESS, _UPTIME_STARTED, _UPTIME_STARTED_MONO
+def _worker_loop(run_once: bool = False):
+    global _LAST_RESULTS, _PROGRESS, _UPTIME_STARTED, _UPTIME_STARTED_MONO, _RUN_REQUESTED
     _log("Worker loop started.")
     _set_action("Worker loop started.")
     _UPTIME_STARTED = _now_wall()
@@ -884,6 +1124,9 @@ def _worker_loop():
     elif getattr(cfg, "engine", "playwright") == "playwright" and not _HAS_PLAYWRIGHT:
         _log("[engine] Playwright is unavailable; using HTTP/API engine for this run.")
         cfg.engine = "http"
+
+    consecutive_unhealthy_rounds = 0
+    previous_backoff_multiplier = 1
 
     # Guard loop: (no code yet)
     while not _stop_event.is_set():
@@ -960,16 +1203,49 @@ def _worker_loop():
             _log(f"{r.code:<{widths['code']}} {(r.name or '(Hotel name not found)'):<{widths['name']}} {res:<{widths['res']}}")
         _log(bar)
 
+        backoff_multiplier, consecutive_unhealthy_rounds, unknown_ratio_percent = _adaptive_backoff_state(
+            results,
+            consecutive_unhealthy_rounds,
+            bool(getattr(cfg, "adaptive_backoff_enabled", DEFAULT_ADAPTIVE_BACKOFF_ENABLED)) and not run_once,
+        )
+        effective_base_interval = min(
+            3600,
+            max(30, int(cfg.loop_interval_seconds)) * backoff_multiplier,
+        )
+        with _PROGRESS_LOCK:
+            _PROGRESS["backoff_multiplier"] = backoff_multiplier
+            _PROGRESS["unknown_ratio_percent"] = unknown_ratio_percent
+            _PROGRESS["consecutive_unhealthy_rounds"] = consecutive_unhealthy_rounds
+            _PROGRESS["effective_interval_sec"] = effective_base_interval
+        if backoff_multiplier > 1:
+            _log(
+                f"[safety] Adaptive backoff {backoff_multiplier}x: "
+                f"unknown={unknown_ratio_percent}%, next base wait={effective_base_interval}s"
+            )
+        elif previous_backoff_multiplier > 1:
+            _log("[safety] Healthy round detected; adaptive backoff returned to 1x.")
+        previous_backoff_multiplier = backoff_multiplier
+
+        if run_once:
+            _RUN_REQUESTED = False
+            _set_action("Single scan complete.")
+            _log("Single scan complete; worker is stopping.")
+            break
+
         # Post-wait model: after a loop finishes, always wait the full interval
-        wait_s = _jittered_delay(
-            max(30, min(3600, int(cfg.loop_interval_seconds))),
-            max(0, min(50, int(getattr(cfg, "request_jitter_percent", DEFAULT_REQUEST_JITTER_PERCENT)) // 2)),
+        wait_s = min(
+            3600.0,
+            _jittered_delay(
+                effective_base_interval,
+                max(0, min(50, int(getattr(cfg, "request_jitter_percent", DEFAULT_REQUEST_JITTER_PERCENT)) // 2)),
+            ),
         )
         with _PROGRESS_LOCK:
             _PROGRESS["phase"] = "waiting"
             _PROGRESS["wait_started_mono"] = _now_mono()
             _PROGRESS["wait_total_sec"] = int(round(wait_s))
             _PROGRESS["wait_elapsed_sec"] = 0
+            _PROGRESS["effective_interval_sec"] = int(round(wait_s))
         _set_action(f"Round {current_round} complete. Waiting {wait_s:.1f}s...")
         watch_codes = set(newly_available_codes or [])
         if watch_codes:
@@ -1071,9 +1347,14 @@ def home() -> Response:
                 })
 
         # 渲染多行：同一酒店只在首行显示 Code 和 HotelName
-        name_html = f"<a href='{r.url}' target='_blank'>{(r.name or '(Hotel name not found)')}</a>"
+        trigger_class = "hotel-info-trigger"
+        name_html = (
+            f"<a class='{trigger_class}' data-hotel-code='{_html_attr(r.code)}' "
+            f"href='{_html_attr(r.url)}' target='_blank' rel='noreferrer noopener'>"
+            f"{html.escape(r.name or '(Hotel name not found)')}</a>"
+        )
         for idx, row in enumerate(by_offers):
-            code_cell = r.code if idx == 0 else ""
+            code_cell = (r.display_code or r.code) if idx == 0 else ""
             name_cell = name_html if idx == 0 else ""
             rows.append(
                 f"<tr>"
@@ -1090,154 +1371,260 @@ def home() -> Response:
     current_membership_status = getattr(cfg, 'membership_status', DEFAULT_MEMBERSHIP_STATUS)
     current_primary_language = _normalize_primary_language(getattr(cfg, 'primary_language', DEFAULT_PRIMARY_LANGUAGE))
     language_options_html = "\n".join(
-        f"<option value='{code}' {'selected' if current_primary_language == code else ''}>{info['label']} / {info['english']}</option>"
+        f"<option value='{code}' {'selected' if current_primary_language == code else ''}>{info['label']}</option>"
         for code, info in LANGUAGE_OPTIONS.items()
     )
-    html = f"""
-    <html><head><meta charset='utf-8'><title>{APP_NAME}</title>
+    page_html = f"""
+    <html><head><meta charset='utf-8'><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>{APP_NAME}</title>
+    <meta name="theme-color" content="#155ec2">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <link rel="icon" type="image/png" href="/static/toyoko-chan-mascot.png?v=3">
+    <link rel="apple-touch-icon" href="/static/toyoko-chan-mascot.png?v=3">
+    <link rel="manifest" href="/manifest.webmanifest">
     <link rel="stylesheet" href="/static/app.css">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"></head>
-        <body>
-          <div class="topbar">
-            <div></div>
-            <h2>{APP_NAME}</h2>
-            <div class="topbar-tools">
-              <label for="primary_language">语言 Language</label>
-              <select id="primary_language">{language_options_html}</select>
+	        <body data-theme="light" data-app-version="{APP_VERSION}">
+	          <div class="app-shell">
+	            <aside class="app-sidebar" id="app-sidebar" aria-label="Primary navigation">
+	              <button class="sidebar-collapse-button" id="sidebar-collapse-button" type="button" aria-label="Collapse navigation" aria-expanded="true" title="Collapse navigation">‹</button>
+	              <div class="sidebar-brand">
+	                <span class="sidebar-brand-mark"><img src="/static/toyoko-chan-mascot.png?v=3" alt=""></span>
+	                <div><strong>{APP_NAME}</strong><span>Vacancy workspace</span></div>
+	              </div>
+	              <nav class="sidebar-nav">
+	                <button class="sidebar-nav-item active" data-app-view="search" aria-current="page"><span class="nav-icon">⌕</span><span class="nav-label">空房检索 / Vacancy Search</span></button>
+	                <button class="sidebar-nav-item" data-app-view="monitor"><span class="nav-icon">◉</span><span class="nav-label">空房监控 / Vacancy Monitor</span><span class="nav-live-dot" aria-hidden="true"></span></button>
+	                <button class="sidebar-nav-item" data-app-view="search-settings"><span class="nav-icon">≡</span><span class="nav-label">搜索设定 / Search Settings</span></button>
+	                <button class="sidebar-nav-item" data-app-view="push-settings"><span class="nav-icon">◇</span><span class="nav-label">推送设定 / Push Settings</span></button>
+	                <button class="sidebar-nav-item" data-app-view="interface"><span class="nav-icon">◐</span><span class="nav-label">界面设定 / Interface</span></button>
+	              </nav>
+	              <div class="sidebar-utilities" aria-label="Interface tools">
+	                <div class="language-menu-wrap">
+	                  <button class="icon-button" id="language-menu-button" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Language" title="Language">🌐</button>
+	                  <div class="language-menu" id="language-menu" role="menu" hidden>
+	                    <button type="button" role="menuitemradio" data-language="zh_cn">中文（简体）</button>
+	                    <button type="button" role="menuitemradio" data-language="zh_tw">中文（繁體）</button>
+	                    <button type="button" role="menuitemradio" data-language="ja">日本語</button>
+	                    <button type="button" role="menuitemradio" data-language="ko">한국어</button>
+	                    <button type="button" role="menuitemradio" data-language="en">English</button>
+	                  </div>
+	                </div>
+	                <button class="icon-button" id="theme-toggle-button" type="button" aria-label="Theme" title="Theme">◐</button>
+	                <button class="icon-button" id="guide-open-button" type="button" aria-label="Guide" title="Guide">?</button>
+	                <button class="icon-button update-open-button" id="update-open-button" type="button" aria-label="Software update" title="Software update">↻</button>
+	              </div>
+	              <div class="sidebar-footer-status">
+	                <span class="sidebar-status-dot" id="sidebar-status-dot"></span>
+	                <div><strong id="sidebar-status-text">STOPPED</strong><span id="sidebar-hotel-count">0 hotels</span></div>
+	              </div>
+	            </aside>
+	            <button class="sidebar-scrim" id="sidebar-scrim" type="button" aria-label="Close navigation" hidden></button>
+	            <main class="app-main">
+	          <div class="topbar">
+	            <button class="icon-button mobile-nav-button" id="mobile-nav-button" type="button" aria-label="Open navigation" title="Navigation">☰</button>
+	            <h2>{APP_NAME}</h2>
+	          </div>
+          <nav class="command-dock" aria-label="Search controls">
+            <div class="command-state">
+              <span class="command-dot" id="command-dot" aria-hidden="true"></span>
+              <div>
+                <strong id="dock-status">STOPPED 已停止</strong>
+                <span id="dock-summary">尚未选择酒店 No hotels selected</span>
+                <span id="dock-config-state" class="config-state clean">配置已同步 Configuration ready</span>
+                <span id="connection-state" class="connection-state online">连接正常 Connected</span>
+              </div>
             </div>
-          </div>
-          <div id="update-banner" class="update-banner" hidden>
-            <div>
-              <div class="update-title" id="update-title">发现新版本 Update available</div>
-              <div class="update-message" id="update-message"></div>
-            </div>
-            <button id="btn_upgrade" class="primary">升级 Update</button>
-          </div>
+            <div class="run-actions">
+	              <button id="btn_scan_once">单次检索 Scan Once</button>
+	              <button class="primary" id="btn_start">启动 Start</button>
+	              <button class="danger" id="btn_stop" disabled>停止 Stop</button>
+	            </div>
+	          </nav>
 
-          <fieldset id="run_settings_panel">
-            <legend id="run_settings_legend">运行配置 Run Settings</legend>
-
-           <details class="box search-panel" id="search_panel" open>
+	          <section class="app-view active" id="view-search" data-view="search" aria-label="Vacancy Search">
+	           <details class="box search-panel" id="search_panel" open>
              <summary>搜索 Search</summary>
-             <div class="search-head">
-               <div>
-                 <div class="search-title">空房检索条件</div>
-                 <div class="search-subtitle">选择日期、入住条件和酒店范围；启动后会自动写入搜索记录。</div>
-               </div>
-               <div class="quick-actions">
-                 <button id="btn_today">今晚 Tonight</button>
-                 <button id="btn_tomorrow">明晚 Tomorrow</button>
-                 <button id="btn_weekend">周末 Weekend</button>
-               </div>
-             </div>
+	             <div class="search-head">
+	               <div>
+	                 <div class="search-title">空房检索条件</div>
+	                 <div class="search-subtitle">选择日期、入住条件和酒店范围；启动后会自动写入搜索记录。</div>
+	               </div>
+	               <button class="search-reset" id="btn_default" type="button"><span aria-hidden="true">↺</span> 默认 Default</button>
+	             </div>
 
-             <div class='search-grid'>
-               <div class="control-box">
-                 <label>入住 Check-in</label>
-                 <input id='start_date' type='date' value='{_html_attr(cfg.start_date)}'>
-               </div>
-               <div class="control-box">
-                 <label>退房 Check-out</label>
-                 <input id='end_date' type='date' value='{_html_attr(cfg.end_date)}'>
-               </div>
-               <div class="control-box">
-                 <label>人数 People</label>
-                 <input id='people' type='number' min='1' max='5' step='1' value='{cfg.people}'>
-               </div>
-               <div class="control-box">
-                 <label>房间 Rooms</label>
-                 <input id='rooms' type='number' min='1' max='9' step='1' value='{cfg.rooms}'>
-               </div>
-               <div class="control-box wide">
-                 <label>吸烟 Smoking</label>
-                 <select id='smoking'>
-                   <option value='noSmoking' {'selected' if cfg.smoking == 'noSmoking' else ''}>无烟房 Non-Smoking</option>
-                   <option value='Smoking'   {'selected' if cfg.smoking == 'Smoking' else ''}>吸烟房 Smoking</option>
-                   <option value='all'       {'selected' if cfg.smoking == 'all' else ''}>不限制 Any</option>
-                 </select>
-               </div>
-               <div class="control-box">
-                 <label>房型 Room Type</label>
-                 <select id="room_requirement">
-                   <option value="any"   {'selected' if current_room_requirement == 'any' else ''}>不限制 Any</option>
-                   <option value="single"{'selected' if current_room_requirement == 'single' else ''}>单人房 Single</option>
-                   <option value="double"{'selected' if current_room_requirement == 'double' else ''}>大床房 Double</option>
-                   <option value="twin"  {'selected' if current_room_requirement == 'twin' else ''}>双床房 Twin</option>
-                 </select>
-               </div>
-               <div class="control-box">
-                 <label>会员状态 Membership</label>
-                 <select id="membership_status">
-                   <option value="member" {'selected' if current_membership_status == 'member' else ''}>会员 Member</option>
-                   <option value="non_member" {'selected' if current_membership_status == 'non_member' else ''}>非会员 Non-member</option>
-                   <option value="unknown" {'selected' if current_membership_status == 'unknown' else ''}>未知 Unknown</option>
-                 </select>
-               </div>
-             </div>
+	             <div class="search-conditions">
+	               <div class="stay-row">
+	                 <div class="field-control">
+	                   <label for="start_date">入住 Check-in</label>
+	                   <input id='start_date' type='date' value='{_html_attr(cfg.start_date)}'>
+	                 </div>
+	                 <div class="field-control">
+	                   <label for="end_date">退房 Check-out</label>
+	                   <input id='end_date' type='date' value='{_html_attr(cfg.end_date)}'>
+	                 </div>
+	                 <div class="field-control quick-date-field">
+	                   <label>快捷日期 Quick Dates</label>
+	                   <div class="quick-actions" aria-label="Quick dates">
+	                     <button id="btn_today" type="button">今晚 Tonight</button>
+	                     <button id="btn_tomorrow" type="button">明晚 Tomorrow</button>
+	                     <button id="btn_weekend" type="button">周末 Weekend</button>
+	                   </div>
+	                 </div>
+	                 <div class="field-control compact-number">
+	                   <label for="people">人数 People</label>
+	                   <div class="number-stepper">
+	                     <button type="button" class="step-button" data-step-target="people" data-step-delta="-1" aria-label="Decrease people">−</button>
+	                     <input id='people' type='number' min='1' max='5' step='1' value='{cfg.people}'>
+	                     <button type="button" class="step-button" data-step-target="people" data-step-delta="1" aria-label="Increase people">+</button>
+	                   </div>
+	                 </div>
+	                 <div class="field-control compact-number">
+	                   <label for="rooms">房间 Rooms</label>
+	                   <div class="number-stepper">
+	                     <button type="button" class="step-button" data-step-target="rooms" data-step-delta="-1" aria-label="Decrease rooms">−</button>
+	                     <input id='rooms' type='number' min='1' max='9' step='1' value='{cfg.rooms}'>
+	                     <button type="button" class="step-button" data-step-target="rooms" data-step-delta="1" aria-label="Increase rooms">+</button>
+	                   </div>
+	                 </div>
+	               </div>
+	               <div class="preference-row">
+	                 <div class="field-control">
+	                   <label for="smoking">吸烟 Smoking</label>
+	                   <select id='smoking'>
+	                     <option value='noSmoking' {'selected' if cfg.smoking == 'noSmoking' else ''}>无烟房 Non-Smoking</option>
+	                     <option value='Smoking'   {'selected' if cfg.smoking == 'Smoking' else ''}>吸烟房 Smoking</option>
+	                     <option value='all'       {'selected' if cfg.smoking == 'all' else ''}>不限制 Any</option>
+	                   </select>
+	                 </div>
+	                 <div class="field-control">
+	                   <label for="room_requirement">房型 Room Type</label>
+	                   <select id="room_requirement">
+	                     <option value="any"   {'selected' if current_room_requirement == 'any' else ''}>不限制 Any</option>
+	                     <option value="single"{'selected' if current_room_requirement == 'single' else ''}>单人房 Single</option>
+	                     <option value="double"{'selected' if current_room_requirement == 'double' else ''}>大床房 Double</option>
+	                     <option value="twin"  {'selected' if current_room_requirement == 'twin' else ''}>双床房 Twin</option>
+	                   </select>
+	                 </div>
+	                 <div class="field-control">
+	                   <label for="membership_status">会员状态 Membership</label>
+	                   <select id="membership_status">
+	                     <option value="member" {'selected' if current_membership_status == 'member' else ''}>会员 Member</option>
+	                     <option value="non_member" {'selected' if current_membership_status == 'non_member' else ''}>非会员 Non-member</option>
+	                     <option value="unknown" {'selected' if current_membership_status == 'unknown' else ''}>未知 Unknown</option>
+	                   </select>
+	                 </div>
+	                 <div class="provider-selector" id="provider_selector">
+	                   <div class="provider-selector-head">
+	                     <span class="provider-selector-title">酒店品牌 Hotel Brands</span>
+	                   </div>
+	                   <div class="provider-options">
+	                     <button id="btn_provider_all" class="provider-all" type="button" aria-pressed="true">全部 All</button>
+	                     <label class="provider-choice toyoko"><input id="provider_toyoko" type="checkbox" {'checked' if 'toyoko' in getattr(cfg, 'enabled_providers', DEFAULT_ENABLED_PROVIDERS) else ''}><i></i><span>东横 Toyoko Inn</span></label>
+	                     <label class="provider-choice routeinn"><input id="provider_routeinn" type="checkbox" {'checked' if 'routeinn' in getattr(cfg, 'enabled_providers', DEFAULT_ENABLED_PROVIDERS) else ''}><i></i><span>露樱 Route Inn Hotels</span></label>
+	                     <label class="provider-choice dormy"><input id="provider_dormy" type="checkbox" {'checked' if 'dormy' in getattr(cfg, 'enabled_providers', DEFAULT_ENABLED_PROVIDERS) else ''}><i></i><span>多美迎 Dormy Inn</span></label>
+	                     <label class="provider-choice mystays"><input id="provider_mystays" type="checkbox" {'checked' if 'mystays' in getattr(cfg, 'enabled_providers', DEFAULT_ENABLED_PROVIDERS) else ''}><i></i><span>MYSTAYS Hotel</span></label>
+	                     <label class="provider-choice daiwa"><input id="provider_daiwa" type="checkbox" {'checked' if 'daiwa' in getattr(cfg, 'enabled_providers', DEFAULT_ENABLED_PROVIDERS) else ''}><i></i><span>大和ROYNET Daiwa Roynet</span></label>
+	                   </div>
+	                 </div>
+	               </div>
+	             </div>
 
              <details class="box" id="area_picker_panel" open>
                <summary>区域酒店搜索 Area Hotel Picker</summary>
-               <div class="area-toolbar">
-                 <div class="mode-tabs" id="hotel_picker_mode_tabs">
-                   <label><input type="radio" name="hotel_picker_mode" value="area" {'checked' if getattr(cfg, "search_mode", DEFAULT_SEARCH_MODE) != "radius" else ''}> 区域模式 Area</label>
-                   <label><input type="radio" name="hotel_picker_mode" value="radius" {'checked' if getattr(cfg, "search_mode", DEFAULT_SEARCH_MODE) == "radius" else ''}> 方圆模式 Radius</label>
-                 </div>
-               </div>
-               <div id="area_mode_panel" class="picker-mode">
-                 <div class="row">
-                   <div>
-                     <label>大区域 Region</label>
-                     <select id="area_region">
-                       <option value="">请选择 Select Region</option>
-                     </select>
-                   </div>
-                   <div>
-                     <label>详细区域 Detail Area</label>
-                     <select id="area_detail" disabled>
-                       <option value="">先选择大区域 Select a region first</option>
-                     </select>
-                   </div>
-                 </div>
-                 <div class="area-toolbar">
-                   <button id="btn_area_load" class="primary">加载酒店 Load Hotels</button>
-                 </div>
-               </div>
-               <div id="radius_mode_panel" class="picker-mode">
-                 <div class="radius-grid">
-                   <div>
-                     <label>地名地址或者坐标 Place, Address, or Coordinates</label>
-                     <input id="radius_query" type="text" value="{_html_attr(getattr(cfg, 'radius_query', ''))}" placeholder="东京站 / Tokyo Station / 35.6812,139.7671">
-                   </div>
-                   <div>
-                     <label>方圆半径 Radius</label>
-                     <input id="radius_km" type="range" min="1" max="50" step="1" value="{getattr(cfg, 'radius_km', DEFAULT_RADIUS_KM)}">
-                     <div class="help">当前 Current: <b><span id="radius_km_val">{getattr(cfg, 'radius_km', DEFAULT_RADIUS_KM)}</span></b> km</div>
-                   </div>
-                 </div>
-                 <input id="radius_lat" type="hidden" value="{getattr(cfg, 'radius_lat', '') if getattr(cfg, 'radius_lat', None) is not None else ''}">
-                 <input id="radius_lng" type="hidden" value="{getattr(cfg, 'radius_lng', '') if getattr(cfg, 'radius_lng', None) is not None else ''}">
-                 <div class="area-toolbar">
-                   <button id="btn_radius_load" class="primary">查找附近酒店 Load Nearby</button>
-                   <span class="help">地址会优先通过 OpenStreetMap/Nominatim 解析；坐标可直接本地解析。</span>
-                 </div>
-               </div>
-               <div class="area-toolbar">
-                 <button id="btn_area_all">全选 Select All</button>
-                 <button id="btn_area_none">全不选 Select None</button>
-                 <span class="help" id="area_status">选择大区域；详细区域可不选，默认加载整个大区域。勾选酒店后直接点击 Start 搜索。</span>
-               </div>
-               <input id="area_filter" class="hotel-filter" type="text" placeholder="过滤酒店中文/英文名或编号 Filter by Chinese/English hotel name or code">
-	               <div id="area_hotels" class="hotel-picker">
-	                 <div class="hotel-picker-empty">尚未加载酒店 No hotels loaded yet</div>
-	               </div>
-	               <div id="area_map_panel" class="selected-map-panel" hidden>
-	                 <div class="selected-map-head">
-	                   <div>
-	                     <div class="selected-map-title">已选酒店地图 Selected Hotel Map</div>
-	                     <div class="help" id="area_map_status">地图会显示当前已勾选且带坐标的酒店。</div>
+	               <div class="area-picker-config">
+	                 <div class="mode-tabs" id="hotel_picker_mode_tabs">
+	                   <label><input type="radio" name="hotel_picker_mode" value="area" {'checked' if getattr(cfg, "search_mode", DEFAULT_SEARCH_MODE) != "radius" else ''}> 区域模式 Area</label>
+	                   <label><input type="radio" name="hotel_picker_mode" value="radius" {'checked' if getattr(cfg, "search_mode", DEFAULT_SEARCH_MODE) == "radius" else ''}> 方圆模式 Radius</label>
+	                 </div>
+	                 <div id="area_mode_panel" class="picker-mode">
+	                   <div class="scope-config area-scope-config">
+	                     <div class="field-control">
+	                       <label for="area_region">大区域 Region</label>
+	                       <select id="area_region">
+	                         <option value="">请选择 Select Region</option>
+	                       </select>
+	                     </div>
+	                     <div class="field-control">
+	                       <label for="area_detail">详细区域 Detail Area</label>
+	                       <select id="area_detail" disabled>
+	                         <option value="">先选择大区域 Select a region first</option>
+	                       </select>
+	                     </div>
+	                     <button id="btn_area_load" class="primary">加载酒店 Load Hotels</button>
 	                   </div>
 	                 </div>
-	                 <div id="area_selected_map" class="selected-map-canvas"></div>
+	                 <div id="radius_mode_panel" class="picker-mode">
+	                   <div class="scope-config radius-grid">
+	                     <div class="field-control">
+	                       <label for="radius_query">地名地址或者坐标 Place, Address, or Coordinates</label>
+	                       <input id="radius_query" type="text" value="{_html_attr(getattr(cfg, 'radius_query', ''))}" placeholder="东京站或 35.6812,139.7671">
+	                     </div>
+	                     <div class="field-control radius-control">
+	                       <label for="radius_km">方圆半径 Radius <b><span id="radius_km_val">{getattr(cfg, 'radius_km', DEFAULT_RADIUS_KM)}</span> km</b></label>
+	                       <input id="radius_km" type="range" min="1" max="50" step="1" value="{getattr(cfg, 'radius_km', DEFAULT_RADIUS_KM)}">
+	                     </div>
+	                     <button id="btn_radius_load" class="primary">查找附近酒店 Load Nearby</button>
+	                   </div>
+	                 </div>
+	                 <input id="radius_lat" type="hidden" value="{getattr(cfg, 'radius_lat', '') if getattr(cfg, 'radius_lat', None) is not None else ''}">
+	                 <input id="radius_lng" type="hidden" value="{getattr(cfg, 'radius_lng', '') if getattr(cfg, 'radius_lng', None) is not None else ''}">
+	                 <span class="selection-summary" id="area_selection_summary">已选 0 / 0 Selected</span>
+	               </div>
+	               <div class="area-status-row">
+	                 <span id="area_status" role="status" aria-live="polite">选择大区域；详细区域可不选，默认加载整个大区域。勾选酒店后直接点击 Start 搜索。</span>
+	               </div>
+	               <div class="hotel-picker-toolbar">
+	                 <div class="hotel-filter-wrap">
+	                   <span aria-hidden="true">⌕</span>
+	                   <input id="area_filter" class="hotel-filter" type="search" placeholder="按酒店名或编号过滤">
+	                 </div>
+	                 <button id="btn_area_selected_only" type="button" aria-pressed="false">仅看已选 Selected</button>
+	                 <label class="hotel-sort-control"><span>排序 Sort</span><select id="area_sort">
+	                   <option value="default">默认 Default</option>
+	                   <option value="distance">距离 Distance</option>
+	                   <option value="name">名称 Name</option>
+	                   <option value="code">编号 Code</option>
+	                 </select></label>
+	                 <button id="btn_area_all">全选 Select All</button>
+	                 <button id="btn_area_none">全不选 Select None</button>
+	               </div>
+	               <div class="hotel-workspace-tabs" role="tablist" aria-label="Hotel view">
+	                 <button type="button" class="active" data-hotel-workspace-view="list" aria-pressed="true">列表 List</button>
+	                 <button type="button" data-hotel-workspace-view="map" aria-pressed="false">地图 Map</button>
+	               </div>
+	               <div class="hotel-workspace" id="hotel_workspace" data-mobile-view="list">
+	                 <div class="hotel-list-pane">
+	                   <div class="hotel-list-meta"><span id="area_visible_summary">0 hotels</span></div>
+	                   <div id="area_hotels" class="hotel-picker">
+	                     <div class="hotel-picker-empty">尚未加载酒店 No hotels loaded yet</div>
+	                   </div>
+	                 </div>
+	                 <div id="area_map_panel" class="selected-map-panel hotel-map-pane" hidden>
+	                   <div class="selected-map-head">
+	                     <div>
+	                       <div class="selected-map-title">已选酒店地图 Selected Hotel Map</div>
+	                       <div class="help" id="area_map_status">地图会显示当前已勾选且带坐标的酒店。</div>
+	                     </div>
+	                     <div id="area_map_legend" class="map-provider-legend"></div>
+	                   </div>
+	                   <div id="area_selected_map" class="selected-map-canvas"></div>
+	                 </div>
+	               </div>
+	               <div id="hotel_catalog_panel" class="catalog-status" aria-live="polite">
+	                 <span id="hotel_catalog_dot" class="catalog-status-dot" aria-hidden="true"></span>
+	                 <div class="catalog-status-copy">
+	                   <div id="hotel_catalog_title" class="catalog-status-title">酒店数据 Hotel Data</div>
+	                   <div id="hotel_catalog_meta" class="catalog-status-meta">等待后台检查 Waiting for background check</div>
+	                   <div id="provider_catalog_meta" class="catalog-status-meta">其他品牌本地数据库等待检查 Other-brand local database is waiting</div>
+	                   <div id="provider_catalog_new" class="catalog-new-hotels" hidden></div>
+	                   <div id="hotel_catalog_upcoming" class="catalog-status-upcoming" hidden></div>
+	                   <div id="hotel_catalog_new" class="catalog-new-hotels" hidden></div>
+	                 </div>
+	                 <div class="catalog-status-actions">
+	                   <button id="btn_catalog_refresh" type="button">刷新酒店数据 Refresh</button>
+	                   <button id="btn_catalog_ack" type="button" hidden>知道了 Dismiss</button>
+	                 </div>
 	               </div>
 	             </details>
 
@@ -1252,19 +1639,24 @@ def home() -> Response:
                  <div class="history-empty">暂无搜索记录 No history yet</div>
                </div>
              </details>
-           </details>
+	           </details>
+	          </section>
 
-            <section class="run-panel">
+	          <section class="app-view" id="view-monitor" data-view="monitor" aria-label="Vacancy Monitor" hidden>
+	            <section class="run-panel">
               <div class="run-top">
                 <div>
                   <div class="run-title">启动与监控 Run Control</div>
                   <div class="run-subtitle">启动后按当前搜索范围循环检索；运行中可以停止、保存配置或更新酒店库。</div>
                 </div>
-                <div class="run-actions">
-                  <button class='primary' id='btn_start'>启动 Start</button>
-                  <button class='danger' id='btn_stop'>停止 Stop</button>
-                  <button id='btn_default'>默认 Default</button>
-                </div>
+              </div>
+
+              <div class="run-snapshot" id="run-snapshot" aria-label="Active search configuration">
+                <div><span id="snapshot-dates-label">日期 Dates</span><b id="snapshot-dates">-</b></div>
+                <div><span id="snapshot-hotels-label">酒店 Hotels</span><b id="snapshot-hotels">0</b></div>
+                <div><span id="snapshot-engine-label">引擎 Engine</span><b id="snapshot-engine">HTTP/API</b></div>
+                <div><span id="snapshot-cadence-label">每轮间隔 Round</span><b id="snapshot-cadence">30s</b></div>
+                <div><span id="snapshot-safety-label">流量保护 Safety</span><b id="snapshot-safety">正常 Normal</b></div>
               </div>
 
               <div class="status-grid">
@@ -1294,10 +1686,9 @@ def home() -> Response:
                 <span id='time-text'>耗时 Loop elapsed: 0s | 总耗时 Uptime: 0s</span>
                 <span id='action-text'>状态 Current: (idle)</span>
               </div>
-              <div id='msg' class='notice success'></div>
-              <div id='err' class='notice error'></div>
-            </section>
-          </fieldset>
+              <div id='msg' class='notice success' role='status' aria-live='polite'></div>
+              <div id='err' class='notice error' role='alert'></div>
+	            </section>
 
           <section class="results-panel">
             <div class="results-head">
@@ -1312,13 +1703,42 @@ def home() -> Response:
               </div>
             </div>
 
+            <div class="results-toolbar" aria-label="Result filters">
+              <div class="result-filter-tabs" id="result_filter_tabs">
+                <button data-result-filter="all" class="active" aria-pressed="true">全部 All</button>
+                <button data-result-filter="available" aria-pressed="false">有房 Available</button>
+                <button data-result-filter="unavailable" aria-pressed="false">无房 Unavailable</button>
+                <button data-result-filter="check" aria-pressed="false">需确认 Check</button>
+                <button data-result-filter="changes" aria-pressed="false">变化 Changes</button>
+              </div>
+              <div class="result-query-wrap">
+                <label class="sr-only" for="result_query">搜索结果 Search results</label>
+                <input id="result_query" type="search" placeholder="搜索编号、酒店或房型 Search code, hotel, or room">
+              </div>
+              <div class="results-sort-wrap">
+                <span id="results_filter_count">显示 0 / 0 Showing</span>
+                <span id="results_updated_at">尚未更新 Never updated</span>
+                <label for="results_sort">排序 Sort</label>
+                <select id="results_sort">
+                  <option value="default">默认 Default</option>
+                  <option value="status">状态 Status</option>
+                  <option value="price">价格 Price</option>
+                  <option value="name">酒店名 Hotel</option>
+                  <option value="distance">距离 Distance</option>
+                </select>
+                <button id="btn_results_refresh">刷新 Refresh</button>
+                <button id="btn_results_export">导出 CSV Export</button>
+              </div>
+            </div>
+            <div id="result-change-note" class="result-change-note" role="status" aria-live="polite" hidden></div>
+
             <div class="results-table-wrap">
               <table class="result-table">
                 <thead>
                   <tr>
                     <th style="width:110px">编号 Code</th>
                     <th>酒店 Hotel</th>
-                    <th style="width:130px">状态 Status</th>
+                    <th style="width:190px">状态 Status</th>
                     <th style="width:140px">最低价 Min Price</th>
                     <th style="width:90px">剩余 Left</th>
                     <th style="width:220px">房型 Room Type</th>
@@ -1362,9 +1782,11 @@ def home() -> Response:
                 </div>
               </div>
             </div>
-          </section>
+	          </section>
+	          </section>
 
-            <details class="box settings-panel">
+	          <section class="app-view" id="view-search-settings" data-view="search-settings" aria-label="Search Settings" hidden>
+	            <details class="box settings-panel" open>
               <summary>搜索设定 Search Settings</summary>
               <div class="settings-note">引擎、检索节奏和智能并行集中在这里。智能并行仅用于 HTTP/API，并会错峰请求。</div>
               <div class="settings-grid">
@@ -1397,12 +1819,16 @@ def home() -> Response:
                   <label>随机抖动 Request Jitter</label>
                   <input id='request_jitter' type='range' min='0' max='100' step='5' value='{getattr(cfg, "request_jitter_percent", DEFAULT_REQUEST_JITTER_PERCENT)}'>
                   <div class='help'>当前 Current: <b><span id="request_jitter_val">{getattr(cfg, "request_jitter_percent", DEFAULT_REQUEST_JITTER_PERCENT)}</span></b>%</div>
+                  <label class="inline"><input id='adaptive_backoff_enabled' type='checkbox' {'checked' if getattr(cfg, "adaptive_backoff_enabled", DEFAULT_ADAPTIVE_BACKOFF_ENABLED) else ''}> 启用自适应退避 Adaptive Backoff</label>
+                  <div class='help adaptive-backoff-help'>访问异常达到 50% 时自动把下一轮间隔提高到 2 倍，连续异常最多 4 倍；恢复正常后自动回落。</div>
                 </div>
 
               </div>
-            </details>
+	            </details>
+	          </section>
 
-            <details class="box settings-panel">
+	          <section class="app-view" id="view-push-settings" data-view="push-settings" aria-label="Push Settings" hidden>
+	            <details class="box settings-panel" open>
               <summary>推送设定 Push Settings</summary>
               <div class="settings-note">空房、重复提醒、无房变化和启动通知会发送到所有已启用渠道。</div>
               <div class="settings-grid">
@@ -1518,23 +1944,172 @@ def home() -> Response:
                   <input id='email_to' type='text' value='{_html_attr(cfg.email_to)}' placeholder='a@b.com, c@d.com'>
                 </div>
               </div>
-            </details>
+	            </details>
+	          </section>
 
+	          <section class="app-view" id="view-interface" data-view="interface" aria-label="Interface Settings" hidden>
+	            <div class="interface-settings-grid">
+	              <section class="interface-card">
+	                <span class="interface-card-icon">🌐</span>
+	                <div><h2>语言</h2><p>界面仅显示当前选择的语言。</p></div>
+	                <label class="sr-only" for="primary_language">语言 Language</label>
+	                <select id="primary_language">{language_options_html}</select>
+	              </section>
+	              <section class="interface-card">
+	                <span class="interface-card-icon">◐</span>
+	                <div><h2>主题 / Theme</h2><p>可跟随系统，也可固定浅色或深色主题。</p></div>
+	                <div class="theme-options" role="radiogroup" aria-label="Theme">
+	                  <button type="button" data-theme-choice="system" aria-pressed="true">跟随系统 / System</button>
+	                  <button type="button" data-theme-choice="light" aria-pressed="false">浅色 / Light</button>
+	                  <button type="button" data-theme-choice="dark" aria-pressed="false">深色 / Dark</button>
+	                </div>
+	              </section>
+	              <section class="interface-card mobile-access-card" id="mobile-access-card">
+	                <span class="interface-card-icon mobile-access-icon" aria-hidden="true">▯</span>
+	                <div class="mobile-access-heading"><h2 id="mobile-access-title">手机访问</h2><p id="mobile-access-help">在局域网或 Tailscale 中安全连接手机。</p></div>
+	                <div class="mobile-access-controls" id="mobile-access-host-controls">
+	                  <label class="inline mobile-access-toggle"><input id="mobile_access_enabled" type="checkbox"> <span id="mobile-access-enable-label">启用手机访问</span></label>
+	                  <button class="primary" id="btn_mobile_access_apply" type="button">应用</button>
+	                </div>
+	                <div class="mobile-access-state" id="mobile-access-state" data-state="loading" aria-live="polite">
+	                  <span class="mobile-access-state-dot" aria-hidden="true"></span>
+	                  <div><strong id="mobile-access-state-title">正在读取状态</strong><span id="mobile-access-state-message"></span></div>
+	                </div>
+	                <div class="mobile-access-details" id="mobile-access-details" hidden>
+	                  <div class="mobile-access-setup">
+	                    <div class="mobile-access-method">
+	                      <div class="mobile-access-section-label" id="mobile-access-method-title">1. 选择连接方式</div>
+	                      <div class="mobile-access-methods" role="radiogroup" aria-labelledby="mobile-access-method-title">
+	                        <button type="button" class="mobile-access-method-button active" data-mobile-connection="lan" aria-pressed="true">
+	                          <span class="mobile-access-method-icon" aria-hidden="true">⌂</span>
+	                          <span><strong id="mobile-lan-title">同一 Wi-Fi</strong><small id="mobile-lan-help">适合在家中或酒店内使用</small></span>
+	                          <em id="mobile-lan-status">检测中</em>
+	                        </button>
+	                        <button type="button" class="mobile-access-method-button" data-mobile-connection="tailscale" aria-pressed="false">
+	                          <span class="mobile-access-method-icon" aria-hidden="true">↗</span>
+	                          <span><strong id="mobile-tailscale-title">Tailscale 远程</strong><small id="mobile-tailscale-help">离开当前 Wi-Fi 后也可安全连接</small></span>
+	                          <em id="mobile-tailscale-status">检测中</em>
+	                        </button>
+	                        <button type="button" class="mobile-access-method-button" data-mobile-connection="public" aria-pressed="false">
+	                          <span class="mobile-access-method-icon" aria-hidden="true">◎</span>
+	                          <span><strong id="mobile-public-title">公网直连</strong><small id="mobile-public-help">仅建议配合 HTTPS 使用</small></span>
+	                          <em id="mobile-public-status">检测中</em>
+	                        </button>
+	                      </div>
+	                    </div>
+	                    <div class="mobile-access-connect">
+	                      <div class="mobile-access-field"><label id="mobile-access-url-label" for="mobile_access_url">2. 在手机打开此地址</label><div><input id="mobile_access_url" type="text" readonly><button id="btn_mobile_access_copy" type="button">复制</button><a class="mobile-access-open" id="btn_mobile_access_open" href="#" target="_blank" rel="noreferrer" aria-label="打开地址" title="打开地址">↗</a></div></div>
+	                      <div class="mobile-access-field"><label id="mobile-access-code-label" for="mobile_access_code">3. 输入配对码</label><div><input id="mobile_access_code" class="pairing-code" type="text" readonly><button id="btn_mobile_access_rotate" type="button">更换</button></div></div>
+	                    </div>
+	                    <div class="mobile-access-steps" id="mobile-access-steps" aria-label="Connection steps">
+	                      <span><b>1</b><i id="mobile-step-network">连接网络</i></span>
+	                      <span><b>2</b><i id="mobile-step-scan">扫码或打开地址</i></span>
+	                      <span><b>3</b><i id="mobile-step-pair">完成配对</i></span>
+	                    </div>
+	                    <p class="mobile-access-note" id="mobile-access-note">首次连接需要输入配对码，之后会保留登录状态。</p>
+	                  </div>
+	                  <figure class="mobile-access-qr" id="mobile-access-qr-wrap"><div class="mobile-access-qr-label" id="mobile-access-qr-mode">同一 Wi-Fi</div><img id="mobile_access_qr" alt=""><figcaption id="mobile-access-qr-label">使用手机相机扫码连接</figcaption></figure>
+	                </div>
+	              </section>
+	            </div>
+	          </section>
 
-          <footer>
-            <span id="footer-app-name">{APP_NAME}</span> — Version: <b>{APP_VERSION}</b> · Author:
-            <a href="https://space.bilibili.com/4955287" target="_blank" rel="noreferrer noopener"><b>{APP_AUTHOR}</b></a>
-            · Github:
-            <a href="https://github.com/JellyNekoNeko/toyoko-tracker" target="_blank" rel="noreferrer noopener"><b>JellyNekoNeko/toyoko-tracker</b></a>
-          </footer>
+	          <div class="update-modal" id="update-modal" hidden>
+	            <section class="update-dialog" role="dialog" aria-modal="true" aria-labelledby="update-dialog-title">
+	              <header class="update-dialog-header">
+	                <div class="update-product">
+	                  <img src="/static/toyoko-chan-mascot.png?v=3" alt="">
+	                  <div><span id="update-dialog-kicker">SOFTWARE UPDATE</span><h2 id="update-dialog-title">软件更新</h2></div>
+	                </div>
+	                <button class="update-close" id="update-close-button" type="button" aria-label="关闭" title="关闭">×</button>
+	              </header>
+	              <div class="update-dialog-body">
+	                <div class="update-app-name" id="update-app-name">东横酱</div>
+	                <div class="update-version-grid" aria-label="Version information">
+	                  <div><span id="update-current-label">当前版本</span><strong id="update-current-version">{APP_VERSION}</strong></div>
+	                  <div><span id="update-latest-label">最新版本</span><strong id="update-latest-version">-</strong></div>
+	                </div>
+	                <div class="update-state-row" id="update-state-row" data-state="idle" aria-live="polite">
+	                  <span class="update-state-dot" aria-hidden="true"></span>
+	                  <div><strong id="update-state-title">正在检查更新</strong><span id="update-state-message"></span></div>
+	                </div>
+	                <div class="update-project-info">
+	                  <div><span id="update-author-label">作者</span><a href="https://space.bilibili.com/4955287" target="_blank" rel="noreferrer noopener"><b>{APP_AUTHOR}</b><span aria-hidden="true">↗</span></a></div>
+	                  <div><span id="update-github-label">GitHub</span><a href="https://github.com/JellyNekoNeko/toyoko-tracker" target="_blank" rel="noreferrer noopener"><b>JellyNekoNeko/toyoko-tracker</b><span aria-hidden="true">↗</span></a></div>
+	                </div>
+	              </div>
+	              <footer class="update-actions">
+	                <button type="button" id="btn_update_check">重新检查</button>
+	                <button class="primary" type="button" id="btn_upgrade" disabled>更新</button>
+	              </footer>
+	            </section>
+	          </div>
+
+	          <div class="guide-modal" id="guide-modal" hidden>
+	            <section class="guide-dialog" role="dialog" aria-modal="true" aria-labelledby="guide-title">
+	              <header class="guide-header">
+	                <div class="guide-brand">
+	                  <img src="/static/toyoko-chan-mascot.png?v=3" alt="">
+	                  <div><span id="guide-kicker">QUICK START</span><h2 id="guide-title">东横酱使用向导 / Toyoko Chan Guide</h2></div>
+	                </div>
+	                <button class="guide-close" id="guide-close-button" type="button" aria-label="Close guide" title="Close guide">×</button>
+	              </header>
+	              <nav class="guide-progress" id="guide-progress" aria-label="Guide progress">
+	                <button type="button" data-guide-jump="0" aria-current="step"><span>1</span></button>
+	                <button type="button" data-guide-jump="1"><span>2</span></button>
+	                <button type="button" data-guide-jump="2"><span>3</span></button>
+	                <button type="button" data-guide-jump="3"><span>4</span></button>
+	                <button type="button" data-guide-jump="4"><span>5</span></button>
+	              </nav>
+	              <div class="guide-stage">
+	                <div class="guide-visual" aria-hidden="true">
+	                  <div class="guide-figure guide-figure-layout active" data-guide-visual="0">
+	                    <div class="guide-mini-sidebar"><i></i><b></b><b></b><b></b><b></b></div>
+	                    <div class="guide-mini-workspace"><div class="guide-mini-dock"><i></i><span></span><em></em></div><div class="guide-mini-content"><b></b><span></span><span></span><span></span></div></div>
+	                  </div>
+	                  <div class="guide-figure guide-figure-search" data-guide-visual="1" hidden>
+	                    <div class="guide-mini-fields"><span></span><span></span><span></span><span></span></div>
+	                    <div class="guide-mini-brands"><b></b><b></b><b></b></div>
+	                    <div class="guide-mini-picker"><i>⌖</i><span></span><span></span><span></span></div>
+	                  </div>
+	                  <div class="guide-figure guide-figure-results" data-guide-visual="2" hidden>
+	                    <div class="guide-mini-stats"><b class="good">2</b><b class="bad">1</b><b>3</b></div>
+	                    <div class="guide-mini-table"><span></span><p><i class="good"></i><b></b><em></em></p><p><i class="bad"></i><b></b><em></em></p><p><i class="good"></i><b></b><em></em></p></div>
+	                  </div>
+	                  <div class="guide-figure guide-figure-search-settings" data-guide-visual="3" hidden>
+	                    <div><i>HTTP</i><span></span></div><div><i>1×</i><span></span></div><div><i>120s</i><span></span><span></span></div>
+	                  </div>
+	                  <div class="guide-figure guide-figure-push" data-guide-visual="4" hidden>
+	                    <div class="guide-mini-events"><span class="on"></span><span class="on"></span><span></span><span class="on"></span></div>
+	                    <div class="guide-mini-channels"><b>◉</b><b>✉</b><b>●</b><b>⌁</b></div>
+	                    <i class="guide-mini-notification">✓</i>
+	                  </div>
+	                </div>
+	                <div class="guide-copy">
+	                  <span class="guide-step-count" id="guide-step-count">1 / 5</span>
+	                  <h3 id="guide-step-title">认识界面 / Interface Overview</h3>
+	                  <p id="guide-step-body">使用左侧导航切换工作区；顶部操作条始终提供单次检索、启动和停止。 / Use the sidebar to switch workspaces; the top command bar keeps scan, start, and stop within reach.</p>
+	                  <div class="guide-tip" id="guide-step-tip">提示：运行后会自动进入空房监控。 / Tip: Starting a scan automatically opens Vacancy Monitor.</div>
+	                </div>
+	              </div>
+	              <footer class="guide-actions">
+	                <button type="button" id="guide-skip-button">稍后 / Skip</button>
+	                <div><button type="button" id="guide-prev-button">上一步 / Back</button><button class="primary" type="button" id="guide-next-button">下一步 / Next</button></div>
+	              </footer>
+	            </section>
+	          </div>
+
+          <aside id="hotel-info-popover" class="hotel-info-popover" role="dialog" aria-live="polite" hidden></aside>
+	            </main>
+	          </div>
         """
 
-    html += """
+    page_html += """
           <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
           <script src="/static/app.js"></script>
         </body></html>
         """
-    return Response(html, mimetype="text/html")
+    return Response(page_html, mimetype="text/html")
 
  # ---- Hotel name → code mapping (toyoko_hotel_names.json) ----
 HOTEL_NAME_JSON = os.path.join(BASE_DIR, "toyoko_hotel_names.json")
@@ -1545,6 +2120,163 @@ _AREA_INDEX_CACHE = None  # type: Optional[dict]
 _AREA_INDEX_CACHE_MTIME = 0.0
 _AREA_HOTELS_CACHE: Dict[str, List[Dict[str, Any]]] = {}
 _RADIUS_BUILD_LOCK = threading.Lock()
+
+
+def _invalidate_hotel_catalog_caches() -> None:
+    _AREA_HOTELS_CACHE.clear()
+
+
+_set_catalog_hooks(log_hook=_log, refresh_hook=_invalidate_hotel_catalog_caches)
+
+
+def _start_catalog_scheduler() -> None:
+    _catalog_start_scheduler()
+
+
+def _stop_catalog_scheduler() -> None:
+    _catalog_stop_scheduler()
+
+
+_PROVIDER_DATABASE_LOCK = threading.Lock()
+_PROVIDER_DATABASE_STOP = threading.Event()
+_PROVIDER_DATABASE_THREAD: Optional[threading.Thread] = None
+_PROVIDER_DATABASE_INTERVAL = 6 * 60 * 60
+
+
+def _detail_area_references() -> Dict[int, List[Tuple[int, float, float]]]:
+    jobs: List[Tuple[int, int]] = []
+    for region in _load_area_index().get("regions") or []:
+        for prefecture in region.get("prefectures") or []:
+            try:
+                prefecture_id = int(prefecture.get("id"))
+            except (TypeError, ValueError):
+                continue
+            for area in prefecture.get("areas") or []:
+                area_name = str(area.get("name") or "").lower()
+                if "within tokyo's 23 wards" in area_name:
+                    continue
+                try:
+                    jobs.append((prefecture_id, int(area.get("id"))))
+                except (TypeError, ValueError):
+                    continue
+
+    references: Dict[int, List[Tuple[int, float, float]]] = {}
+
+    def fetch(job: Tuple[int, int]) -> Tuple[int, int, List[Dict[str, Any]]]:
+        prefecture_id, area_id = job
+        return prefecture_id, area_id, _fetch_hotels_for_selector("area", area_id)
+
+    with ThreadPoolExecutor(max_workers=6, thread_name_prefix="area-classifier") as executor:
+        futures = {executor.submit(fetch, job): job for job in jobs}
+        for future in as_completed(futures):
+            prefecture_id, area_id = futures[future]
+            try:
+                _, _, hotels = future.result()
+            except Exception as exc:
+                _log(f"[database] area reference {area_id} skipped: {exc}")
+                continue
+            for hotel in hotels:
+                lat = _optional_float(hotel.get("lat"))
+                lng = _optional_float(hotel.get("lng"))
+                if lat is not None and lng is not None:
+                    references.setdefault(prefecture_id, []).append((area_id, lat, lng))
+    return references
+
+
+def _classify_provider_hotels(
+    hotels: List[Dict[str, Any]],
+    references: Dict[int, List[Tuple[int, float, float]]],
+) -> List[Dict[str, Any]]:
+    classified = []
+    for source in hotels:
+        hotel = dict(source)
+        prefecture_id = hotel.get("prefecture_id")
+        if not prefecture_id:
+            prefecture_id = _prefecture_id_from_text(
+                str(hotel.get("prefecture") or hotel.get("address") or hotel.get("address_en") or "")
+            )
+        try:
+            prefecture_id = int(prefecture_id) if prefecture_id else None
+        except (TypeError, ValueError):
+            prefecture_id = None
+        hotel["prefecture_id"] = prefecture_id
+        hotel["region_id"] = hotel.get("region_id") or _region_id_for_prefecture_id(prefecture_id)
+        lat = _optional_float(hotel.get("lat"))
+        lng = _optional_float(hotel.get("lng"))
+        candidates = references.get(prefecture_id or -1, [])
+        if lat is not None and lng is not None and candidates:
+            nearest = min(candidates, key=lambda row: _haversine_km(lat, lng, row[1], row[2]))
+            hotel["detail_area_id"] = nearest[0]
+            hotel["detail_area_distance_km"] = round(_haversine_km(lat, lng, nearest[1], nearest[2]), 3)
+        else:
+            hotel["detail_area_id"] = None
+        classified.append(hotel)
+    return classified
+
+
+def _refresh_provider_database(force: bool = False) -> Dict[str, Any]:
+    if not _PROVIDER_DATABASE_LOCK.acquire(blocking=False):
+        return {"ok": True, "state": "checking", "providers": {}}
+    try:
+        _log("[database] refreshing non-Toyoko hotel database...")
+        references = _detail_area_references()
+        fetchers = {
+            "routeinn": lambda: _fetch_routeinn_coordinate_hotels(DEFAULT_PRIMARY_LANGUAGE, force=force),
+            "dormy": lambda: _fetch_chain_provider_hotels("dormy", DEFAULT_PRIMARY_LANGUAGE, force=force),
+            "mystays": lambda: _fetch_chain_provider_hotels("mystays", DEFAULT_PRIMARY_LANGUAGE, force=force),
+            "daiwa": lambda: _fetch_chain_provider_hotels("daiwa", DEFAULT_PRIMARY_LANGUAGE, force=force),
+        }
+        results: Dict[str, Any] = {}
+        with ThreadPoolExecutor(max_workers=len(fetchers), thread_name_prefix="provider-catalog") as executor:
+            futures = {executor.submit(fetcher): provider for provider, fetcher in fetchers.items()}
+            for future in as_completed(futures):
+                provider = futures[future]
+                try:
+                    hotels = _classify_provider_hotels(future.result(), references)
+                    results[provider] = _db_sync_provider(provider, hotels)
+                    _log(f"[database] {provider}: {len(hotels)} hotels synchronized")
+                except Exception as exc:
+                    _db_record_sync_error(provider, str(exc))
+                    results[provider] = {"error": str(exc)}
+                    _log(f"[database] {provider} refresh failed: {exc}")
+        return {"ok": True, "state": "complete", "providers": results}
+    finally:
+        _PROVIDER_DATABASE_LOCK.release()
+
+
+def _request_provider_database_refresh(force: bool = True) -> bool:
+    if _PROVIDER_DATABASE_LOCK.locked():
+        return False
+    threading.Thread(
+        target=_refresh_provider_database,
+        kwargs={"force": force},
+        name="provider-database-refresh",
+        daemon=True,
+    ).start()
+    return True
+
+
+def _provider_database_worker() -> None:
+    _refresh_provider_database(force=False)
+    while not _PROVIDER_DATABASE_STOP.wait(_PROVIDER_DATABASE_INTERVAL):
+        _refresh_provider_database(force=True)
+
+
+def _start_provider_database_scheduler() -> None:
+    global _PROVIDER_DATABASE_THREAD
+    if _PROVIDER_DATABASE_THREAD and _PROVIDER_DATABASE_THREAD.is_alive():
+        return
+    _PROVIDER_DATABASE_STOP.clear()
+    _PROVIDER_DATABASE_THREAD = threading.Thread(
+        target=_provider_database_worker,
+        name="provider-database-scheduler",
+        daemon=True,
+    )
+    _PROVIDER_DATABASE_THREAD.start()
+
+
+def _stop_provider_database_scheduler() -> None:
+    _PROVIDER_DATABASE_STOP.set()
 
 def _normalize_name(s: str) -> str:
     """Normalize hotel name for matching (remove spaces/punct, lowercase)."""
@@ -1607,7 +2339,7 @@ def _hotel_names_by_code(code: str, fallback: Optional[str] = None, primary_lang
         primary = row.get(lang_info["name_key"]) or row.get(lang_info["short_key"]) or ""
         zh = row.get("name_full_zh_cn") or row.get("name_zh_cn") or ""
         en = row.get("name_full_en") or row.get("name_en") or fallback or ""
-        display = primary and en and f"{primary} / {en}" or primary or en or fallback or ""
+        display = primary or en or fallback or ""
         return {
             "primary": primary,
             "primary_language": lang,
@@ -1796,6 +2528,8 @@ def _hotel_for_primary_language(hotel: Dict[str, Any], primary_language: Optiona
     lang = _normalize_primary_language(primary_language)
     names = _hotel_names_by_code(hotel.get("code", ""), hotel.get("name_en") or hotel.get("name"), lang)
     item = dict(hotel)
+    item["provider"] = "toyoko"
+    item["display_code"] = item.get("display_code") or item.get("code")
     item["name_primary"] = names.get("primary") or hotel.get(f"name_{lang}") or hotel.get("name_zh") or hotel.get("name_en") or hotel.get("name") or ""
     item["name_en"] = names.get("en") or hotel.get("name_en") or hotel.get("name") or ""
     item["name_zh"] = names.get("zh") or hotel.get("name_zh") or ""
@@ -1835,7 +2569,45 @@ def _all_area_selectors() -> List[Tuple[str, int]]:
     return selectors
 
 
-def _all_hotels_for_radius(primary_language: Optional[str] = None) -> List[Dict[str, Any]]:
+def _prefecture_id_for_detail(region_id: Optional[int], detail_id: str) -> Optional[int]:
+    detail = str(detail_id or "")
+    if detail.startswith("pref-"):
+        try:
+            return int(detail.split("-", 1)[1])
+        except ValueError:
+            return None
+    if not detail.startswith("area-"):
+        return None
+    try:
+        area_id = int(detail.split("-", 1)[1])
+    except ValueError:
+        return None
+    index = _load_area_index()
+    for region in index.get("regions") or []:
+        if region_id is not None and int(region.get("id", -1)) != int(region_id):
+            continue
+        for prefecture in region.get("prefectures") or []:
+            if any(int(area.get("id", -1)) == area_id for area in prefecture.get("areas") or []):
+                return int(prefecture.get("id"))
+    return None
+
+
+def _prefecture_ids_for_region(region_id: int) -> List[int]:
+    index = _load_area_index()
+    for region in index.get("regions") or []:
+        if int(region.get("id", -1)) != int(region_id):
+            continue
+        ids: List[int] = []
+        for prefecture in region.get("prefectures") or []:
+            try:
+                ids.append(int(prefecture.get("id")))
+            except (TypeError, ValueError):
+                continue
+        return ids
+    return []
+
+
+def _all_toyoko_hotels_for_radius(primary_language: Optional[str] = None) -> List[Dict[str, Any]]:
     cached = _AREA_HOTELS_CACHE.get("all")
     if cached is None:
         cached = _load_radius_hotels_cache()
@@ -1871,16 +2643,32 @@ def _all_hotels_for_radius(primary_language: Optional[str] = None) -> List[Dict[
     return [_hotel_for_primary_language(h, primary_language) for h in cached]
 
 
+def _all_hotels_for_radius(
+    primary_language: Optional[str] = None,
+    enabled_providers: Optional[List[str]] = None,
+) -> List[Dict[str, Any]]:
+    providers = [provider for provider in (enabled_providers or DEFAULT_ENABLED_PROVIDERS) if provider in SUPPORTED_PROVIDERS]
+    hotels: List[Dict[str, Any]] = []
+    if "toyoko" in providers:
+        hotels.extend(_all_toyoko_hotels_for_radius(primary_language))
+    for provider in ("routeinn", "dormy", "mystays", "daiwa"):
+        if provider in providers:
+            cached = _db_load_hotels(provider, primary_language or DEFAULT_PRIMARY_LANGUAGE)
+            if cached:
+                hotels.extend(cached)
+            elif provider == "routeinn":
+                hotels.extend(_fetch_routeinn_coordinate_hotels(primary_language or DEFAULT_PRIMARY_LANGUAGE))
+            else:
+                hotels.extend(_fetch_chain_provider_hotels(provider, primary_language or DEFAULT_PRIMARY_LANGUAGE))
+    return hotels
+
+
 def _load_radius_hotels_cache() -> Optional[List[Dict[str, Any]]]:
     try:
-        if not os.path.exists(RADIUS_HOTELS_CACHE_PATH):
-            return None
-        with open(RADIUS_HOTELS_CACHE_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        hotels = data.get("hotels") if isinstance(data, dict) else None
-        if isinstance(hotels, list) and hotels:
+        hotels = _load_catalog_coordinate_cache(allow_stale=True)
+        if hotels:
             _log(f"[radius] loaded coordinate cache: {len(hotels)} hotels")
-            return [h for h in hotels if isinstance(h, dict)]
+            return hotels
     except Exception as e:
         _log(f"[radius] load coordinate cache failed: {e}")
     return None
@@ -2044,11 +2832,21 @@ def _haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     return 2 * r * math.asin(math.sqrt(a))
 
 
-def _hotels_within_radius(query: str, radius_km: int, primary_language: Optional[str] = None) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+def _hotels_within_radius(
+    query: str,
+    radius_km: int,
+    primary_language: Optional[str] = None,
+    enabled_providers: Optional[List[str]] = None,
+) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
     lat, lng, source = _geocode_location(query)
     radius = max(1, min(50, int(radius_km or DEFAULT_RADIUS_KM)))
     hotels = []
-    for h in _all_hotels_for_radius(primary_language):
+    radius_hotels = (
+        _all_hotels_for_radius(primary_language)
+        if enabled_providers is None
+        else _all_hotels_for_radius(primary_language, enabled_providers)
+    )
+    for h in radius_hotels:
         hlat = _optional_float(h.get("lat"))
         hlng = _optional_float(h.get("lng"))
         if hlat is None or hlng is None:
@@ -2058,7 +2856,10 @@ def _hotels_within_radius(query: str, radius_km: int, primary_language: Optional
             item = dict(h)
             item["distance_km"] = round(distance, 2)
             hotels.append(item)
-    hotels.sort(key=lambda x: (float(x.get("distance_km") or 9999), str(x.get("code") or "")))
+    hotels.sort(key=lambda x: (
+        float(x["distance_km"]) if x.get("distance_km") is not None else 9999.0,
+        str(x.get("code") or ""),
+    ))
     center = {"lat": round(lat, 7), "lng": round(lng, 7), "source": source, "radius_km": radius}
     return center, hotels
 
@@ -2106,6 +2907,11 @@ def _apply_payload_to_config(cfg: AppConfig, payload: Dict[str, Any]) -> None:
     cfg.search_mode = str(payload.get("search_mode", getattr(cfg, "search_mode", DEFAULT_SEARCH_MODE)) or DEFAULT_SEARCH_MODE)
     if cfg.search_mode not in {"area", "radius"}:
         cfg.search_mode = DEFAULT_SEARCH_MODE
+    providers = payload.get("enabled_providers", getattr(cfg, "enabled_providers", DEFAULT_ENABLED_PROVIDERS))
+    if isinstance(providers, list):
+        cfg.enabled_providers = [provider for provider in providers if provider in SUPPORTED_PROVIDERS]
+    if not cfg.enabled_providers:
+        raise ValueError("Please enable at least one hotel brand / 请至少启用一个酒店品牌")
     cfg.radius_query = str(payload.get("radius_query", getattr(cfg, "radius_query", "")) or "")
     cfg.radius_lat = _optional_float(payload.get("radius_lat", getattr(cfg, "radius_lat", None)))
     cfg.radius_lng = _optional_float(payload.get("radius_lng", getattr(cfg, "radius_lng", None)))
@@ -2140,6 +2946,8 @@ def _apply_payload_to_config(cfg: AppConfig, payload: Dict[str, Any]) -> None:
         1,
         3,
     )
+    if "adaptive_backoff_enabled" in payload:
+        cfg.adaptive_backoff_enabled = bool(payload["adaptive_backoff_enabled"])
     cfg.people = _int_from_payload(payload, "people", cfg.people, 1, 5)
     cfg.rooms = _int_from_payload(payload, "rooms", cfg.rooms, 1, 9)
 
@@ -2204,6 +3012,7 @@ def _apply_payload_to_config(cfg: AppConfig, payload: Dict[str, Any]) -> None:
 def start() -> Response:
         global _worker_thread, _RUN_REQUESTED
         payload = request.get_json(force=True, silent=True) or {}
+        run_once = bool(payload.get("run_once", False))
         restarted = False
 
         if _worker_thread and _worker_thread.is_alive():
@@ -2248,9 +3057,19 @@ def start() -> Response:
         with _RESULTS_LOCK:
             global _LAST_RESULTS
             _LAST_RESULTS = []
+        with _PROGRESS_LOCK:
+            _PROGRESS["backoff_multiplier"] = 1
+            _PROGRESS["unknown_ratio_percent"] = 0
+            _PROGRESS["consecutive_unhealthy_rounds"] = 0
+            _PROGRESS["effective_interval_sec"] = int(_CONFIG.loop_interval_seconds)
         clear_alert_state()
 
-        _worker_thread = threading.Thread(target=_worker_loop, name="checker-thread", daemon=True)
+        _worker_thread = threading.Thread(
+            target=_worker_loop,
+            args=(run_once,),
+            name="checker-thread",
+            daemon=True,
+        )
         _worker_thread.start()
         _log("Started worker.")
         _log(f"{APP_NAME} {APP_VERSION} · Author: {APP_AUTHOR}")
@@ -2262,7 +3081,14 @@ def start() -> Response:
         except Exception as e:
             _log(f"[start] could not send start notifications: {e}")
 
-        return jsonify({"ok": True, "message": "restarted" if restarted else "started", "restarted": restarted, "config": _public_config_dict(_CONFIG)})
+        message = "scan_once_started" if run_once else ("restarted" if restarted else "started")
+        return jsonify({
+            "ok": True,
+            "message": message,
+            "restarted": restarted,
+            "run_once": run_once,
+            "config": _public_config_dict(_CONFIG),
+        })
 
 def stop() -> Response:
         global _worker_thread, _RUN_REQUESTED
@@ -2281,6 +3107,10 @@ def stop() -> Response:
             _PROGRESS["wait_elapsed_sec"] = 0
             _PROGRESS["round_started"] = 0.0
             _PROGRESS["round_started_mono"] = 0.0
+            _PROGRESS["backoff_multiplier"] = 1
+            _PROGRESS["unknown_ratio_percent"] = 0
+            _PROGRESS["consecutive_unhealthy_rounds"] = 0
+            _PROGRESS["effective_interval_sec"] = 0
         global _UPTIME_STARTED, _UPTIME_STARTED_MONO
         _UPTIME_STARTED = None
         _UPTIME_STARTED_MONO = None
@@ -2447,7 +3277,28 @@ def status() -> Response:
             "action_age_sec": action_age_sec,
             "notification_status": notification_status_snapshot(cfg),
             "availability_logs": availability_log_snapshot(),
+            "hotel_catalog": _catalog_status_snapshot(),
+            "provider_catalog": {**_db_status_snapshot(), "checking": _PROVIDER_DATABASE_LOCK.locked()},
         })
+
+
+def hotel_info() -> Response:
+        code = str(request.args.get("code") or "").strip()
+        language = _normalize_primary_language(request.args.get("language") or DEFAULT_PRIMARY_LANGUAGE)
+        try:
+            if re.fullmatch(r"\d{1,5}", code):
+                info = _get_hotel_info(code, language)
+            else:
+                hotel = _db_load_hotel(code, language)
+                if not hotel:
+                    raise ValueError("hotel is not present in the local database")
+                info = _get_provider_hotel_info(hotel, language)
+            return jsonify({"ok": True, "info": info})
+        except ValueError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        except Exception as exc:
+            _log(f"[hotel-info] {code}/{language}: {exc}")
+            return jsonify({"ok": False, "error": "official hotel information is temporarily unavailable"}), 502
 
 
 def health() -> Response:
@@ -2465,6 +3316,34 @@ def update_status() -> Response:
         with _UPDATE_LOCK:
             data = dict(_UPDATE_STATUS)
         return jsonify({"ok": True, "update": data})
+
+
+def update_check() -> Response:
+        _check_pypi_latest_async()
+        with _UPDATE_LOCK:
+            data = dict(_UPDATE_STATUS)
+        return jsonify({"ok": True, "update": data}), 202
+
+
+def hotel_catalog_status() -> Response:
+        return jsonify({"ok": True, "catalog": _catalog_status_snapshot()})
+
+
+def hotel_catalog_refresh() -> Response:
+        return jsonify({"ok": True, "catalog": _request_catalog_refresh(force=True)}), 202
+
+
+def hotel_catalog_acknowledge() -> Response:
+        return jsonify({"ok": True, "catalog": _acknowledge_new_hotels()})
+
+
+def provider_catalog_status() -> Response:
+        return jsonify({"ok": True, **_db_status_snapshot(), "checking": _PROVIDER_DATABASE_LOCK.locked()})
+
+
+def provider_catalog_refresh() -> Response:
+        started = _request_provider_database_refresh(force=True)
+        return jsonify({"ok": True, "started": started, "checking": True}), 202
 
 
 def upgrade() -> Response:
@@ -2495,9 +3374,69 @@ def area_hotels() -> Response:
             return jsonify({"ok": False, "error": "region_id is required"}), 400
         detail_id = str(payload.get("detail_id") or "")
         primary_language = _normalize_primary_language(payload.get("primary_language", DEFAULT_PRIMARY_LANGUAGE))
+        requested_providers = payload.get("providers", DEFAULT_ENABLED_PROVIDERS)
+        providers = [provider for provider in requested_providers if provider in SUPPORTED_PROVIDERS] if isinstance(requested_providers, list) else list(DEFAULT_ENABLED_PROVIDERS)
+        if not providers:
+            return jsonify({"ok": False, "error": "at least one hotel brand is required"}), 400
         try:
-            hotels = _hotels_for_area_selection(region_id, detail_id, primary_language)
-            return jsonify({"ok": True, "hotels": hotels, "count": len(hotels)})
+            hotels: List[Dict[str, Any]] = []
+            provider_counts: Dict[str, int] = {}
+            provider_errors: Dict[str, str] = {}
+            if "toyoko" in providers:
+                try:
+                    toyoko_hotels = _hotels_for_area_selection(region_id, detail_id, primary_language)
+                    hotels.extend(toyoko_hotels)
+                    provider_counts["toyoko"] = len(toyoko_hotels)
+                except Exception as exc:
+                    provider_errors["toyoko"] = str(exc)
+            database_providers = [
+                provider for provider in ("routeinn", "dormy", "mystays", "daiwa") if provider in providers
+            ]
+            if database_providers:
+                prefecture_id = _prefecture_id_for_detail(region_id, detail_id)
+                detail_area_id = None
+                if detail_id.startswith("area-"):
+                    try:
+                        detail_area_id = int(detail_id.split("-", 1)[1])
+                    except ValueError:
+                        pass
+                if not any(_db_provider_count(provider) for provider in database_providers):
+                    _refresh_provider_database(force=False)
+                for provider in database_providers:
+                    try:
+                        if detail_area_id == 5287:
+                            provider_hotels = [
+                                hotel for hotel in _db_load_hotels(
+                                    provider, primary_language, region_id=region_id, prefecture_id=13
+                                )
+                                if int(hotel.get("detail_area_id") or 0) != 469
+                            ]
+                        else:
+                            provider_hotels = _db_load_hotels(
+                                provider,
+                                primary_language,
+                                region_id=region_id,
+                                prefecture_id=prefecture_id,
+                                detail_area_id=detail_area_id,
+                            )
+                        hotels.extend(provider_hotels)
+                        provider_counts[provider] = len(provider_hotels)
+                    except Exception as exc:
+                        provider_errors[provider] = str(exc)
+            provider_order = {provider: index for index, provider in enumerate(SUPPORTED_PROVIDERS)}
+            hotels.sort(key=lambda hotel: (
+                provider_order.get(str(hotel.get("provider") or ""), 9),
+                str(hotel.get("display_code") or hotel.get("code") or ""),
+            ))
+            if not hotels and provider_errors:
+                raise RuntimeError("; ".join(f"{key}: {value}" for key, value in provider_errors.items()))
+            return jsonify({
+                "ok": True,
+                "hotels": hotels,
+                "count": len(hotels),
+                "provider_counts": provider_counts,
+                "provider_errors": provider_errors,
+            })
         except Exception as e:
             _log(f"[area] load hotels failed: {e}")
             return jsonify({"ok": False, "error": str(e)}), 500
@@ -2508,27 +3447,45 @@ def radius_hotels() -> Response:
         query = str(payload.get("query") or "").strip()
         radius_km = max(1, min(50, int(payload.get("radius_km") or DEFAULT_RADIUS_KM)))
         primary_language = _normalize_primary_language(payload.get("primary_language", DEFAULT_PRIMARY_LANGUAGE))
+        providers = payload.get("providers", DEFAULT_ENABLED_PROVIDERS)
+        if not isinstance(providers, list):
+            providers = list(DEFAULT_ENABLED_PROVIDERS)
+        providers = [provider for provider in providers if provider in SUPPORTED_PROVIDERS]
         if not query:
             return jsonify({"ok": False, "error": "address or coordinates are required"}), 400
+        if not providers:
+            return jsonify({"ok": False, "error": "at least one hotel brand is required"}), 400
         try:
-            center, hotels = _hotels_within_radius(query, radius_km, primary_language)
-            return jsonify({"ok": True, "center": center, "hotels": hotels, "count": len(hotels)})
+            center, hotels = _hotels_within_radius(query, radius_km, primary_language, providers)
+            provider_counts = {
+                provider: sum(1 for hotel in hotels if str(hotel.get("provider") or "toyoko") == provider)
+                for provider in providers
+            }
+            return jsonify({
+                "ok": True,
+                "center": center,
+                "hotels": hotels,
+                "count": len(hotels),
+                "provider_counts": provider_counts,
+            })
         except Exception as e:
             _log(f"[radius] load hotels failed: {e}")
             return jsonify({"ok": False, "error": str(e)}), 500
 
 
  # ========= Startup Helper: Port and Browser =========
-def _find_free_port(preferred: int = 4170) -> int:
+def _find_free_port(preferred: int = 4170, host: str = "127.0.0.1") -> int:
         s = socket.socket()
         try:
-            s.bind(("127.0.0.1", preferred))
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.bind((host, preferred))
             s.close()
             return preferred
         except OSError:
             s.close()
         s = socket.socket()
-        s.bind(("127.0.0.1", 0))
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind((host, 0))
         port = s.getsockname()[1]
         s.close()
         return port

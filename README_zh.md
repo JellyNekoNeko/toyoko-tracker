@@ -88,7 +88,8 @@ pip install --upgrade toyoko-tracker
 只有当你想使用浏览器兼容引擎时，才需要安装 Chromium：
 
 ```bash
-playwright install chromium
+pip install --upgrade "toyoko-tracker[playwright]"
+python -m playwright install chromium
 ```
 
 ---
@@ -111,7 +112,34 @@ toyoko-tracker
 
 ---
 
-### 1.6 版本信息
+### 1.6 可选：手机与局域网访问
+
+建议先安装轻量的手机模式可选依赖，其中包含 Waitress WSGI 服务和本地二维码生成器：
+
+```bash
+pip install --upgrade "toyoko-tracker[mobile]"
+```
+
+然后选择一种开启方式：
+
+1. 打开 **界面设定 → 手机访问**，启用局域网访问，再重启东横酱。
+2. 或直接运行 `toyoko-tracker --lan`。
+3. 在 Mac 的 **界面设定**中扫描二维码，或在手机打开显示的局域网地址。
+4. 如果配对码没有自动填入，手动输入界面中显示的配对码。
+
+局域网设备在配对成功前无法访问任何检索接口。错误配对会触发频率限制；登录会话使用 HttpOnly Cookie；更换配对码会让已经登录的手机会话失效；手机访问开关只能从主机 Mac 修改。请只在可信任的家庭或个人网络使用，不要把端口直接暴露到公网。
+
+若要恢复仅限本机访问，可关闭开关并重启，或运行：
+
+```bash
+toyoko-tracker --local-only
+```
+
+WebUI 已包含 PWA manifest，可添加到手机主屏幕。完整的 Service Worker 能力需要 HTTPS 安全上下文；普通局域网 HTTP 仍可使用响应式界面、配对、启动、停止及查看结果。后续若需要在外出时安全访问，建议接入 Tailscale HTTPS。
+
+---
+
+### 1.7 版本信息
 
 - 当前版本：`v0.6.0`
 - App 名称：`东横酱 Toyoko Chan`
@@ -125,8 +153,10 @@ toyoko-tracker
 
 Toyoko Tracker 支持两种选择酒店的方式：
 
-1. **区域模式**：选择大区域和可选的详细区域
-2. **方圆模式**：输入地名、地址或坐标，并选择 1–50 公里半径
+1. **区域模式**：选择大区域和可选的详细区域，支持全部已启用酒店来源
+2. **方圆模式**：输入地名、地址或坐标，并选择 1–50 公里半径；按界面中勾选的全部酒店来源检索
+
+搜索条件中可以分别启用 **东横 / Toyoko Inn**、**露樱 / Route Inn Hotels**、**多美迎 / Dormy Inn**、**MYSTAYS Hotel** 和 **大和ROYNET / Daiwa Roynet**。露樱来源统一包含露樱、露樱Grandia、Grandvrio 与 ARK；每个来源都使用独立的官网清单和预订接口适配器。
 
 ---
 
@@ -161,6 +191,19 @@ Toyoko Tracker 支持两种选择酒店的方式：
 5. 在地图中确认并勾选需要监控的酒店
 
 坐标会在本地直接解析；地名和地址通过 OpenStreetMap/Nominatim 转换为坐标。
+
+露樱目前不加入方圆坐标池，请使用区域模式选择露樱酒店。
+
+---
+
+### 2.3 酒店数据自动更新
+
+- 程序启动后会在独立后台任务中核对东横 INN 官网酒店清单，不阻塞 WebUI 或空房检索
+- 官网清单每 6 小时检查一次，方圆检索坐标缓存有效期为 24 小时
+- 缓存过期时仍可继续使用旧数据，成功刷新后再原子替换，避免网络异常导致酒店列表消失
+- 新开业酒店会与上次官网快照进行编号比对，并在区域酒店选择器中提示
+- 即将开业酒店、最后检查时间、缓存状态及坐标完整度会显示在酒店数据状态条中
+- 可点击 **刷新酒店数据 / Refresh** 立即发起一次后台检查
 
 ---
 
@@ -226,7 +269,8 @@ Toyoko Tracker 提供两种搜索引擎。
 需要先安装：
 
 ```bash
-playwright install chromium
+pip install --upgrade "toyoko-tracker[playwright]"
+python -m playwright install chromium
 ```
 
 ---
@@ -693,7 +737,8 @@ pip install --upgrade toyoko-tracker
 安装 Chromium：
 
 ```bash
-playwright install chromium
+pip install --upgrade "toyoko-tracker[playwright]"
+python -m playwright install chromium
 ```
 
 然后重新启动 Toyoko Tracker。

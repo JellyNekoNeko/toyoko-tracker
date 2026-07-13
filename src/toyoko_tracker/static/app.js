@@ -3,8 +3,71 @@
             const EDIT_TS = {};
             let PROGRESS_ANIM_FRAME = null;
             let LAST_PROGRESS_STATE = null;
-            function markEdited(id){ EDIT_TS[id] = Date.now(); }
+            let LAST_RUNNING = false;
+            let LAST_RESULTS = [];
+            let RESULT_FILTER = 'all';
+            let RESULT_SORT = 'default';
+            let RESULT_QUERY = '';
+            let RESULT_CHANGED_CODES = new Set();
+            const RESULT_VIEW_PREFS_KEY = 'toyoko-chan-result-view-v1';
+            let FORM_DIRTY = false;
+            let LAST_RESULTS_FINGERPRINT = '';
+            let RESULT_CHANGE_CLASSES = new Map();
+            let RESULT_CHANGE_TOKEN = 0;
+            let STATUS_REFRESH_IN_FLIGHT = false;
+            let CONNECTION_ONLINE = true;
+            let LAST_STATUS_UPDATED_AT = null;
+            const HOTEL_INFO_CACHE = new Map();
+            const HOTEL_INFO_REQUESTS = new Map();
+            let HOTEL_INFO_SHOW_TIMER = null;
+            let HOTEL_INFO_HIDE_TIMER = null;
+            let ACTIVE_HOTEL_INFO_TRIGGER = null;
+            let HOTEL_INFO_MAP = null;
+            let LAST_CATALOG_STATUS = null;
+            let LAST_PROVIDER_CATALOG_STATUS = null;
+            let LAST_MOBILE_ACCESS_STATUS = null;
+            let MOBILE_CONNECTION_MODE = localStorage.getItem('toyoko-chan-mobile-connection-v1') || 'lan';
+            const APP_VIEW_KEY = 'toyoko-chan-active-view-v1';
+            const SIDEBAR_COLLAPSED_KEY = 'toyoko-chan-sidebar-collapsed-v1';
+            const THEME_KEY = 'toyoko-chan-theme-v1';
+            const LANGUAGE_KEY = 'toyoko-chan-language-v1';
+            const GUIDE_SEEN_KEY = 'toyoko-chan-guide-seen-version';
+            const APP_VIEWS = ['search', 'monitor', 'search-settings', 'push-settings', 'interface'];
+            let ACTIVE_APP_VIEW = 'search';
+            let THEME_PREFERENCE = 'system';
+            let GUIDE_STEP = 0;
+            let GUIDE_AUTO_OPEN = false;
+            let UPDATE_DIALOG_AUTO_OPEN = false;
+            let UPDATE_AUTO_PROMPTED_VERSION = '';
+            function markEdited(id){ EDIT_TS[id] = Date.now(); setConfigDirty(true); }
             function recentlyEdited(id, ms=10000){ return EDIT_TS[id] && (Date.now() - EDIT_TS[id] < ms); }
+            function setConfigDirty(dirty){
+              FORM_DIRTY = !!dirty;
+              const state = document.getElementById('dock-config-state');
+              if (!state) return;
+              state.textContent = tx(FORM_DIRTY ? 'configPending' : 'configReady');
+              state.className = `config-state ${FORM_DIRTY ? 'dirty' : 'clean'}`;
+            }
+            function setConnectionOnline(online){
+              CONNECTION_ONLINE = !!online;
+              const state = document.getElementById('connection-state');
+              if (state) {
+                state.textContent = tx(online ? 'connectionOnline' : 'connectionOffline');
+                state.className = `connection-state ${online ? 'online' : 'offline'}`;
+              }
+              document.querySelector('.command-dock')?.classList.toggle('offline', !online);
+            }
+            function updateResultsTimestamp(){
+              const element = document.getElementById('results_updated_at');
+              if (!element) return;
+              if (!LAST_STATUS_UPDATED_AT) {
+                element.textContent = tx('neverUpdated');
+                return;
+              }
+              const time = LAST_STATUS_UPDATED_AT.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+              element.textContent = fmt('lastUpdated', {time});
+              element.setAttribute('datetime', LAST_STATUS_UPDATED_AT.toISOString());
+            }
             const UI18N = {
               zh_cn: {
                 appName: '东横酱 / Toyoko Chan',
@@ -15,10 +78,10 @@
                 smoking: '吸烟 / Smoking', roomType: '房型 / Room Type', membership: '会员状态 / Membership',
                 areaPicker: '区域酒店搜索 / Area Hotel Picker', region: '大区域 / Region', detailArea: '详细区域 / Detail Area',
                 loadHotels: '加载酒店 / Load Hotels', selectAll: '全选 / Select All', selectNone: '全不选 / Select None',
-                areaHint: '选择大区域；详细区域可不选，默认加载整个大区域。勾选酒店后直接点击 Start 搜索。',
-                areaSelected: '已选择大区域；可直接加载全部，或选择详细区域。勾选酒店后直接点击 Start 搜索。',
+                areaHint: '选择大区域；详细区域可不选，默认加载整个大区域。勾选酒店后直接点击启动。',
+                areaSelected: '已选择大区域；可直接加载全部，或选择详细区域。勾选酒店后直接点击启动。',
                 selectRegion: '请选择 / Select Region', selectRegionFirst: '先选择大区域 / Select a region first',
-                filterPlaceholder: '过滤酒店主语言/英文名或编号 / Filter by primary/English hotel name or code',
+                filterPlaceholder: '按酒店名或编号过滤 / Filter by hotel name or code',
                 noHotels: '尚未加载酒店 / No hotels loaded yet', noMatchingHotels: '没有匹配酒店 / No matching hotels',
                 openMap: '打开地图 / Open Map', history: '搜索记录 / Search History', refresh: '刷新 / Refresh', clear: '清空 / Clear',
                 historyHint: '最多显示最近 10 条；完全相同设定不会重复记录。', noHistory: '暂无搜索记录 / No history yet',
@@ -80,10 +143,10 @@
                 smoking: '吸菸 / Smoking', roomType: '房型 / Room Type', membership: '會員狀態 / Membership',
                 areaPicker: '區域飯店搜尋 / Area Hotel Picker', region: '大區域 / Region', detailArea: '詳細區域 / Detail Area',
                 loadHotels: '載入飯店 / Load Hotels', selectAll: '全選 / Select All', selectNone: '全不選 / Select None',
-                areaHint: '選擇大區域；詳細區域可不選，預設載入整個大區域。勾選飯店後直接點 Start 搜尋。',
-                areaSelected: '已選擇大區域；可直接載入全部，或選擇詳細區域。勾選飯店後直接點 Start 搜尋。',
+                areaHint: '選擇大區域；詳細區域可不選，預設載入整個大區域。勾選飯店後直接點啟動。',
+                areaSelected: '已選擇大區域；可直接載入全部，或選擇詳細區域。勾選飯店後直接點啟動。',
                 selectRegion: '請選擇 / Select Region', selectRegionFirst: '先選擇大區域 / Select a region first',
-                filterPlaceholder: '過濾飯店主語言/英文名或編號 / Filter by primary/English hotel name or code',
+                filterPlaceholder: '依飯店名稱或編號篩選 / Filter by hotel name or code',
                 noHotels: '尚未載入飯店 / No hotels loaded yet', noMatchingHotels: '沒有符合的飯店 / No matching hotels',
                 openMap: '開啟地圖 / Open Map', history: '搜尋記錄 / Search History', refresh: '重新整理 / Refresh', clear: '清空 / Clear',
                 historyHint: '最多顯示最近 10 筆；完全相同設定不會重複記錄。', noHistory: '暫無搜尋記錄 / No history yet',
@@ -145,10 +208,10 @@
                 smoking: '喫煙条件 / Smoking', roomType: '部屋タイプ / Room Type', membership: '会員状態 / Membership',
                 areaPicker: 'エリア別ホテル検索 / Area Hotel Picker', region: '大エリア / Region', detailArea: '詳細エリア / Detail Area',
                 loadHotels: 'ホテル読込 / Load Hotels', selectAll: 'すべて選択 / Select All', selectNone: 'すべて解除 / Select None',
-                areaHint: '大エリアを選択してください。詳細エリアは任意です。ホテルを選んで Start を押すと検索します。',
+                areaHint: '大エリアを選択してください。詳細エリアは任意です。ホテルを選んで開始を押すと検索します。',
                 areaSelected: '大エリアを選択済みです。全体を読み込むか、詳細エリアを選択できます。',
                 selectRegion: '選択してください / Select Region', selectRegionFirst: '先に大エリアを選択 / Select a region first',
-                filterPlaceholder: '主言語/英語のホテル名または番号で絞り込み / Filter by primary/English hotel name or code',
+                filterPlaceholder: 'ホテル名または番号で絞り込み / Filter by hotel name or code',
                 noHotels: 'ホテル未読込 / No hotels loaded yet', noMatchingHotels: '一致するホテルなし / No matching hotels',
                 openMap: '地図を開く / Open Map', history: '検索履歴 / Search History', refresh: '更新 / Refresh', clear: 'クリア / Clear',
                 historyHint: '直近 10 件まで表示。同一設定は重複保存されません。', noHistory: '履歴なし / No history yet',
@@ -210,10 +273,10 @@
                 smoking: '흡연 조건 / Smoking', roomType: '객실 타입 / Room Type', membership: '회원 상태 / Membership',
                 areaPicker: '지역 호텔 검색 / Area Hotel Picker', region: '대지역 / Region', detailArea: '상세 지역 / Detail Area',
                 loadHotels: '호텔 불러오기 / Load Hotels', selectAll: '전체 선택 / Select All', selectNone: '전체 해제 / Select None',
-                areaHint: '대지역을 선택하세요. 상세 지역은 선택하지 않아도 됩니다. 호텔을 선택한 뒤 Start를 누르면 검색합니다.',
+                areaHint: '대지역을 선택하세요. 상세 지역은 선택하지 않아도 됩니다. 호텔을 선택한 뒤 시작을 누르면 검색합니다.',
                 areaSelected: '대지역이 선택되었습니다. 전체를 불러오거나 상세 지역을 선택할 수 있습니다.',
                 selectRegion: '선택하세요 / Select Region', selectRegionFirst: '먼저 대지역 선택 / Select a region first',
-                filterPlaceholder: '주 언어/영어 호텔명 또는 번호로 필터 / Filter by primary/English hotel name or code',
+                filterPlaceholder: '호텔명 또는 번호로 필터 / Filter by hotel name or code',
                 noHotels: '호텔을 아직 불러오지 않음 / No hotels loaded yet', noMatchingHotels: '일치하는 호텔 없음 / No matching hotels',
                 openMap: '지도 열기 / Open Map', history: '검색 기록 / Search History', refresh: '새로고침 / Refresh', clear: '비우기 / Clear',
                 historyHint: '최근 10개까지 표시합니다. 완전히 같은 설정은 중복 저장되지 않습니다.', noHistory: '검색 기록 없음 / No history yet',
@@ -269,10 +332,28 @@
             };
             const UI18N_EXTRA = {
               zh_cn: {
+                navSearch: '空房检索 / Vacancy Search', navMonitor: '空房监控 / Vacancy Monitor', interfaceSettings: '界面设定 / Interface Settings',
+                collapseNav: '收起导航 / Collapse navigation', expandNav: '展开导航 / Expand navigation',
+                guideOpen: '使用向导 / Guide', guideClose: '关闭向导 / Close guide', guideTitle: '东横酱使用向导 / Toyoko Chan Guide',
+                guideSkip: '稍后 / Skip', guideBack: '上一步 / Back', guideNext: '下一步 / Next', guideFinish: '完成 / Finish', guideProgress: '向导进度 / Guide progress',
+                guideStep1Title: '认识界面 / Interface Overview', guideStep1Body: '使用左侧导航切换工作区；顶部操作条始终提供单次检索、启动和停止。 / Use the sidebar to switch workspaces; the top command bar keeps scan, start, and stop within reach.', guideStep1Tip: '提示：启动后会自动进入空房监控。 / Tip: Starting a scan automatically opens Vacancy Monitor.',
+                guideStep2Title: '搜索酒店 / Find Hotels', guideStep2Body: '先设定日期、人数、房型和会员状态，再选择酒店品牌。通过区域或方圆模式加载酒店，并勾选需要检索的对象。 / Set dates, guests, room and membership first, then choose brands. Load hotels by area or radius and check the hotels to scan.', guideStep2Tip: '提示：酒店选择会随搜索记录保存，下次启动可自动恢复。 / Tip: Hotel selections are saved with search history and can be restored next time.',
+                guideStep3Title: '查看空房结果 / Review Results', guideStep3Body: '空房监控会集中显示有房、无房和需确认状态，以及价格、剩余数量和房型。酒店名与房型可打开官网详情或预订页。 / Vacancy Monitor shows available, unavailable and check states with price, quantity and room type. Hotel and room links open official detail or booking pages.', guideStep3Tip: '提示：使用结果筛选、搜索和变化标签，可以快速找到最新变化。 / Tip: Filters, search and the Changes tab help surface the latest updates.',
+                guideStep4Title: '搜索设定 / Search Settings', guideStep4Body: 'HTTP/API 适合日常轻量检索；智能并行用于较多酒店，检索节奏控制轮次、单店间隔和随机抖动。 / HTTP/API is the lightweight daily choice. Smart Parallel helps with larger lists, while Scan Cadence controls rounds, hotel delay and jitter.', guideStep4Tip: '建议：每轮 120 秒以上，并保留自适应退避，降低异常流量风险。 / Recommended: use 120+ second rounds and keep Adaptive Backoff enabled.',
+                guideStep5Title: '推送设定 / Push Settings', guideStep5Body: '先选择需要提醒的事件，再启用 Bark、Server酱、Telegram、本地通知或邮件。每个渠道都可独立配置。 / Choose notification events, then enable Bark, Server Chan, Telegram, Local Notifications or Email. Each channel is configured independently.', guideStep5Tip: '提示：正式监控前先发送测试通知，确认设备和系统权限正常。 / Tip: Send a test notification before monitoring to verify the device and system permissions.',
+                workspace: '空房追踪工作区 / Vacancy workspace', sidebarHotelCount: '{count} 家酒店 / {count} hotels',
+                searchViewHelp: '设定住宿条件、酒店范围并开始检索。 / Set stay conditions, hotel scope, and start searching.',
+                monitorViewHelp: '查看运行状态、空房结果与实时推送状态。 / Review live status, vacancy results, and notifications.',
+                searchSettingsViewHelp: '调整检索引擎、并行策略与访问节奏。 / Tune the engine, parallel strategy, and scan cadence.',
+                pushSettingsViewHelp: '选择提醒事件并配置通知渠道。 / Choose alert events and configure notification channels.',
+                interfaceViewHelp: '选择主语言与显示主题；偏好仅保存在本机浏览器。 / Choose language and theme; preferences stay in this browser.',
+                theme: '主题 / Theme', language: '语言 / Language', languageHelp: '主语言始终与英语对照显示。 / The primary language is always paired with English.',
+                themeHelp: '可跟随系统，也可固定浅色或深色主题。 / Follow the system or choose a fixed light or dark theme.',
+                themeSystem: '跟随系统 / System', themeLight: '浅色 / Light', themeDark: '深色 / Dark',
                 areaMode: '区域模式 / Area', radiusMode: '方圆模式 / Radius',
                 placeAddressCoordinates: '地名地址或者坐标 / Place, Address, or Coordinates',
                 radius: '方圆半径 / Radius', loadNearby: '查找附近酒店 / Load Nearby',
-                radiusHelp: '地址会优先通过 OpenStreetMap/Nominatim 解析；坐标可直接本地解析。 / Addresses use OpenStreetMap/Nominatim first; coordinates are parsed locally.',
+                radiusHelp: '地址通过 OpenStreetMap/Nominatim 解析，并按上方已选择的酒店品牌检索。 / Addresses use OpenStreetMap/Nominatim and the hotel brands selected above.',
                 selectedHotelMap: '已选酒店地图 / Selected Hotel Map',
                 selectedHotelMapHint: '地图会显示当前已勾选且带坐标的酒店。 / The map shows checked hotels that have coordinates.',
                 noSelectedHotelCoords: '已选酒店没有坐标。 / Selected hotels do not have coordinates.',
@@ -319,16 +400,86 @@
                 upgradingMessage: '正在后台执行 pip install --upgrade toyoko-tracker / Running pip install --upgrade toyoko-tracker in the background',
                 updatingButton: '升级中 / Updating', upgradedTitle: '升级完成 / Update finished',
                 upgradedMessage: '请重启程序以使用新版本 / Please restart the app to use the new version.',
+                updateOpen: '软件更新 / Software Update', updateClose: '关闭更新窗口 / Close update dialog',
+                updateDialogTitle: '软件更新 / Software Update', updateDialogKicker: '版本与项目 / VERSION & PROJECT',
+                currentVersionLabel: '当前版本 / Current Version', latestVersionLabel: '最新版本 / Latest Version',
+                versionInformation: '版本信息 / Version Information',
+                authorLabel: '作者 / Author', githubLabel: '源代码 / Source Code', checkAgain: '重新检查 / Check Again',
+                checkingUpdate: '正在检查更新 / Checking for updates', checkingUpdateMessage: '正在后台连接 PyPI，不会影响空房检索。 / Contacting PyPI in the background without interrupting vacancy scans.',
+                upToDate: '已是最新版 / Up to date', upToDateMessage: '当前安装版本已经是 PyPI 上的最新版本。 / The installed version is the latest version on PyPI.',
+                updateAvailableDetail: '有新版本可用，可以立即在后台更新。 / A new version is available and can be installed in the background.',
+                updateFailedTitle: '检查更新失败 / Update check failed', updateFailedMessage: '暂时无法取得最新版本信息，请稍后重新检查。 / Latest version information is unavailable. Try again later.',
+                updateUnknown: '尚未检查 / Not checked yet',
                 currentAction: '状态 / Current', memberPrice: '会员价 / Member', memberPriceUnknown: '会员价未知 / Member price unknown',
                 nonMemberPrice: '非会员价 / Non-member', sentOk: '发送成功 / sent OK',
                 terminalNotifierSentOk: 'terminal-notifier 发送成功 / terminal-notifier sent OK',
-                osascriptSentOk: 'osascript 发送成功 / osascript sent OK'
+                osascriptSentOk: 'osascript 发送成功 / osascript sent OK',
+                scanOnce: '单次检索 / Scan Once', scanningOnce: '单次检索已启动 / Single scan started.', restart: '重新启动 / Restart',
+                dockNoHotels: '尚未选择酒店 / No hotels selected', dockSelected: '已选择 {count} 家酒店 / {count} hotels selected',
+                selectedSummary: '已选 {selected} / {total} / Selected', invalidDates: '退房日期必须晚于入住日期。 / Check-out must be after check-in.',
+                allFilter: '全部 / All', sort: '排序 / Sort', sortDefault: '默认 / Default', sortStatus: '状态 / Status', sortPrice: '价格 / Price', sortName: '酒店名 / Hotel', sortDistance: '距离 / Distance',
+                showingResults: '显示 {shown} / {total} / Showing', noFilteredResults: '当前筛选没有结果 / No results match this filter',
+                configReady: '配置已同步 / Configuration ready', configPending: '有尚未应用的修改 / Changes apply on next start',
+                connectionOnline: '连接正常 / Connected', connectionOffline: '连接中断，正在重连 / Reconnecting',
+                snapshotHotels: '酒店 / Hotels', resultBecameAvailable: '{count} 家酒店出现空房 / {count} hotel(s) became available',
+                resultNoLongerAvailable: '{count} 家酒店已无房 / {count} hotel(s) no longer available',
+                resultRoomCountChanged: '{count} 家酒店房量有变化 / Room count changed at {count} hotel(s)',
+                changesFilter: '变化 / Changes', resultSearchPlaceholder: '搜索编号、酒店或房型 / Search code, hotel, or room',
+                refreshResults: '刷新 / Refresh', exportResults: '导出 CSV / Export',
+                lastUpdated: '更新于 {time} / Updated', neverUpdated: '尚未更新 / Never updated',
+                exportNoResults: '当前视图没有可导出的结果。 / No visible results to export.',
+                adaptiveBackoff: '启用自适应退避 / Adaptive Backoff',
+                adaptiveBackoffHelp: '访问异常达到 50% 时自动把下一轮间隔提高到 2 倍，连续异常最多 4 倍；恢复正常后自动回落。 / Automatically slows the next round to 2x when checks fail at 50% or more, up to 4x for consecutive unhealthy rounds.',
+                safety: '流量保护 / Safety', safetyNormal: '正常 / Normal',
+                safetyBackoff: '退避 {multiplier}× · 异常 {ratio}% / Backoff',
+                hotelInfo: '酒店信息 / Hotel Info', loadingHotelInfo: '正在加载官网信息 / Loading official information...',
+                hotelInfoUnavailable: '官网信息暂时无法加载 / Official information is unavailable.',
+                officialReference: '官方参考 / Official Reference', addressLabel: '地址 / Address', directionsLabel: '交通前往方式 / Directions',
+                byTrain: '乘坐电车 / By train', byCar: '驾车 / By car', byPlane: '乘坐飞机 / By plane',
+                openOfficial: '打开官网 / Open Official Page',
+                catalogTitle: '东横酒店数据 / Toyoko Hotel Data', catalogChecking: '正在核对东横官网酒店清单 / Checking Toyoko hotel list',
+                catalogFresh: '东横酒店数据已是最新 / Toyoko hotel data is current', catalogUpdated: '东横酒店数据已更新 / Toyoko hotel data updated',
+                catalogFailed: '后台更新失败，继续使用原缓存 / Refresh failed; using the previous cache',
+                catalogMeta: '日本营业酒店 {open} 家 · 坐标 {coords} 家 · {cache} · {checked}',
+                catalogCacheFresh: '缓存有效 / Cache fresh', catalogCacheStale: '缓存已过期 / Cache expired',
+                catalogNeverChecked: '尚未检查 / Never checked', catalogCheckedAt: '检查于 {time} / Checked',
+                catalogUpcoming: '即将开业 {count} 家 / {count} upcoming: {hotels}',
+                catalogNewTitle: '发现 {count} 家新开业酒店 / {count} newly opened hotel(s)',
+                catalogRefresh: '刷新酒店数据 / Refresh', catalogAcknowledge: '知道了 / Dismiss',
+                catalogRefreshQueued: '已在后台开始刷新 / Background refresh started',
+                catalogUnresolved: '其中 {count} 家暂缺坐标 / {count} hotel(s) still need coordinates',
+                hotelBrands: '酒店品牌 / Hotel Brands', toyokoProvider: '东横 / Toyoko Inn', routeinnProvider: '露樱 / Route Inn Hotels', dormyProvider: '多美迎 / Dormy Inn', mystaysProvider: 'MYSTAYS Hotel', daiwaProvider: '大和ROYNET / Daiwa Roynet',
+                routeinnProviderNote: '露樱包含露樱、露樱Grandia、Grandvrio、ARK / Route Inn includes Route Inn, Grandia, Grandvrio, and ARK.',
+                providerRequired: '请至少选择一个酒店品牌。 / Select at least one hotel brand.',
+                quickDates: '快捷日期 / Quick Dates', allBrands: '全部品牌 / All brands', selectedOnly: '仅看已选 / Selected only',
+                listView: '列表 / List', mapView: '地图 / Map', visibleHotels: '显示 {shown} / {total} 家酒店 / Showing {shown} of {total} hotels',
+                sortCode: '编号 / Code', decreasePeople: '减少人数 / Decrease people', increasePeople: '增加人数 / Increase people',
+                decreaseRooms: '减少房间 / Decrease rooms', increaseRooms: '增加房间 / Increase rooms',
+                toyokoShort: '东横', routeinnShort: '露樱', dormyShort: '多美迎', mystaysShort: 'MYSTAYS', daiwaShort: '大和ROYNET', partialProviderFailure: '部分品牌加载失败 / Some brands failed to load'
               },
               zh_tw: {
+                navSearch: '空房搜尋 / Vacancy Search', navMonitor: '空房監控 / Vacancy Monitor', interfaceSettings: '介面設定 / Interface Settings',
+                collapseNav: '收合導覽 / Collapse navigation', expandNav: '展開導覽 / Expand navigation',
+                guideOpen: '使用導覽 / Guide', guideClose: '關閉導覽 / Close guide', guideTitle: '東橫醬使用導覽 / Toyoko Chan Guide',
+                guideSkip: '稍後 / Skip', guideBack: '上一步 / Back', guideNext: '下一步 / Next', guideFinish: '完成 / Finish', guideProgress: '導覽進度 / Guide progress',
+                guideStep1Title: '認識介面 / Interface Overview', guideStep1Body: '使用左側導覽切換工作區；頂部操作列始終提供單次搜尋、啟動和停止。 / Use the sidebar to switch workspaces; the top command bar keeps scan, start, and stop within reach.', guideStep1Tip: '提示：啟動後會自動進入空房監控。 / Tip: Starting a scan automatically opens Vacancy Monitor.',
+                guideStep2Title: '搜尋飯店 / Find Hotels', guideStep2Body: '先設定日期、人數、房型和會員狀態，再選擇飯店品牌。透過區域或方圓模式載入並勾選飯店。 / Set dates, guests, room and membership first, then choose brands. Load hotels by area or radius and check the hotels to scan.', guideStep2Tip: '提示：飯店選擇會隨搜尋記錄保存，下次可自動還原。 / Tip: Hotel selections are saved with search history and can be restored next time.',
+                guideStep3Title: '查看空房結果 / Review Results', guideStep3Body: '空房監控會顯示有房、無房和需確認狀態，以及價格、剩餘數量和房型。飯店名與房型可開啟官網或預訂頁。 / Vacancy Monitor shows available, unavailable and check states with price, quantity and room type. Hotel and room links open official detail or booking pages.', guideStep3Tip: '提示：結果篩選、搜尋和變化標籤可快速找到最新變化。 / Tip: Filters, search and the Changes tab help surface the latest updates.',
+                guideStep4Title: '搜尋設定 / Search Settings', guideStep4Body: 'HTTP/API 適合日常輕量搜尋；智慧並行用於較多飯店，搜尋節奏控制輪次、單店間隔與隨機抖動。 / HTTP/API is the lightweight daily choice. Smart Parallel helps with larger lists, while Scan Cadence controls rounds, hotel delay and jitter.', guideStep4Tip: '建議：每輪 120 秒以上，並保留自適應退避。 / Recommended: use 120+ second rounds and keep Adaptive Backoff enabled.',
+                guideStep5Title: '推送設定 / Push Settings', guideStep5Body: '先選擇提醒事件，再啟用 Bark、Server醬、Telegram、本機通知或郵件。 / Choose notification events, then enable Bark, Server Chan, Telegram, Local Notifications or Email.', guideStep5Tip: '提示：正式監控前先發送測試通知。 / Tip: Send a test notification before monitoring to verify the device and system permissions.',
+                workspace: '空房追蹤工作區 / Vacancy workspace', sidebarHotelCount: '{count} 家飯店 / {count} hotels',
+                searchViewHelp: '設定住宿條件、飯店範圍並開始搜尋。 / Set stay conditions, hotel scope, and start searching.',
+                monitorViewHelp: '查看執行狀態、空房結果與即時推送狀態。 / Review live status, vacancy results, and notifications.',
+                searchSettingsViewHelp: '調整搜尋引擎、並行策略與存取節奏。 / Tune the engine, parallel strategy, and scan cadence.',
+                pushSettingsViewHelp: '選擇提醒事件並設定通知管道。 / Choose alert events and configure notification channels.',
+                interfaceViewHelp: '選擇主語言與顯示主題；偏好僅保存在本機瀏覽器。 / Choose language and theme; preferences stay in this browser.',
+                theme: '主題 / Theme', language: '語言 / Language', languageHelp: '主語言始終與英語對照顯示。 / The primary language is always paired with English.',
+                themeHelp: '可跟隨系統，也可固定淺色或深色主題。 / Follow the system or choose a fixed light or dark theme.',
+                themeSystem: '跟隨系統 / System', themeLight: '淺色 / Light', themeDark: '深色 / Dark',
                 areaMode: '區域模式 / Area', radiusMode: '方圓模式 / Radius',
                 placeAddressCoordinates: '地名地址或者座標 / Place, Address, or Coordinates',
                 radius: '方圓半徑 / Radius', loadNearby: '查找附近飯店 / Load Nearby',
-                radiusHelp: '地址會優先透過 OpenStreetMap/Nominatim 解析；座標可直接本地解析。 / Addresses use OpenStreetMap/Nominatim first; coordinates are parsed locally.',
+                radiusHelp: '地址透過 OpenStreetMap/Nominatim 解析，並依上方選取的飯店品牌搜尋。 / Addresses use OpenStreetMap/Nominatim and the hotel brands selected above.',
                 selectedHotelMap: '已選飯店地圖 / Selected Hotel Map',
                 selectedHotelMapHint: '地圖會顯示目前已勾選且帶座標的飯店。 / The map shows checked hotels that have coordinates.',
                 noSelectedHotelCoords: '已選飯店沒有座標。 / Selected hotels do not have coordinates.',
@@ -375,16 +526,86 @@
                 upgradingMessage: '正在背景執行 pip install --upgrade toyoko-tracker / Running pip install --upgrade toyoko-tracker in the background',
                 updatingButton: '升級中 / Updating', upgradedTitle: '升級完成 / Update finished',
                 upgradedMessage: '請重啟程式以使用新版本 / Please restart the app to use the new version.',
+                updateOpen: '軟體更新 / Software Update', updateClose: '關閉更新視窗 / Close update dialog',
+                updateDialogTitle: '軟體更新 / Software Update', updateDialogKicker: '版本與專案 / VERSION & PROJECT',
+                currentVersionLabel: '目前版本 / Current Version', latestVersionLabel: '最新版本 / Latest Version',
+                versionInformation: '版本資訊 / Version Information',
+                authorLabel: '作者 / Author', githubLabel: '原始碼 / Source Code', checkAgain: '重新檢查 / Check Again',
+                checkingUpdate: '正在檢查更新 / Checking for updates', checkingUpdateMessage: '正在背景連線 PyPI，不會影響空房搜尋。 / Contacting PyPI in the background without interrupting vacancy scans.',
+                upToDate: '已是最新版 / Up to date', upToDateMessage: '目前安裝版本已是 PyPI 上的最新版本。 / The installed version is the latest version on PyPI.',
+                updateAvailableDetail: '有新版本可用，可以立即在背景更新。 / A new version is available and can be installed in the background.',
+                updateFailedTitle: '檢查更新失敗 / Update check failed', updateFailedMessage: '暫時無法取得最新版本資訊，請稍後重新檢查。 / Latest version information is unavailable. Try again later.',
+                updateUnknown: '尚未檢查 / Not checked yet',
                 currentAction: '狀態 / Current', memberPrice: '會員價 / Member', memberPriceUnknown: '會員價未知 / Member price unknown',
                 nonMemberPrice: '非會員價 / Non-member', sentOk: '傳送成功 / sent OK',
                 terminalNotifierSentOk: 'terminal-notifier 傳送成功 / terminal-notifier sent OK',
-                osascriptSentOk: 'osascript 傳送成功 / osascript sent OK'
+                osascriptSentOk: 'osascript 傳送成功 / osascript sent OK',
+                scanOnce: '單次搜尋 / Scan Once', scanningOnce: '單次搜尋已啟動 / Single scan started.', restart: '重新啟動 / Restart',
+                dockNoHotels: '尚未選擇飯店 / No hotels selected', dockSelected: '已選擇 {count} 家飯店 / {count} hotels selected',
+                selectedSummary: '已選 {selected} / {total} / Selected', invalidDates: '退房日期必須晚於入住日期。 / Check-out must be after check-in.',
+                allFilter: '全部 / All', sort: '排序 / Sort', sortDefault: '預設 / Default', sortStatus: '狀態 / Status', sortPrice: '價格 / Price', sortName: '飯店名 / Hotel', sortDistance: '距離 / Distance',
+                showingResults: '顯示 {shown} / {total} / Showing', noFilteredResults: '目前篩選沒有結果 / No results match this filter',
+                configReady: '設定已同步 / Configuration ready', configPending: '有尚未套用的修改 / Changes apply on next start',
+                connectionOnline: '連線正常 / Connected', connectionOffline: '連線中斷，正在重連 / Reconnecting',
+                snapshotHotels: '飯店 / Hotels', resultBecameAvailable: '{count} 家飯店出現空房 / {count} hotel(s) became available',
+                resultNoLongerAvailable: '{count} 家飯店已無房 / {count} hotel(s) no longer available',
+                resultRoomCountChanged: '{count} 家飯店房量有變化 / Room count changed at {count} hotel(s)',
+                changesFilter: '變化 / Changes', resultSearchPlaceholder: '搜尋編號、飯店或房型 / Search code, hotel, or room',
+                refreshResults: '重新整理 / Refresh', exportResults: '匯出 CSV / Export',
+                lastUpdated: '更新於 {time} / Updated', neverUpdated: '尚未更新 / Never updated',
+                exportNoResults: '目前檢視沒有可匯出的結果。 / No visible results to export.',
+                adaptiveBackoff: '啟用自適應退避 / Adaptive Backoff',
+                adaptiveBackoffHelp: '存取異常達到 50% 時，自動把下一輪間隔提高到 2 倍；連續異常最多 4 倍，恢復正常後自動回落。 / Automatically slows the next round to 2x when checks fail at 50% or more, up to 4x for consecutive unhealthy rounds.',
+                safety: '流量保護 / Safety', safetyNormal: '正常 / Normal',
+                safetyBackoff: '退避 {multiplier}× · 異常 {ratio}% / Backoff',
+                hotelInfo: '飯店資訊 / Hotel Info', loadingHotelInfo: '正在載入官網資訊 / Loading official information...',
+                hotelInfoUnavailable: '官網資訊暫時無法載入 / Official information is unavailable.',
+                officialReference: '官方參考 / Official Reference', addressLabel: '地址 / Address', directionsLabel: '交通方式 / Directions',
+                byTrain: '搭乘電車 / By train', byCar: '開車 / By car', byPlane: '搭乘飛機 / By plane',
+                openOfficial: '開啟官網 / Open Official Page',
+                catalogTitle: '東橫飯店資料 / Toyoko Hotel Data', catalogChecking: '正在核對東橫官網飯店清單 / Checking Toyoko hotel list',
+                catalogFresh: '東橫飯店資料已是最新 / Toyoko hotel data is current', catalogUpdated: '東橫飯店資料已更新 / Toyoko hotel data updated',
+                catalogFailed: '背景更新失敗，繼續使用原快取 / Refresh failed; using the previous cache',
+                catalogMeta: '日本營業飯店 {open} 家 · 座標 {coords} 家 · {cache} · {checked}',
+                catalogCacheFresh: '快取有效 / Cache fresh', catalogCacheStale: '快取已過期 / Cache expired',
+                catalogNeverChecked: '尚未檢查 / Never checked', catalogCheckedAt: '檢查於 {time} / Checked',
+                catalogUpcoming: '即將開業 {count} 家 / {count} upcoming: {hotels}',
+                catalogNewTitle: '發現 {count} 家新開業飯店 / {count} newly opened hotel(s)',
+                catalogRefresh: '重新整理飯店資料 / Refresh', catalogAcknowledge: '知道了 / Dismiss',
+                catalogRefreshQueued: '已在背景開始重新整理 / Background refresh started',
+                catalogUnresolved: '其中 {count} 家暫缺座標 / {count} hotel(s) still need coordinates',
+                hotelBrands: '飯店品牌 / Hotel Brands', toyokoProvider: '東橫 / Toyoko Inn', routeinnProvider: '露櫻 / Route Inn Hotels', dormyProvider: '多美迎 / Dormy Inn', mystaysProvider: 'MYSTAYS Hotel', daiwaProvider: '大和ROYNET / Daiwa Roynet',
+                routeinnProviderNote: '露櫻包含露櫻、露櫻Grandia、Grandvrio、ARK / Route Inn includes Route Inn, Grandia, Grandvrio, and ARK.',
+                providerRequired: '請至少選擇一個飯店品牌。 / Select at least one hotel brand.',
+                quickDates: '快捷日期 / Quick Dates', allBrands: '全部品牌 / All brands', selectedOnly: '僅看已選 / Selected only',
+                listView: '列表 / List', mapView: '地圖 / Map', visibleHotels: '顯示 {shown} / {total} 家飯店 / Showing {shown} of {total} hotels',
+                sortCode: '編號 / Code', decreasePeople: '減少人數 / Decrease people', increasePeople: '增加人數 / Increase people',
+                decreaseRooms: '減少房間 / Decrease rooms', increaseRooms: '增加房間 / Increase rooms',
+                toyokoShort: '東橫', routeinnShort: '露櫻', dormyShort: '多美迎', mystaysShort: 'MYSTAYS', daiwaShort: '大和ROYNET', partialProviderFailure: '部分品牌載入失敗 / Some brands failed to load'
               },
               ja: {
+                navSearch: '空室検索 / Vacancy Search', navMonitor: '空室監視 / Vacancy Monitor', interfaceSettings: '表示設定 / Interface Settings',
+                collapseNav: 'ナビを折りたたむ / Collapse navigation', expandNav: 'ナビを展開 / Expand navigation',
+                guideOpen: '使い方ガイド / Guide', guideClose: 'ガイドを閉じる / Close guide', guideTitle: '東横ちゃん使い方ガイド / Toyoko Chan Guide',
+                guideSkip: 'あとで / Skip', guideBack: '戻る / Back', guideNext: '次へ / Next', guideFinish: '完了 / Finish', guideProgress: 'ガイド進捗 / Guide progress',
+                guideStep1Title: '画面の見方 / Interface Overview', guideStep1Body: '左側のナビで作業画面を切り替えます。上部の操作バーから一回検索、開始、停止をいつでも実行できます。 / Use the sidebar to switch workspaces; the top command bar keeps scan, start, and stop within reach.', guideStep1Tip: 'ヒント：検索開始後は空室監視へ自動で移動します。 / Tip: Starting a scan automatically opens Vacancy Monitor.',
+                guideStep2Title: 'ホテルを検索 / Find Hotels', guideStep2Body: '日付、人数、部屋タイプ、会員状態、ブランドを設定し、エリアまたは半径モードでホテルを読み込んで選択します。 / Set dates, guests, room and membership first, then choose brands. Load hotels by area or radius and check the hotels to scan.', guideStep2Tip: 'ヒント：ホテル選択は検索履歴に保存され、次回復元できます。 / Tip: Hotel selections are saved with search history and can be restored next time.',
+                guideStep3Title: '空室結果を確認 / Review Results', guideStep3Body: '空室監視では空室あり、空室なし、要確認の状態と価格、残数、部屋タイプを確認できます。 / Vacancy Monitor shows available, unavailable and check states with price, quantity and room type. Hotel and room links open official detail or booking pages.', guideStep3Tip: 'ヒント：絞り込み、検索、変化タブで最新の変化を確認できます。 / Tip: Filters, search and the Changes tab help surface the latest updates.',
+                guideStep4Title: '検索設定 / Search Settings', guideStep4Body: '日常利用は軽量な HTTP/API を推奨します。スマート並列と検索間隔で効率とアクセス頻度を調整します。 / HTTP/API is the lightweight daily choice. Smart Parallel helps with larger lists, while Scan Cadence controls rounds, hotel delay and jitter.', guideStep4Tip: '推奨：ラウンド間隔は 120 秒以上、自動バックオフは有効のままにします。 / Recommended: use 120+ second rounds and keep Adaptive Backoff enabled.',
+                guideStep5Title: '通知設定 / Push Settings', guideStep5Body: '通知イベントを選び、Bark、ServerChan、Telegram、ローカル通知、メールを必要に応じて設定します。 / Choose notification events, then enable Bark, Server Chan, Telegram, Local Notifications or Email.', guideStep5Tip: 'ヒント：監視前にテスト通知で端末と権限を確認してください。 / Tip: Send a test notification before monitoring to verify the device and system permissions.',
+                workspace: '空室追跡ワークスペース / Vacancy workspace', sidebarHotelCount: '{count} 件 / {count} hotels',
+                searchViewHelp: '宿泊条件とホテル範囲を設定して検索を開始します。 / Set stay conditions, hotel scope, and start searching.',
+                monitorViewHelp: '実行状況、空室結果、通知状態を確認します。 / Review live status, vacancy results, and notifications.',
+                searchSettingsViewHelp: '検索エンジン、並列処理、検索間隔を調整します。 / Tune the engine, parallel strategy, and scan cadence.',
+                pushSettingsViewHelp: '通知イベントと通知先を設定します。 / Choose alert events and configure notification channels.',
+                interfaceViewHelp: '主言語とテーマを選択します。設定はこのブラウザに保存されます。 / Choose language and theme; preferences stay in this browser.',
+                theme: 'テーマ / Theme', language: '言語 / Language', languageHelp: '主言語は常に英語と併記されます。 / The primary language is always paired with English.',
+                themeHelp: 'システム連動、ライト、ダークから選択できます。 / Follow the system or choose a fixed light or dark theme.',
+                themeSystem: 'システム / System', themeLight: 'ライト / Light', themeDark: 'ダーク / Dark',
                 areaMode: 'エリアモード / Area', radiusMode: '半径モード / Radius',
                 placeAddressCoordinates: '地名・住所または座標 / Place, Address, or Coordinates',
                 radius: '半径 / Radius', loadNearby: '周辺ホテルを検索 / Load Nearby',
-                radiusHelp: '住所は OpenStreetMap/Nominatim で優先的に座標化します。座標はローカルで直接解析します。 / Addresses use OpenStreetMap/Nominatim first; coordinates are parsed locally.',
+                radiusHelp: '住所は OpenStreetMap/Nominatim で座標化し、上で選択したホテルブランドを検索します。 / Addresses use OpenStreetMap/Nominatim and the hotel brands selected above.',
                 selectedHotelMap: '選択ホテル地図 / Selected Hotel Map',
                 selectedHotelMapHint: 'チェック済みで座標があるホテルを地図に表示します。 / The map shows checked hotels that have coordinates.',
                 noSelectedHotelCoords: '選択ホテルに座標がありません。 / Selected hotels do not have coordinates.',
@@ -431,16 +652,86 @@
                 upgradingMessage: 'バックグラウンドで pip install --upgrade toyoko-tracker を実行しています / Running pip install --upgrade toyoko-tracker in the background',
                 updatingButton: '更新中 / Updating', upgradedTitle: '更新完了 / Update finished',
                 upgradedMessage: '新バージョンを使用するにはアプリを再起動してください / Please restart the app to use the new version.',
+                updateOpen: 'ソフトウェア更新 / Software Update', updateClose: '更新画面を閉じる / Close update dialog',
+                updateDialogTitle: 'ソフトウェア更新 / Software Update', updateDialogKicker: 'バージョンとプロジェクト / VERSION & PROJECT',
+                currentVersionLabel: '現在のバージョン / Current Version', latestVersionLabel: '最新バージョン / Latest Version',
+                versionInformation: 'バージョン情報 / Version Information',
+                authorLabel: '作者 / Author', githubLabel: 'ソースコード / Source Code', checkAgain: '再確認 / Check Again',
+                checkingUpdate: '更新を確認中 / Checking for updates', checkingUpdateMessage: '空室検索を妨げず、バックグラウンドで PyPI に接続しています。 / Contacting PyPI in the background without interrupting vacancy scans.',
+                upToDate: '最新版です / Up to date', upToDateMessage: 'インストール済みのバージョンは PyPI の最新版です。 / The installed version is the latest version on PyPI.',
+                updateAvailableDetail: '新しいバージョンをバックグラウンドで更新できます。 / A new version is available and can be installed in the background.',
+                updateFailedTitle: '更新確認に失敗 / Update check failed', updateFailedMessage: '最新バージョン情報を取得できません。後でもう一度お試しください。 / Latest version information is unavailable. Try again later.',
+                updateUnknown: '未確認 / Not checked yet',
                 currentAction: '状態 / Current', memberPrice: '会員価格 / Member', memberPriceUnknown: '会員価格不明 / Member price unknown',
                 nonMemberPrice: '非会員価格 / Non-member', sentOk: '送信成功 / sent OK',
                 terminalNotifierSentOk: 'terminal-notifier 送信成功 / terminal-notifier sent OK',
-                osascriptSentOk: 'osascript 送信成功 / osascript sent OK'
+                osascriptSentOk: 'osascript 送信成功 / osascript sent OK',
+                scanOnce: '一回検索 / Scan Once', scanningOnce: '一回検索を開始しました / Single scan started.', restart: '再起動 / Restart',
+                dockNoHotels: 'ホテル未選択 / No hotels selected', dockSelected: '{count} 件のホテルを選択 / {count} hotels selected',
+                selectedSummary: '{selected} / {total} 件選択 / Selected', invalidDates: 'チェックアウト日はチェックイン日より後にしてください。 / Check-out must be after check-in.',
+                allFilter: 'すべて / All', sort: '並び替え / Sort', sortDefault: '既定 / Default', sortStatus: '状態 / Status', sortPrice: '料金 / Price', sortName: 'ホテル名 / Hotel', sortDistance: '距離 / Distance',
+                showingResults: '{shown} / {total} 件表示 / Showing', noFilteredResults: 'この絞り込みに一致する結果はありません / No results match this filter',
+                configReady: '設定同期済み / Configuration ready', configPending: '未適用の変更があります / Changes apply on next start',
+                connectionOnline: '接続済み / Connected', connectionOffline: '接続が切れました。再接続中 / Reconnecting',
+                snapshotHotels: 'ホテル / Hotels', resultBecameAvailable: '{count} 件のホテルに空室が出ました / {count} hotel(s) became available',
+                resultNoLongerAvailable: '{count} 件のホテルが満室になりました / {count} hotel(s) no longer available',
+                resultRoomCountChanged: '{count} 件のホテルで室数が変わりました / Room count changed at {count} hotel(s)',
+                changesFilter: '変更 / Changes', resultSearchPlaceholder: '番号・ホテル・部屋タイプを検索 / Search code, hotel, or room',
+                refreshResults: '更新 / Refresh', exportResults: 'CSV 出力 / Export',
+                lastUpdated: '{time} に更新 / Updated', neverUpdated: '未更新 / Never updated',
+                exportNoResults: '現在の表示に出力できる結果がありません。 / No visible results to export.',
+                adaptiveBackoff: '適応バックオフを有効化 / Adaptive Backoff',
+                adaptiveBackoffHelp: 'アクセス異常が 50% 以上になると次回間隔を 2 倍、連続異常では最大 4 倍にします。正常なラウンドで自動復帰します。 / Automatically slows the next round to 2x when checks fail at 50% or more, up to 4x for consecutive unhealthy rounds.',
+                safety: '流量保護 / Safety', safetyNormal: '正常 / Normal',
+                safetyBackoff: 'バックオフ {multiplier}× · 異常 {ratio}% / Backoff',
+                hotelInfo: 'ホテル情報 / Hotel Info', loadingHotelInfo: '公式情報を読み込み中 / Loading official information...',
+                hotelInfoUnavailable: '公式情報を一時的に読み込めません / Official information is unavailable.',
+                officialReference: '公式情報 / Official Reference', addressLabel: '住所 / Address', directionsLabel: 'アクセス / Directions',
+                byTrain: '電車で / By train', byCar: '車で / By car', byPlane: '飛行機で / By plane',
+                openOfficial: '公式ページを開く / Open Official Page',
+                catalogTitle: '東横ホテルデータ / Toyoko Hotel Data', catalogChecking: '東横の公式ホテル一覧を確認中 / Checking Toyoko hotel list',
+                catalogFresh: '東横ホテルデータは最新です / Toyoko hotel data is current', catalogUpdated: '東横ホテルデータを更新しました / Toyoko hotel data updated',
+                catalogFailed: '更新に失敗したため以前のキャッシュを使用中 / Refresh failed; using the previous cache',
+                catalogMeta: '日本国内営業中 {open} 件 · 座標 {coords} 件 · {cache} · {checked}',
+                catalogCacheFresh: 'キャッシュ有効 / Cache fresh', catalogCacheStale: 'キャッシュ期限切れ / Cache expired',
+                catalogNeverChecked: '未確認 / Never checked', catalogCheckedAt: '{time} に確認 / Checked',
+                catalogUpcoming: '開業予定 {count} 件 / {count} upcoming: {hotels}',
+                catalogNewTitle: '新規開業ホテル {count} 件 / {count} newly opened hotel(s)',
+                catalogRefresh: 'ホテルデータ更新 / Refresh', catalogAcknowledge: '確認済み / Dismiss',
+                catalogRefreshQueued: 'バックグラウンド更新を開始しました / Background refresh started',
+                catalogUnresolved: '座標未取得 {count} 件 / {count} hotel(s) still need coordinates',
+                hotelBrands: 'ホテルブランド / Hotel Brands', toyokoProvider: '東横 / Toyoko Inn', routeinnProvider: 'ルートイン / Route Inn Hotels', dormyProvider: 'ドーミーイン / Dormy Inn', mystaysProvider: 'ホテルマイステイズ / MYSTAYS Hotel', daiwaProvider: 'ダイワロイネット / Daiwa Roynet',
+                routeinnProviderNote: 'ルートインにはルートイン、Grandia、Grandvrio、ARK が含まれます / Route Inn includes Route Inn, Grandia, Grandvrio, and ARK.',
+                providerRequired: 'ホテルブランドを1つ以上選択してください。 / Select at least one hotel brand.',
+                quickDates: 'クイック日付 / Quick Dates', allBrands: '全ブランド / All brands', selectedOnly: '選択済みのみ / Selected only',
+                listView: '一覧 / List', mapView: '地図 / Map', visibleHotels: '{shown} / {total} 件を表示 / Showing {shown} of {total} hotels',
+                sortCode: '番号 / Code', decreasePeople: '人数を減らす / Decrease people', increasePeople: '人数を増やす / Increase people',
+                decreaseRooms: '部屋数を減らす / Decrease rooms', increaseRooms: '部屋数を増やす / Increase rooms',
+                toyokoShort: '東横', routeinnShort: 'ルートイン', dormyShort: 'ドーミーイン', mystaysShort: 'マイステイズ', daiwaShort: 'ダイワ', partialProviderFailure: '一部ブランドの読込に失敗 / Some brands failed to load'
               },
               ko: {
+                navSearch: '빈 객실 검색 / Vacancy Search', navMonitor: '빈 객실 모니터 / Vacancy Monitor', interfaceSettings: '화면 설정 / Interface Settings',
+                collapseNav: '탐색 메뉴 접기 / Collapse navigation', expandNav: '탐색 메뉴 펼치기 / Expand navigation',
+                guideOpen: '사용 안내 / Guide', guideClose: '안내 닫기 / Close guide', guideTitle: '토요코 짱 사용 안내 / Toyoko Chan Guide',
+                guideSkip: '나중에 / Skip', guideBack: '이전 / Back', guideNext: '다음 / Next', guideFinish: '완료 / Finish', guideProgress: '안내 진행 / Guide progress',
+                guideStep1Title: '화면 둘러보기 / Interface Overview', guideStep1Body: '왼쪽 탐색 메뉴에서 작업 화면을 바꾸고, 상단 작업 막대에서 한 번 검색, 시작, 중지를 실행합니다. / Use the sidebar to switch workspaces; the top command bar keeps scan, start, and stop within reach.', guideStep1Tip: '팁: 검색을 시작하면 빈 객실 모니터로 자동 이동합니다. / Tip: Starting a scan automatically opens Vacancy Monitor.',
+                guideStep2Title: '호텔 검색 / Find Hotels', guideStep2Body: '날짜, 인원, 객실 유형, 회원 상태와 브랜드를 설정한 뒤 지역 또는 반경 모드로 호텔을 불러와 선택합니다. / Set dates, guests, room and membership first, then choose brands. Load hotels by area or radius and check the hotels to scan.', guideStep2Tip: '팁: 호텔 선택은 검색 기록에 저장되어 다음에 복원됩니다. / Tip: Hotel selections are saved with search history and can be restored next time.',
+                guideStep3Title: '빈 객실 결과 확인 / Review Results', guideStep3Body: '빈 객실 모니터에서 이용 가능, 이용 불가, 확인 필요 상태와 가격, 잔여 수, 객실 유형을 확인합니다. / Vacancy Monitor shows available, unavailable and check states with price, quantity and room type. Hotel and room links open official detail or booking pages.', guideStep3Tip: '팁: 필터, 검색, 변경 탭으로 최신 변화를 빠르게 찾을 수 있습니다. / Tip: Filters, search and the Changes tab help surface the latest updates.',
+                guideStep4Title: '검색 설정 / Search Settings', guideStep4Body: '일상 검색에는 가벼운 HTTP/API를 권장합니다. 스마트 병렬과 검색 주기로 효율과 접근 간격을 조정합니다. / HTTP/API is the lightweight daily choice. Smart Parallel helps with larger lists, while Scan Cadence controls rounds, hotel delay and jitter.', guideStep4Tip: '권장: 라운드는 120초 이상, 적응형 백오프는 활성화 상태로 유지하세요. / Recommended: use 120+ second rounds and keep Adaptive Backoff enabled.',
+                guideStep5Title: '푸시 설정 / Push Settings', guideStep5Body: '알림 이벤트를 고른 뒤 Bark, ServerChan, Telegram, 로컬 알림 또는 이메일을 설정합니다. / Choose notification events, then enable Bark, Server Chan, Telegram, Local Notifications or Email.', guideStep5Tip: '팁: 모니터링 전에 테스트 알림으로 기기와 권한을 확인하세요. / Tip: Send a test notification before monitoring to verify the device and system permissions.',
+                workspace: '빈 객실 추적 작업 공간 / Vacancy workspace', sidebarHotelCount: '{count}개 호텔 / {count} hotels',
+                searchViewHelp: '숙박 조건과 호텔 범위를 설정하고 검색을 시작합니다. / Set stay conditions, hotel scope, and start searching.',
+                monitorViewHelp: '실행 상태, 객실 결과와 알림 상태를 확인합니다. / Review live status, vacancy results, and notifications.',
+                searchSettingsViewHelp: '검색 엔진, 병렬 전략과 검색 주기를 조정합니다. / Tune the engine, parallel strategy, and scan cadence.',
+                pushSettingsViewHelp: '알림 이벤트와 알림 채널을 설정합니다. / Choose alert events and configure notification channels.',
+                interfaceViewHelp: '주 언어와 테마를 선택합니다. 설정은 이 브라우저에 저장됩니다. / Choose language and theme; preferences stay in this browser.',
+                theme: '테마 / Theme', language: '언어 / Language', languageHelp: '주 언어는 항상 영어와 함께 표시됩니다. / The primary language is always paired with English.',
+                themeHelp: '시스템, 라이트 또는 다크 테마를 선택할 수 있습니다. / Follow the system or choose a fixed light or dark theme.',
+                themeSystem: '시스템 / System', themeLight: '라이트 / Light', themeDark: '다크 / Dark',
                 areaMode: '지역 모드 / Area', radiusMode: '반경 모드 / Radius',
                 placeAddressCoordinates: '장소, 주소 또는 좌표 / Place, Address, or Coordinates',
                 radius: '반경 / Radius', loadNearby: '주변 호텔 찾기 / Load Nearby',
-                radiusHelp: '주소는 OpenStreetMap/Nominatim으로 먼저 좌표화하고, 좌표는 로컬에서 바로 해석합니다. / Addresses use OpenStreetMap/Nominatim first; coordinates are parsed locally.',
+                radiusHelp: '주소는 OpenStreetMap/Nominatim으로 좌표화하고 위에서 선택한 호텔 브랜드를 검색합니다. / Addresses use OpenStreetMap/Nominatim and the hotel brands selected above.',
                 selectedHotelMap: '선택 호텔 지도 / Selected Hotel Map',
                 selectedHotelMapHint: '좌표가 있는 체크된 호텔을 지도에 표시합니다. / The map shows checked hotels that have coordinates.',
                 noSelectedHotelCoords: '선택한 호텔에 좌표가 없습니다. / Selected hotels do not have coordinates.',
@@ -487,23 +778,237 @@
                 upgradingMessage: '백그라운드에서 pip install --upgrade toyoko-tracker 실행 중 / Running pip install --upgrade toyoko-tracker in the background',
                 updatingButton: '업데이트 중 / Updating', upgradedTitle: '업데이트 완료 / Update finished',
                 upgradedMessage: '새 버전을 사용하려면 앱을 다시 시작해 주세요 / Please restart the app to use the new version.',
+                updateOpen: '소프트웨어 업데이트 / Software Update', updateClose: '업데이트 창 닫기 / Close update dialog',
+                updateDialogTitle: '소프트웨어 업데이트 / Software Update', updateDialogKicker: '버전 및 프로젝트 / VERSION & PROJECT',
+                currentVersionLabel: '현재 버전 / Current Version', latestVersionLabel: '최신 버전 / Latest Version',
+                versionInformation: '버전 정보 / Version Information',
+                authorLabel: '작성자 / Author', githubLabel: '소스 코드 / Source Code', checkAgain: '다시 확인 / Check Again',
+                checkingUpdate: '업데이트 확인 중 / Checking for updates', checkingUpdateMessage: '빈 객실 검색을 방해하지 않고 백그라운드에서 PyPI에 연결합니다. / Contacting PyPI in the background without interrupting vacancy scans.',
+                upToDate: '최신 버전 / Up to date', upToDateMessage: '설치된 버전이 PyPI의 최신 버전입니다. / The installed version is the latest version on PyPI.',
+                updateAvailableDetail: '새 버전을 백그라운드에서 바로 설치할 수 있습니다. / A new version is available and can be installed in the background.',
+                updateFailedTitle: '업데이트 확인 실패 / Update check failed', updateFailedMessage: '최신 버전 정보를 가져올 수 없습니다. 나중에 다시 확인하세요. / Latest version information is unavailable. Try again later.',
+                updateUnknown: '확인 전 / Not checked yet',
                 currentAction: '상태 / Current', memberPrice: '회원가 / Member', memberPriceUnknown: '회원가 알 수 없음 / Member price unknown',
                 nonMemberPrice: '비회원가 / Non-member', sentOk: '전송 성공 / sent OK',
                 terminalNotifierSentOk: 'terminal-notifier 전송 성공 / terminal-notifier sent OK',
-                osascriptSentOk: 'osascript 전송 성공 / osascript sent OK'
+                osascriptSentOk: 'osascript 전송 성공 / osascript sent OK',
+                scanOnce: '한 번 검색 / Scan Once', scanningOnce: '한 번 검색을 시작했습니다 / Single scan started.', restart: '다시 시작 / Restart',
+                dockNoHotels: '선택한 호텔 없음 / No hotels selected', dockSelected: '호텔 {count}개 선택 / {count} hotels selected',
+                selectedSummary: '{selected} / {total}개 선택 / Selected', invalidDates: '체크아웃 날짜는 체크인 날짜보다 뒤여야 합니다. / Check-out must be after check-in.',
+                allFilter: '전체 / All', sort: '정렬 / Sort', sortDefault: '기본 / Default', sortStatus: '상태 / Status', sortPrice: '가격 / Price', sortName: '호텔명 / Hotel', sortDistance: '거리 / Distance',
+                showingResults: '{shown} / {total}개 표시 / Showing', noFilteredResults: '현재 필터와 일치하는 결과가 없습니다 / No results match this filter',
+                configReady: '설정 동기화됨 / Configuration ready', configPending: '아직 적용되지 않은 변경 사항 / Changes apply on next start',
+                connectionOnline: '연결됨 / Connected', connectionOffline: '연결 끊김, 다시 연결 중 / Reconnecting',
+                snapshotHotels: '호텔 / Hotels', resultBecameAvailable: '호텔 {count}곳에 객실이 생겼습니다 / {count} hotel(s) became available',
+                resultNoLongerAvailable: '호텔 {count}곳의 객실이 없어졌습니다 / {count} hotel(s) no longer available',
+                resultRoomCountChanged: '호텔 {count}곳의 객실 수가 변경되었습니다 / Room count changed at {count} hotel(s)',
+                changesFilter: '변경 / Changes', resultSearchPlaceholder: '번호, 호텔 또는 객실 검색 / Search code, hotel, or room',
+                refreshResults: '새로고침 / Refresh', exportResults: 'CSV 내보내기 / Export',
+                lastUpdated: '{time} 업데이트 / Updated', neverUpdated: '업데이트 전 / Never updated',
+                exportNoResults: '현재 보기에 내보낼 결과가 없습니다. / No visible results to export.',
+                adaptiveBackoff: '적응형 백오프 사용 / Adaptive Backoff',
+                adaptiveBackoffHelp: '접근 오류가 50% 이상이면 다음 주기를 2배로 늦추고, 연속 오류 시 최대 4배까지 적용합니다. 정상 라운드 후 자동 복구됩니다. / Automatically slows the next round to 2x when checks fail at 50% or more, up to 4x for consecutive unhealthy rounds.',
+                safety: '트래픽 보호 / Safety', safetyNormal: '정상 / Normal',
+                safetyBackoff: '백오프 {multiplier}× · 오류 {ratio}% / Backoff',
+                hotelInfo: '호텔 정보 / Hotel Info', loadingHotelInfo: '공식 정보를 불러오는 중 / Loading official information...',
+                hotelInfoUnavailable: '공식 정보를 일시적으로 불러올 수 없습니다 / Official information is unavailable.',
+                officialReference: '공식 정보 / Official Reference', addressLabel: '주소 / Address', directionsLabel: '교통편 / Directions',
+                byTrain: '전철 / By train', byCar: '자동차 / By car', byPlane: '비행기 / By plane',
+                openOfficial: '공식 페이지 열기 / Open Official Page',
+                catalogTitle: '토요코인 호텔 데이터 / Toyoko Hotel Data', catalogChecking: '토요코인 공식 호텔 목록 확인 중 / Checking Toyoko hotel list',
+                catalogFresh: '토요코인 호텔 데이터가 최신입니다 / Toyoko hotel data is current', catalogUpdated: '토요코인 호텔 데이터를 업데이트했습니다 / Toyoko hotel data updated',
+                catalogFailed: '업데이트 실패로 이전 캐시 사용 중 / Refresh failed; using the previous cache',
+                catalogMeta: '일본 영업 호텔 {open}개 · 좌표 {coords}개 · {cache} · {checked}',
+                catalogCacheFresh: '캐시 유효 / Cache fresh', catalogCacheStale: '캐시 만료 / Cache expired',
+                catalogNeverChecked: '확인 전 / Never checked', catalogCheckedAt: '{time} 확인 / Checked',
+                catalogUpcoming: '개장 예정 {count}개 / {count} upcoming: {hotels}',
+                catalogNewTitle: '신규 개장 호텔 {count}개 / {count} newly opened hotel(s)',
+                catalogRefresh: '호텔 데이터 새로고침 / Refresh', catalogAcknowledge: '확인 / Dismiss',
+                catalogRefreshQueued: '백그라운드 새로고침 시작 / Background refresh started',
+                catalogUnresolved: '좌표 미확인 {count}개 / {count} hotel(s) still need coordinates',
+                hotelBrands: '호텔 브랜드 / Hotel Brands', toyokoProvider: '토요코인 / Toyoko Inn', routeinnProvider: '루트인 / Route Inn Hotels', dormyProvider: '도미인 / Dormy Inn', mystaysProvider: '마이스테이즈 / MYSTAYS Hotel', daiwaProvider: '다이와 로이넷 / Daiwa Roynet',
+                routeinnProviderNote: '루트인에는 Route Inn, Grandia, Grandvrio, ARK가 포함됩니다 / Route Inn includes Route Inn, Grandia, Grandvrio, and ARK.',
+                providerRequired: '호텔 브랜드를 하나 이상 선택해 주세요. / Select at least one hotel brand.',
+                quickDates: '빠른 날짜 / Quick Dates', allBrands: '모든 브랜드 / All brands', selectedOnly: '선택 항목만 / Selected only',
+                listView: '목록 / List', mapView: '지도 / Map', visibleHotels: '{shown} / {total}개 호텔 표시 / Showing {shown} of {total} hotels',
+                sortCode: '번호 / Code', decreasePeople: '인원 줄이기 / Decrease people', increasePeople: '인원 늘리기 / Increase people',
+                decreaseRooms: '객실 줄이기 / Decrease rooms', increaseRooms: '객실 늘리기 / Increase rooms',
+                toyokoShort: '토요코인', routeinnShort: '루트인', dormyShort: '도미인', mystaysShort: '마이스테이즈', daiwaShort: '다이와', partialProviderFailure: '일부 브랜드 불러오기 실패 / Some brands failed to load'
+              }
+            };
+            const MOBILE_UI18N = {
+              zh_cn: {
+                mobileAccessTitle:'手机访问', mobileAccessHelp:'通过同一 Wi-Fi、Tailscale 或受保护的公网地址连接手机。',
+                enableMobileAccess:'启用手机访问', mobileApply:'应用', mobileDisabled:'仅限本机', mobileDisabledHelp:'手机访问未启用。',
+                mobileReady:'手机访问已就绪', mobileReadyHelp:'打开下方地址或扫描二维码，并输入配对码。', mobileRestart:'需要重启应用',
+                mobileRestartEnable:'设置已保存。重启东横酱后即可从手机访问。', mobileRestartDisable:'设置已保存。重启后将恢复为仅限本机。',
+                mobileRemote:'手机已安全连接', mobileRemoteHelp:'局域网会话已通过配对认证；访问设置只能在 Mac 上更改。', mobileLoading:'正在读取状态',
+                mobileError:'手机访问状态读取失败', mobileAddress:'手机访问地址', pairingCode:'配对码', copy:'复制', rotate:'更换',
+                mobileNote:'Mac 与手机需连接同一可信网络。首次连接时输入配对码，之后会保留登录状态。', mobileQr:'使用手机相机扫码连接',
+                mobileCopied:'地址已复制', mobileSaved:'设置已保存', mobileQrMissing:'安装 mobile 可选依赖后可显示二维码。',
+                mobileRestarting:'正在重启应用', mobileRestartingHelp:'正在切换网络监听模式，页面恢复后会自动刷新。', mobileRestartFailed:'应用重启超时，请手动重新打开东横酱。',
+                mobileChooseConnection:'1. 选择连接方式', mobileLanTitle:'同一 Wi-Fi', mobileLanHelp:'适合在家中或酒店内使用', mobileTailscaleTitle:'Tailscale 远程', mobileTailscaleHelp:'离开当前 Wi-Fi 后也可安全连接', mobilePublicTitle:'公网直连', mobilePublicHelp:'仅建议配合 HTTPS 使用',
+                mobileAvailable:'可用', mobileUnavailable:'未检测到', mobileNeedsSetup:'需配置', mobileOpen:'打开地址', mobileAddress:'2. 在手机打开此地址', pairingCode:'3. 输入配对码', mobileStepNetwork:'连接网络', mobileStepScan:'扫码或打开地址', mobileStepPair:'完成配对', mobilePublicPlaceholder:'https://域名或公网IP:端口',
+                mobileLanNote:'手机与 Mac 连接同一可信 Wi-Fi。首次输入配对码后会保留登录状态。', mobileTailscaleNote:'两台设备需登录同一 Tailscale 网络；无需公网 IP，也不会把端口暴露到互联网。', mobilePublicNote:'填写完成端口转发或反向代理后的公网地址并点击“应用”。允许 HTTP，但强烈建议先配置 HTTPS。'
+              },
+              zh_tw: {
+                mobileAccessTitle:'手機存取', mobileAccessHelp:'透過同一 Wi-Fi、Tailscale 或受保護的公網位址連接手機。',
+                enableMobileAccess:'啟用手機存取', mobileApply:'套用', mobileDisabled:'僅限本機', mobileDisabledHelp:'手機存取尚未啟用。',
+                mobileReady:'手機存取已就緒', mobileReadyHelp:'開啟下方網址或掃描 QR Code，並輸入配對碼。', mobileRestart:'需要重新啟動應用程式',
+                mobileRestartEnable:'設定已儲存。重新啟動東橫醬後即可從手機存取。', mobileRestartDisable:'設定已儲存。重新啟動後將恢復為僅限本機。',
+                mobileRemote:'手機已安全連線', mobileRemoteHelp:'區域網路工作階段已通過配對驗證；存取設定只能在 Mac 上變更。', mobileLoading:'正在讀取狀態',
+                mobileError:'無法讀取手機存取狀態', mobileAddress:'手機存取網址', pairingCode:'配對碼', copy:'複製', rotate:'更換',
+                mobileNote:'Mac 與手機需連接同一可信任網路。首次連線時輸入配對碼，之後會保留登入狀態。', mobileQr:'使用手機相機掃描連線',
+                mobileCopied:'網址已複製', mobileSaved:'設定已儲存', mobileQrMissing:'安裝 mobile 可選依賴後可顯示 QR Code。',
+                mobileRestarting:'正在重新啟動應用程式', mobileRestartingHelp:'正在切換網路監聽模式，服務恢復後頁面會自動重新整理。', mobileRestartFailed:'應用程式重新啟動逾時，請手動重新開啟東橫醬。',
+                mobileChooseConnection:'1. 選擇連線方式', mobileLanTitle:'同一 Wi-Fi', mobileLanHelp:'適合在家中或飯店內使用', mobileTailscaleTitle:'Tailscale 遠端', mobileTailscaleHelp:'離開目前 Wi-Fi 後仍可安全連線', mobilePublicTitle:'公網直連', mobilePublicHelp:'僅建議搭配 HTTPS 使用',
+                mobileAvailable:'可用', mobileUnavailable:'未偵測到', mobileNeedsSetup:'需設定', mobileOpen:'開啟網址', mobileAddress:'2. 在手機開啟此網址', pairingCode:'3. 輸入配對碼', mobileStepNetwork:'連接網路', mobileStepScan:'掃描或開啟網址', mobileStepPair:'完成配對', mobilePublicPlaceholder:'https://網域或公網IP:連接埠',
+                mobileLanNote:'手機與 Mac 需連接同一可信任 Wi-Fi。首次輸入配對碼後會保留登入狀態。', mobileTailscaleNote:'兩台裝置需登入同一 Tailscale 網路；不需公網 IP，也不會將連接埠暴露至網際網路。', mobilePublicNote:'填入完成連接埠轉送或反向代理後的公網網址並按「套用」。允許 HTTP，但強烈建議先設定 HTTPS。'
+              },
+              ja: {
+                mobileAccessTitle:'スマートフォン接続', mobileAccessHelp:'同じ Wi-Fi、Tailscale、または保護された公開アドレスから接続します。',
+                enableMobileAccess:'スマートフォン接続を有効にする', mobileApply:'適用', mobileDisabled:'このMacのみ', mobileDisabledHelp:'スマートフォン接続は無効です。',
+                mobileReady:'スマートフォン接続の準備完了', mobileReadyHelp:'下のURLを開くかQRコードを読み取り、ペアリングコードを入力してください。', mobileRestart:'アプリの再起動が必要です',
+                mobileRestartEnable:'設定を保存しました。東横ちゃんを再起動するとスマートフォンから接続できます。', mobileRestartDisable:'設定を保存しました。再起動後はこのMacからのみ接続できます。',
+                mobileRemote:'安全に接続済み', mobileRemoteHelp:'LANセッションはペアリング済みです。接続設定はMacでのみ変更できます。', mobileLoading:'状態を確認中',
+                mobileError:'スマートフォン接続の状態を取得できません', mobileAddress:'スマートフォン用URL', pairingCode:'ペアリングコード', copy:'コピー', rotate:'変更',
+                mobileNote:'Macとスマートフォンを同じ信頼できるネットワークに接続してください。初回のみコード入力が必要です。', mobileQr:'スマートフォンのカメラで読み取る',
+                mobileCopied:'URLをコピーしました', mobileSaved:'設定を保存しました', mobileQrMissing:'mobileオプションをインストールするとQRコードを表示できます。',
+                mobileRestarting:'アプリを再起動しています', mobileRestartingHelp:'ネットワーク待受モードを切り替えています。復旧後にページを自動更新します。', mobileRestartFailed:'再起動がタイムアウトしました。東横ちゃんを手動で開き直してください。',
+                mobileChooseConnection:'1. 接続方法を選択', mobileLanTitle:'同じ Wi-Fi', mobileLanHelp:'自宅やホテル内での利用向け', mobileTailscaleTitle:'Tailscale リモート', mobileTailscaleHelp:'現在の Wi-Fi の外からも安全に接続', mobilePublicTitle:'公開 IP へ直接接続', mobilePublicHelp:'HTTPS との併用を推奨',
+                mobileAvailable:'利用可能', mobileUnavailable:'未検出', mobileNeedsSetup:'要設定', mobileOpen:'アドレスを開く', mobileAddress:'2. スマートフォンで開く', pairingCode:'3. ペアリングコードを入力', mobileStepNetwork:'ネットワーク接続', mobileStepScan:'読取またはURLを開く', mobileStepPair:'ペアリング完了', mobilePublicPlaceholder:'https://ドメインまたは公開IP:ポート',
+                mobileLanNote:'スマートフォンと Mac を同じ信頼できる Wi-Fi に接続してください。初回のみコード入力が必要です。', mobileTailscaleNote:'両方の端末を同じ Tailscale ネットワークに接続してください。公開 IP やポート公開は不要です。', mobilePublicNote:'ポート転送またはリバースプロキシ設定後の公開 URL を入力して「適用」を押します。HTTP も利用できますが HTTPS を強く推奨します。'
+              },
+              ko: {
+                mobileAccessTitle:'스마트폰 접속', mobileAccessHelp:'같은 Wi-Fi, Tailscale 또는 보호된 공인 주소를 통해 연결합니다.',
+                enableMobileAccess:'스마트폰 접속 사용', mobileApply:'적용', mobileDisabled:'이 Mac 전용', mobileDisabledHelp:'스마트폰 접속이 꺼져 있습니다.',
+                mobileReady:'스마트폰 접속 준비 완료', mobileReadyHelp:'아래 주소를 열거나 QR 코드를 스캔한 뒤 페어링 코드를 입력하세요.', mobileRestart:'앱을 다시 시작해야 합니다',
+                mobileRestartEnable:'설정을 저장했습니다. Toyoko Chan을 다시 시작하면 스마트폰에서 접속할 수 있습니다.', mobileRestartDisable:'설정을 저장했습니다. 다시 시작하면 이 Mac에서만 접속할 수 있습니다.',
+                mobileRemote:'안전하게 연결됨', mobileRemoteHelp:'LAN 세션이 페어링 인증되었습니다. 접속 설정은 Mac에서만 변경할 수 있습니다.', mobileLoading:'상태 확인 중',
+                mobileError:'스마트폰 접속 상태를 불러오지 못했습니다', mobileAddress:'스마트폰 접속 주소', pairingCode:'페어링 코드', copy:'복사', rotate:'변경',
+                mobileNote:'Mac과 스마트폰을 같은 신뢰할 수 있는 네트워크에 연결하세요. 첫 연결에만 페어링 코드가 필요합니다.', mobileQr:'스마트폰 카메라로 스캔',
+                mobileCopied:'주소를 복사했습니다', mobileSaved:'설정을 저장했습니다', mobileQrMissing:'mobile 선택 의존성을 설치하면 QR 코드를 표시할 수 있습니다.',
+                mobileRestarting:'앱을 다시 시작하는 중', mobileRestartingHelp:'네트워크 수신 모드를 전환하고 있습니다. 서비스가 복구되면 페이지가 자동으로 새로고침됩니다.', mobileRestartFailed:'앱 다시 시작 시간이 초과되었습니다. Toyoko Chan을 수동으로 다시 열어 주세요.',
+                mobileChooseConnection:'1. 연결 방식 선택', mobileLanTitle:'같은 Wi-Fi', mobileLanHelp:'집이나 호텔 내부에서 사용', mobileTailscaleTitle:'Tailscale 원격', mobileTailscaleHelp:'현재 Wi-Fi 밖에서도 안전하게 연결', mobilePublicTitle:'공인 IP 직접 연결', mobilePublicHelp:'HTTPS와 함께 사용 권장',
+                mobileAvailable:'사용 가능', mobileUnavailable:'감지되지 않음', mobileNeedsSetup:'설정 필요', mobileOpen:'주소 열기', mobileAddress:'2. 휴대폰에서 이 주소 열기', pairingCode:'3. 페어링 코드 입력', mobileStepNetwork:'네트워크 연결', mobileStepScan:'스캔 또는 주소 열기', mobileStepPair:'페어링 완료', mobilePublicPlaceholder:'https://도메인 또는 공인IP:포트',
+                mobileLanNote:'휴대폰과 Mac을 같은 신뢰할 수 있는 Wi-Fi에 연결하세요. 첫 연결에만 코드가 필요합니다.', mobileTailscaleNote:'두 기기가 같은 Tailscale 네트워크에 로그인해야 합니다. 공인 IP나 인터넷 포트 공개는 필요하지 않습니다.', mobilePublicNote:'포트 포워딩 또는 리버스 프록시 설정 후의 공인 URL을 입력하고 적용을 누르세요. HTTP도 가능하지만 HTTPS를 권장합니다.'
+              },
+              en: {
+                mobileAccessTitle:'Mobile Access', mobileAccessHelp:'Connect a phone through the same Wi-Fi, Tailscale, or a protected public address.',
+                enableMobileAccess:'Enable mobile access', mobileApply:'Apply', mobileDisabled:'This Mac only', mobileDisabledHelp:'Mobile access is disabled.',
+                mobileReady:'Mobile access is ready', mobileReadyHelp:'Open the address below or scan the QR code, then enter the pairing code.', mobileRestart:'Restart required',
+                mobileRestartEnable:'Saved. Restart Toyoko Chan to allow phone access.', mobileRestartDisable:'Saved. Restart to return to local-only access.',
+                mobileRemote:'Phone securely connected', mobileRemoteHelp:'This LAN session is paired. Access settings can only be changed on the Mac.', mobileLoading:'Reading access status',
+                mobileError:'Could not read mobile access status', mobileAddress:'Mobile address', pairingCode:'Pairing code', copy:'Copy', rotate:'Rotate',
+                mobileNote:'Connect the Mac and phone to the same trusted network. The first connection requires the pairing code; later sessions stay signed in.', mobileQr:'Scan with the phone camera',
+                mobileCopied:'Address copied', mobileSaved:'Settings saved', mobileQrMissing:'Install the mobile extra to display a QR code.',
+                mobileRestarting:'Restarting the app', mobileRestartingHelp:'Switching the network listener. This page will refresh when the service is ready.', mobileRestartFailed:'The restart timed out. Reopen Toyoko Chan manually.',
+                mobileChooseConnection:'1. Choose a connection', mobileLanTitle:'Same Wi-Fi', mobileLanHelp:'Best at home or inside a hotel', mobileTailscaleTitle:'Tailscale Remote', mobileTailscaleHelp:'Connect securely away from this Wi-Fi', mobilePublicTitle:'Direct Public IP', mobilePublicHelp:'Use with HTTPS only',
+                mobileAvailable:'Available', mobileUnavailable:'Not detected', mobileNeedsSetup:'Setup needed', mobileOpen:'Open address', mobileAddress:'2. Open this address on your phone', pairingCode:'3. Enter the pairing code', mobileStepNetwork:'Join the network', mobileStepScan:'Scan or open address', mobileStepPair:'Finish pairing', mobilePublicPlaceholder:'https://domain-or-public-ip:port',
+                mobileLanNote:'Connect the phone and Mac to the same trusted Wi-Fi. The first connection requires the pairing code.', mobileTailscaleNote:'Sign both devices into the same Tailscale network. No public IP or internet port exposure is required.', mobilePublicNote:'Enter the public URL after configuring port forwarding or a reverse proxy, then select Apply. HTTP works, but HTTPS is strongly recommended.'
               }
             };
             Object.keys(UI18N_EXTRA).forEach(lang => Object.assign(UI18N[lang] || {}, UI18N_EXTRA[lang]));
+            Object.keys(MOBILE_UI18N).forEach(lang => Object.assign(UI18N[lang] || {}, MOBILE_UI18N[lang]));
+            const SINGLE_UI_OVERRIDES = {
+              zh_cn: {
+                languageHelp:'界面仅显示当前选择的语言。', stopped:'已停止', running:'运行中',
+                updateAvailableMessage:'当前：v{current} · 最新：v{latest}', secondsAgo:'{seconds} 秒前',
+                radiusPlaceholder:'东京站或 35.6812,139.7671', providerCatalogDb:'其他品牌数据库',
+                catalogUpdating:'更新中', providerCatalogNew:'发现新酒店：{count}',
+                historyNoRegion:'未选择区域', historyAllAreas:'全部区域', historyHotelCount:'{count} 家酒店'
+              },
+              zh_tw: {
+                languageHelp:'介面僅顯示目前選擇的語言。', stopped:'已停止', running:'執行中',
+                updateAvailableMessage:'目前：v{current} · 最新：v{latest}', secondsAgo:'{seconds} 秒前',
+                radiusPlaceholder:'東京站或 35.6812,139.7671', providerCatalogDb:'其他品牌資料庫',
+                catalogUpdating:'更新中', providerCatalogNew:'發現新飯店：{count}',
+                historyNoRegion:'未選擇區域', historyAllAreas:'全部區域', historyHotelCount:'{count} 家飯店'
+              },
+              ja: {
+                languageHelp:'画面には選択した言語のみ表示されます。', stopped:'停止中', running:'実行中',
+                updateAvailableMessage:'現在：v{current} · 最新：v{latest}', secondsAgo:'{seconds} 秒前',
+                radiusPlaceholder:'東京駅または 35.6812,139.7671', providerCatalogDb:'他ブランドデータベース',
+                catalogUpdating:'更新中', providerCatalogNew:'新規ホテル：{count}',
+                historyNoRegion:'地域未選択', historyAllAreas:'すべての地域', historyHotelCount:'ホテル {count} 件'
+              },
+              ko: {
+                languageHelp:'화면에는 선택한 언어만 표시됩니다.', stopped:'중지됨', running:'실행 중',
+                updateAvailableMessage:'현재: v{current} · 최신: v{latest}', secondsAgo:'{seconds}초 전',
+                radiusPlaceholder:'도쿄역 또는 35.6812,139.7671', providerCatalogDb:'기타 브랜드 데이터베이스',
+                catalogUpdating:'업데이트 중', providerCatalogNew:'신규 호텔: {count}',
+                historyNoRegion:'지역 미선택', historyAllAreas:'전체 지역', historyHotelCount:'호텔 {count}개'
+              }
+            };
+            const EN_UI = {
+              searchTitle:'Vacancy Search', searchSubtitle:'Choose dates, stay preferences, and hotel scope. Starting a scan saves it to search history.',
+              radiusPlaceholder:'Tokyo Station or 35.6812,139.7671', providerCatalogDb:'Other brand database',
+              catalogUpdating:'Updating', providerCatalogNew:'New hotels: {count}',
+              historyNoRegion:'No region', historyAllAreas:'All areas', historyHotelCount:'{count} hotels',
+              areaHint:'Choose a region. Detail area is optional; leaving it blank loads the full region. Check hotels, then start searching.',
+              areaSelected:'Region selected. Load the full region or choose a detail area, then check hotels and start searching.',
+              historyHint:'Shows the 10 most recent searches. Identical settings are not duplicated.',
+              searchSettingsNote:'Engine, scan cadence, and smart parallel settings are managed here. Smart Parallel applies to HTTP/API only and staggers requests.',
+              pushSettingsNote:'Availability, repeat, loss, and start notifications are sent through every enabled channel.',
+              engineHelp:'HTTP/API uses fewer requests and is faster. It can fall back to Playwright when parsing fails.',
+              smartParallelHelp:'HTTP/API only. Staggers worker starts and increases per-worker spacing.',
+              localHelp:'On first use, macOS may require notification permission for Terminal, Python, or osascript in System Settings > Notifications.',
+              runSubtitle:'Repeatedly scans the current hotel scope. You can stop or adjust settings while running.',
+              stopped:'STOPPED', running:'RUNNING', pushSubtitle:'Shows enabled notification channels and their most recent delivery state.',
+              tipEngine:'HTTP/API is recommended by default because it is lightweight, fast, and resource efficient. If parsing fails, the app can fall back to Playwright, which behaves more like a real browser but uses more resources.',
+              tipSmartParallel:'HTTP/API only. Splits hotels across 1-3 staggered workers and increases spacing per worker. Start with one worker and raise it only for larger hotel lists.',
+              tipCadence:'Round Interval controls the wait between scans. Per-hotel Base Delay controls access frequency inside a worker. Request Jitter makes timing less uniform. Prefer 120+ second rounds, 2-5 second hotel delays, and 30-50% jitter.',
+              tipReminder:'Controls repeat alerts after availability appears. Repeat Count is the number of additional alerts after the first; INF continues indefinitely. Use a cooldown of at least 300 seconds.',
+              tipBark:'For iPhone and iPad. 1. Install Bark. 2. Copy the Device Key from the app home screen. 3. Enter it as Bark Key. 4. Keep the default server or enter a self-hosted server. 5. Enable Bark and start searching.',
+              tipServerChan:'For WeChat notifications. 1. Sign in to Server Chan. 2. Connect a WeChat channel. 3. Copy the SendKey. 4. Paste it here. 5. Enable the channel and start searching.',
+              tipTelegram:'1. Find BotFather in Telegram. 2. Create a bot with /newbot and copy the token. 3. Message the bot or add it to a group. 4. Enter the Chat ID. 5. Enable Telegram and start searching.',
+              tipLocal:'Shows system notifications on this Mac. 1. Enable Local Notifications. 2. Send a test. 3. If nothing appears, allow Terminal, Python, or osascript in System Settings > Notifications.',
+              tipEmail:'Sends mail through SMTP. 1. Enable SMTP with your provider. 2. Create an app password. 3. Enter host, port, username, and password. 4. Enter From and To. Port 465 commonly uses SSL/TLS; 587 commonly uses TLS.',
+              catalogMeta:'{open} open hotels in Japan · {coords} coordinates · {cache} · {checked}',
+              mystaysProvider:'MYSTAYS Hotel', toyokoShort:'Toyoko Inn', routeinnShort:'Route Inn', dormyShort:'Dormy Inn', mystaysShort:'MYSTAYS', daiwaShort:'Daiwa Roynet',
+              updateAvailableMessage:'Current: v{current} · Latest: v{latest}', selectedSummary:'Selected {selected} / {total}', showingResults:'Showing {shown} / {total}',
+              languageHelp:'The interface shows only the selected language.', secondsAgo:'{seconds}s ago'
+            };
+            const CJK_TEXT = /[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/;
+            function hasEnglishSuffix(value){
+              const text = String(value || '');
+              const split = text.lastIndexOf(' / ');
+              return split >= 0 && !CJK_TEXT.test(text.slice(split + 3));
+            }
+            function englishValue(value, key){
+              if (EN_UI[key] != null) return EN_UI[key];
+              const text = String(value || '');
+              if (hasEnglishSuffix(text)) return text.slice(text.lastIndexOf(' / ') + 3);
+              return text;
+            }
+            UI18N.en = {};
+            Object.keys(UI18N.zh_cn || {}).forEach(key => { UI18N.en[key] = englishValue(UI18N.zh_cn[key], key); });
+            Object.assign(UI18N.en, EN_UI);
+            Object.assign(UI18N.en, MOBILE_UI18N.en);
             const LANG_OPTION_TEXT = {
-              zh_cn: {zh_cn:'中文(简体) / Simplified Chinese', zh_tw:'中文(繁体) / Traditional Chinese', ja:'日语 / Japanese', ko:'韩语 / Korean'},
-              zh_tw: {zh_cn:'中文(簡體) / Simplified Chinese', zh_tw:'中文(繁體) / Traditional Chinese', ja:'日語 / Japanese', ko:'韓語 / Korean'},
-              ja: {zh_cn:'中国語(簡体) / Simplified Chinese', zh_tw:'中国語(繁体) / Traditional Chinese', ja:'日本語 / Japanese', ko:'韓国語 / Korean'},
-              ko: {zh_cn:'중국어(간체) / Simplified Chinese', zh_tw:'중국어(번체) / Traditional Chinese', ja:'일본어 / Japanese', ko:'한국어 / Korean'}
+              zh_cn: {zh_cn:'中文（简体）', zh_tw:'中文（繁體）', ja:'日语', ko:'韩语', en:'英语'},
+              zh_tw: {zh_cn:'中文（簡體）', zh_tw:'中文（繁體）', ja:'日語', ko:'韓語', en:'英語'},
+              ja: {zh_cn:'中国語（簡体）', zh_tw:'中国語（繁体）', ja:'日本語', ko:'韓国語', en:'英語'},
+              ko: {zh_cn:'중국어(간체)', zh_tw:'중국어(번체)', ja:'일본어', ko:'한국어', en:'영어'},
+              en: {zh_cn:'Simplified Chinese', zh_tw:'Traditional Chinese', ja:'Japanese', ko:'Korean', en:'English'}
             };
             function currentLang(){ return document.getElementById('primary_language')?.value || 'zh_cn'; }
-            function tx(key){ const lang=currentLang(); return (UI18N[lang] && UI18N[lang][key]) || UI18N.zh_cn[key] || key; }
+            function tx(key){
+              const lang = currentLang();
+              const override = SINGLE_UI_OVERRIDES[lang]?.[key];
+              if (override != null) return override;
+              const value = (UI18N[lang] && UI18N[lang][key]) || UI18N.en[key] || UI18N.zh_cn[key] || key;
+              if (lang === 'en') return String(value);
+              const text = String(value);
+              return hasEnglishSuffix(text) ? text.slice(0, text.lastIndexOf(' / ')) : text;
+            }
             function fmt(key, values){
               return tx(key).replace(/\{(\w+)\}/g, (_, name) => values && values[name] != null ? String(values[name]) : '');
+            }
+            const PROVIDER_IDS = ['toyoko', 'routeinn', 'dormy', 'mystays', 'daiwa'];
+            function providerShort(provider){
+              const key = `${PROVIDER_IDS.includes(provider) ? provider : 'toyoko'}Short`;
+              return tx(key);
             }
             function setNodeText(selector, text){ const el=document.querySelector(selector); if(el) el.textContent=text; }
             function setLabelFor(id, text){ const el=document.querySelector(`label[for="${id}"]`); if(el) el.textContent=text; }
@@ -538,6 +1043,288 @@
                 if (values[idx] != null) el.textContent = values[idx];
               });
             }
+            function storageGet(key, fallback=''){
+              try { return localStorage.getItem(key) || fallback; } catch(e) { return fallback; }
+            }
+            function storageSet(key, value){
+              try { localStorage.setItem(key, value); } catch(e) {}
+            }
+            function setSidebarOpen(open){
+              document.body.classList.toggle('sidebar-open', !!open);
+              const button = document.getElementById('mobile-nav-button');
+              const scrim = document.getElementById('sidebar-scrim');
+              if (button) button.setAttribute('aria-expanded', open ? 'true' : 'false');
+              if (scrim) scrim.hidden = !open;
+            }
+            function setSidebarCollapsed(collapsed, persist=true){
+              const isCollapsed = !!collapsed;
+              document.body.classList.toggle('sidebar-collapsed', isCollapsed);
+              const button = document.getElementById('sidebar-collapse-button');
+              if (button) {
+                const label = tx(isCollapsed ? 'expandNav' : 'collapseNav');
+                button.textContent = isCollapsed ? '›' : '‹';
+                button.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
+                button.setAttribute('aria-label', label);
+                button.title = label;
+              }
+              if (persist) storageSet(SIDEBAR_COLLAPSED_KEY, isCollapsed ? '1' : '0');
+              setTimeout(() => {
+                try { AREA_SELECTED_MAP?.invalidateSize(); } catch(e) {}
+                try { HOTEL_INFO_MAP?.invalidateSize(); } catch(e) {}
+              }, 240);
+            }
+            function switchAppView(view, options={}){
+              const next = APP_VIEWS.includes(view) ? view : 'search';
+              ACTIVE_APP_VIEW = next;
+              document.querySelectorAll('.app-view').forEach(panel => {
+                const active = panel.dataset.view === next;
+                panel.hidden = !active;
+                panel.classList.toggle('active', active);
+              });
+              document.querySelectorAll('[data-app-view]').forEach(button => {
+                const active = button.dataset.appView === next;
+                button.classList.toggle('active', active);
+                if (active) button.setAttribute('aria-current', 'page');
+                else button.removeAttribute('aria-current');
+              });
+              if (options.persist !== false) storageSet(APP_VIEW_KEY, next);
+              setSidebarOpen(false);
+              if (next === 'search-settings' || next === 'push-settings') {
+                const details = document.querySelector(`#view-${next} details.settings-panel`);
+                if (details) setDetailsOpen(details, true);
+              }
+              if (next === 'search') {
+                setDetailsOpen(document.getElementById('search_panel'), true);
+              }
+              setTimeout(() => {
+                try { AREA_SELECTED_MAP?.invalidateSize(); } catch(e) {}
+              }, 60);
+              if (options.focus === true) {
+                const heading = document.querySelector(`#view-${next} .view-header h1`);
+                if (heading) {
+                  heading.tabIndex = -1;
+                  heading.focus({preventScroll:true});
+                }
+              }
+              if (options.scroll !== false) window.scrollTo({top:0, behavior:options.instant ? 'auto' : 'smooth'});
+            }
+            function systemTheme(){
+              return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+            }
+            function applyTheme(preference, persist=true){
+              THEME_PREFERENCE = ['system','light','dark'].includes(preference) ? preference : 'system';
+              const resolved = THEME_PREFERENCE === 'system' ? systemTheme() : THEME_PREFERENCE;
+              document.body.dataset.theme = resolved;
+              document.body.dataset.themePreference = THEME_PREFERENCE;
+              document.querySelectorAll('[data-theme-choice]').forEach(button => {
+                const active = button.dataset.themeChoice === THEME_PREFERENCE;
+                button.classList.toggle('active', active);
+                button.setAttribute('aria-pressed', active ? 'true' : 'false');
+              });
+              const toggle = document.getElementById('theme-toggle-button');
+              if (toggle) {
+                toggle.textContent = resolved === 'dark' ? '☼' : '◐';
+                toggle.setAttribute('aria-label', `${tx('theme')}: ${resolved}`);
+                toggle.title = `${tx('theme')}: ${resolved}`;
+              }
+              if (persist) storageSet(THEME_KEY, THEME_PREFERENCE);
+              setTimeout(() => {
+                try { AREA_SELECTED_MAP?.invalidateSize(); } catch(e) {}
+                try { HOTEL_INFO_MAP?.invalidateSize(); } catch(e) {}
+              }, 60);
+            }
+            function setLanguageMenuOpen(open){
+              const menu = document.getElementById('language-menu');
+              const button = document.getElementById('language-menu-button');
+              if (menu) menu.hidden = !open;
+              if (button) button.setAttribute('aria-expanded', open ? 'true' : 'false');
+            }
+            function guideAppVersion(){
+              return document.body.dataset.appVersion || 'development';
+            }
+            function guideSteps(){
+              return [1,2,3,4,5].map(number => ({
+                title: tx(`guideStep${number}Title`),
+                body: tx(`guideStep${number}Body`),
+                tip: tx(`guideStep${number}Tip`)
+              }));
+            }
+            function renderGuideStep(){
+              const steps = guideSteps();
+              GUIDE_STEP = Math.max(0, Math.min(GUIDE_STEP, steps.length - 1));
+              const step = steps[GUIDE_STEP];
+              const set = (id, value) => {
+                const element = document.getElementById(id);
+                if (element) element.textContent = value;
+              };
+              set('guide-title', tx('guideTitle'));
+              set('guide-step-count', `${GUIDE_STEP + 1} / ${steps.length}`);
+              set('guide-step-title', step.title);
+              set('guide-step-body', step.body);
+              set('guide-step-tip', step.tip);
+              set('guide-skip-button', tx('guideSkip'));
+              set('guide-prev-button', tx('guideBack'));
+              set('guide-next-button', GUIDE_STEP === steps.length - 1 ? tx('guideFinish') : tx('guideNext'));
+              document.querySelectorAll('[data-guide-visual]').forEach((visual, index) => {
+                const active = index === GUIDE_STEP;
+                visual.hidden = !active;
+                visual.classList.toggle('active', active);
+              });
+              document.querySelectorAll('[data-guide-jump]').forEach((button, index) => {
+                const active = index === GUIDE_STEP;
+                button.classList.toggle('active', active);
+                if (active) button.setAttribute('aria-current', 'step');
+                else button.removeAttribute('aria-current');
+                button.setAttribute('aria-label', `${index + 1}: ${steps[index].title}`);
+              });
+              const progress = document.getElementById('guide-progress');
+              if (progress) progress.setAttribute('aria-label', tx('guideProgress'));
+              const previous = document.getElementById('guide-prev-button');
+              if (previous) previous.disabled = GUIDE_STEP === 0;
+            }
+            function openGuide(automatic=false){
+              const modal = document.getElementById('guide-modal');
+              if (!modal) return;
+              GUIDE_AUTO_OPEN = !!automatic;
+              GUIDE_STEP = 0;
+              renderGuideStep();
+              modal.hidden = false;
+              document.body.classList.add('guide-open');
+              setSidebarOpen(false);
+              setTimeout(() => document.getElementById('guide-next-button')?.focus(), 60);
+            }
+            function closeGuide(){
+              const modal = document.getElementById('guide-modal');
+              if (!modal || modal.hidden) return;
+              modal.hidden = true;
+              document.body.classList.remove('guide-open');
+              storageSet(GUIDE_SEEN_KEY, guideAppVersion());
+              const shouldRestoreFocus = !GUIDE_AUTO_OPEN;
+              GUIDE_AUTO_OPEN = false;
+              if (shouldRestoreFocus) document.getElementById('guide-open-button')?.focus();
+            }
+            function openUpdateDialog(automatic=false){
+              const modal = document.getElementById('update-modal');
+              if (!modal) return;
+              UPDATE_DIALOG_AUTO_OPEN = !!automatic;
+              modal.hidden = false;
+              document.body.classList.add('update-open');
+              setSidebarOpen(false);
+              renderUpdateDialog(LAST_UPDATE_STATUS || {
+                state:'idle',
+                current_version:document.body.dataset.appVersion || '-'
+              });
+              refreshUpdateStatus();
+              setTimeout(() => {
+                const target = document.getElementById('btn_upgrade');
+                if (target && !target.disabled) target.focus();
+                else document.getElementById('btn_update_check')?.focus();
+              }, 60);
+            }
+            function closeUpdateDialog(){
+              const modal = document.getElementById('update-modal');
+              if (!modal || modal.hidden) return;
+              modal.hidden = true;
+              document.body.classList.remove('update-open');
+              const shouldRestoreFocus = !UPDATE_DIALOG_AUTO_OPEN;
+              UPDATE_DIALOG_AUTO_OPEN = false;
+              if (shouldRestoreFocus) document.getElementById('update-open-button')?.focus();
+            }
+            function initAppShell(){
+              const storedView = storageGet(APP_VIEW_KEY, 'search');
+              const storedLanguage = storageGet(LANGUAGE_KEY, '');
+              const languageSelect = document.getElementById('primary_language');
+              if (languageSelect && ['zh_cn','zh_tw','ja','ko','en'].includes(storedLanguage)) languageSelect.value = storedLanguage;
+              setSidebarCollapsed(storageGet(SIDEBAR_COLLAPSED_KEY, '0') === '1', false);
+              THEME_PREFERENCE = storageGet(THEME_KEY, 'system');
+              applyTheme(THEME_PREFERENCE, false);
+              switchAppView(storedView, {persist:false, focus:false, scroll:false, instant:true});
+              document.querySelectorAll('[data-app-view]').forEach(button => {
+                button.addEventListener('click', () => switchAppView(button.dataset.appView));
+              });
+              document.getElementById('mobile-nav-button')?.addEventListener('click', () => {
+                setSidebarOpen(!document.body.classList.contains('sidebar-open'));
+              });
+              document.getElementById('sidebar-collapse-button')?.addEventListener('click', () => {
+                setSidebarCollapsed(!document.body.classList.contains('sidebar-collapsed'));
+              });
+              document.getElementById('sidebar-scrim')?.addEventListener('click', () => setSidebarOpen(false));
+              document.getElementById('language-menu-button')?.addEventListener('click', event => {
+                event.stopPropagation();
+                const menu = document.getElementById('language-menu');
+                setLanguageMenuOpen(!!menu?.hidden);
+              });
+              document.querySelectorAll('[data-language]').forEach(button => {
+                button.addEventListener('click', () => {
+                  const select = document.getElementById('primary_language');
+                  if (select) {
+                    select.value = button.dataset.language || 'zh_cn';
+                    select.dispatchEvent(new Event('change', {bubbles:true}));
+                  }
+                  setLanguageMenuOpen(false);
+                });
+              });
+              document.getElementById('theme-toggle-button')?.addEventListener('click', () => {
+                applyTheme(document.body.dataset.theme === 'dark' ? 'light' : 'dark');
+              });
+              document.getElementById('guide-open-button')?.addEventListener('click', () => openGuide(false));
+              document.getElementById('update-open-button')?.addEventListener('click', () => openUpdateDialog(false));
+              document.getElementById('btn_mobile_access_apply')?.addEventListener('click', () => saveMobileAccess(false));
+              document.getElementById('btn_mobile_access_rotate')?.addEventListener('click', () => saveMobileAccess(true));
+              document.getElementById('btn_mobile_access_copy')?.addEventListener('click', copyMobileAccessUrl);
+              document.querySelectorAll('[data-mobile-connection]').forEach(button => {
+                button.addEventListener('click', () => selectMobileConnection(button.dataset.mobileConnection || 'lan'));
+              });
+              document.getElementById('mobile_access_url')?.addEventListener('input', event => {
+                if (MOBILE_CONNECTION_MODE !== 'public') return;
+                const value = String(event.target?.value || '').trim();
+                const openLink = document.getElementById('btn_mobile_access_open');
+                if (openLink) {
+                  openLink.href = value || '#';
+                  openLink.setAttribute('aria-disabled', value ? 'false' : 'true');
+                }
+              });
+              document.getElementById('update-close-button')?.addEventListener('click', closeUpdateDialog);
+              document.getElementById('update-modal')?.addEventListener('click', event => {
+                if (event.target === event.currentTarget) closeUpdateDialog();
+              });
+              document.getElementById('guide-close-button')?.addEventListener('click', closeGuide);
+              document.getElementById('guide-skip-button')?.addEventListener('click', closeGuide);
+              document.getElementById('guide-prev-button')?.addEventListener('click', () => {
+                GUIDE_STEP -= 1;
+                renderGuideStep();
+              });
+              document.getElementById('guide-next-button')?.addEventListener('click', () => {
+                if (GUIDE_STEP >= guideSteps().length - 1) closeGuide();
+                else {
+                  GUIDE_STEP += 1;
+                  renderGuideStep();
+                }
+              });
+              document.querySelectorAll('[data-guide-jump]').forEach(button => {
+                button.addEventListener('click', () => {
+                  GUIDE_STEP = Number(button.dataset.guideJump || 0);
+                  renderGuideStep();
+                });
+              });
+              document.querySelectorAll('[data-theme-choice]').forEach(button => {
+                button.addEventListener('click', () => applyTheme(button.dataset.themeChoice || 'system'));
+              });
+              document.addEventListener('click', event => {
+                if (!event.target.closest?.('.language-menu-wrap')) setLanguageMenuOpen(false);
+              });
+              window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener?.('change', () => {
+                if (THEME_PREFERENCE === 'system') applyTheme('system', false);
+              });
+              document.addEventListener('keydown', event => {
+                if (event.key !== 'Escape') return;
+                if (!document.getElementById('update-modal')?.hidden) closeUpdateDialog();
+                else if (!document.getElementById('guide-modal')?.hidden) closeGuide();
+              });
+              setTimeout(() => {
+                if (storageGet(GUIDE_SEEN_KEY, '') !== guideAppVersion()) openGuide(true);
+              }, 450);
+            }
             const AREA_PRIMARY_NAME_BY_LANG = {
               ja: {
                 hokkaido:'北海道', tohoku:'東北', kanto:'関東', tokai:'東海 / 甲信越 / 北陸', kinki:'近畿', chugoku_shikoku:'中国 / 四国', kyushu_okinawa:'九州 / 沖縄',
@@ -561,13 +1348,13 @@
             function bilingualText(primary, english){
               const p = String(primary || '').trim();
               const e = String(english || '').trim();
-              if (p && e && p.toLowerCase() !== e.toLowerCase()) return `${p} / ${e}`;
-              return p || e;
+              return currentLang() === 'en' ? (e || p) : (p || e);
             }
             function localizedAreaParts(item){
               if (!item) return {primary:'', en:''};
               const lang = currentLang();
               const en = item.name || '';
+              if (lang === 'en') return {primary:en, en};
               if (lang === 'zh_cn' || lang === 'zh_tw') return {primary:item.label_zh || item.name_zh || '', en};
               const map = AREA_PRIMARY_NAME_BY_LANG[lang] || {};
               return {primary:map[item.key] || map[en] || '', en};
@@ -580,28 +1367,150 @@
               const lang = currentLang();
               const p = String(primary || '').trim();
               const e = String(english || p || '').trim();
+              if (lang === 'en') return `All of ${e}`;
               const allPrimary = lang === 'ja' ? `すべての ${p || e}` : lang === 'ko' ? `${p || e} 전체` : `全部 ${p || e}`;
-              return bilingualText(allPrimary, `All of ${e}`);
+              return allPrimary;
             }
             function channelName(key, fallback){
               const map = {telegram:'telegramName', local:'localName', email:'emailName', bark:'barkName', serverchan:'serverChanName'};
               return map[key] ? tx(map[key]) : (fallback || key);
             }
             function historyAreaFallback(kind, value){
-              const lang = currentLang();
               if (kind === 'region') {
-                if (!value) return lang === 'ja' ? '地域未選択 / No region' : lang === 'ko' ? '지역 미선택 / No region' : lang === 'zh_tw' ? '未選擇區域 / No region' : '未选择区域 / No region';
-                return `Region ${value}`;
+                if (!value) return tx('historyNoRegion');
+                const region = (AREA_INDEX?.regions || []).find(item => String(item.id) === String(value));
+                return region ? localizedAreaLabel(region) : String(value);
               }
-              if (!value) return lang === 'ja' ? 'すべての地域 / All areas' : lang === 'ko' ? '전체 지역 / All areas' : lang === 'zh_tw' ? '全部區域 / All areas' : '全部区域 / All areas';
-              return value;
+              if (!value) return tx('historyAllAreas');
+              const raw = String(value);
+              const regions = AREA_INDEX?.regions || [];
+              if (raw.startsWith('pref-')) {
+                const prefId = raw.slice(5);
+                const pref = regions.flatMap(region => region.prefectures || [])
+                  .find(item => String(item.id) === prefId);
+                if (pref) {
+                  const parts = localizedAreaParts(pref);
+                  return allOfLabel(parts.primary, parts.en || pref.name);
+                }
+              }
+              if (raw.startsWith('area-')) {
+                const areaId = raw.slice(5);
+                for (const region of regions) {
+                  for (const pref of region.prefectures || []) {
+                    const area = (pref.areas || []).find(item => String(item.id) === areaId);
+                    if (area) return `${localizedAreaLabel(pref)} - ${localizedAreaLabel(area)}`;
+                  }
+                }
+              }
+              return raw;
             }
             function applyUiLanguage(){
               const lang = currentLang();
               document.title = tx('appName');
               setNodeText('.topbar h2', tx('appName'));
-              setNodeText('#footer-app-name', tx('appName'));
+              setNodeText('.sidebar-brand strong', tx('appName'));
+              setNodeText('.sidebar-brand div > span', tx('workspace'));
               setLabelFor('primary_language', tx('language'));
+              const navLabels = document.querySelectorAll('.sidebar-nav .nav-label');
+              [tx('navSearch'), tx('navMonitor'), tx('searchSettings'), tx('pushSettings'), tx('interfaceSettings')]
+                .forEach((text, idx) => {
+                  if (navLabels[idx]) navLabels[idx].textContent = text;
+                  const button = navLabels[idx]?.closest('.sidebar-nav-item');
+                  if (button) button.title = text;
+                });
+              const viewHeaders = document.querySelectorAll('.app-view > .view-header');
+              const viewTitles = [tx('navSearch'), tx('navMonitor'), tx('searchSettings'), tx('pushSettings'), tx('interfaceSettings')];
+              const viewHelp = [tx('searchViewHelp'), tx('monitorViewHelp'), tx('searchSettingsViewHelp'), tx('pushSettingsViewHelp'), tx('interfaceViewHelp')];
+              viewHeaders.forEach((header, idx) => {
+                const title = header.querySelector('h1');
+                const help = header.querySelector('p');
+                if (title && viewTitles[idx]) title.textContent = viewTitles[idx];
+                if (help && viewHelp[idx]) help.textContent = viewHelp[idx];
+              });
+              const interfaceCards = document.querySelectorAll('.interface-card');
+              if (interfaceCards[0]) {
+                const title = interfaceCards[0].querySelector('h2');
+                const help = interfaceCards[0].querySelector('p');
+                if (title) title.textContent = tx('language');
+                if (help) help.textContent = tx('languageHelp');
+              }
+              if (interfaceCards[1]) {
+                const title = interfaceCards[1].querySelector('h2');
+                const help = interfaceCards[1].querySelector('p');
+                if (title) title.textContent = tx('theme');
+                if (help) help.textContent = tx('themeHelp');
+              }
+              setNodeText('#mobile-access-title', tx('mobileAccessTitle'));
+              setNodeText('#mobile-access-help', tx('mobileAccessHelp'));
+              setNodeText('#mobile-access-enable-label', tx('enableMobileAccess'));
+              setNodeText('#btn_mobile_access_apply', tx('mobileApply'));
+              setNodeText('#mobile-access-url-label', tx('mobileAddress'));
+              setNodeText('#mobile-access-code-label', tx('pairingCode'));
+              setNodeText('#btn_mobile_access_copy', tx('copy'));
+              setNodeText('#btn_mobile_access_rotate', tx('rotate'));
+              setNodeText('#mobile-access-method-title', tx('mobileChooseConnection'));
+              setNodeText('#mobile-lan-title', tx('mobileLanTitle'));
+              setNodeText('#mobile-lan-help', tx('mobileLanHelp'));
+              setNodeText('#mobile-tailscale-title', tx('mobileTailscaleTitle'));
+              setNodeText('#mobile-tailscale-help', tx('mobileTailscaleHelp'));
+              setNodeText('#mobile-public-title', tx('mobilePublicTitle'));
+              setNodeText('#mobile-public-help', tx('mobilePublicHelp'));
+              setNodeText('#mobile-step-network', tx('mobileStepNetwork'));
+              setNodeText('#mobile-step-scan', tx('mobileStepScan'));
+              setNodeText('#mobile-step-pair', tx('mobileStepPair'));
+              const mobileOpen = document.getElementById('btn_mobile_access_open');
+              if (mobileOpen) {
+                mobileOpen.setAttribute('aria-label', tx('mobileOpen'));
+                mobileOpen.title = tx('mobileOpen');
+              }
+              setNodeText('#mobile-access-note', tx('mobileNote'));
+              setNodeText('#mobile-access-qr-label', tx('mobileQr'));
+              if (LAST_MOBILE_ACCESS_STATUS) renderMobileAccess(LAST_MOBILE_ACCESS_STATUS);
+              const themeButtons = document.querySelectorAll('[data-theme-choice]');
+              [tx('themeSystem'), tx('themeLight'), tx('themeDark')].forEach((text, idx) => {
+                if (themeButtons[idx]) themeButtons[idx].textContent = text;
+              });
+              document.querySelectorAll('[data-language]').forEach(button => {
+                button.setAttribute('aria-checked', button.dataset.language === lang ? 'true' : 'false');
+                button.classList.toggle('active', button.dataset.language === lang);
+              });
+              const languageButton = document.getElementById('language-menu-button');
+              if (languageButton) {
+                languageButton.setAttribute('aria-label', tx('language'));
+                languageButton.title = tx('language');
+              }
+              const guideButton = document.getElementById('guide-open-button');
+              if (guideButton) {
+                guideButton.setAttribute('aria-label', tx('guideOpen'));
+                guideButton.title = tx('guideOpen');
+              }
+              const updateButton = document.getElementById('update-open-button');
+              if (updateButton) {
+                updateButton.setAttribute('aria-label', tx('updateOpen'));
+                updateButton.title = tx('updateOpen');
+              }
+              const updateClose = document.getElementById('update-close-button');
+              if (updateClose) {
+                updateClose.setAttribute('aria-label', tx('updateClose'));
+                updateClose.title = tx('updateClose');
+              }
+              const guideClose = document.getElementById('guide-close-button');
+              if (guideClose) {
+                guideClose.setAttribute('aria-label', tx('guideClose'));
+                guideClose.title = tx('guideClose');
+              }
+              renderGuideStep();
+              setNodeText('#update-dialog-kicker', tx('updateDialogKicker'));
+              setNodeText('#update-dialog-title', tx('updateDialogTitle'));
+              setNodeText('#update-app-name', tx('appName'));
+              setNodeText('#update-current-label', tx('currentVersionLabel'));
+              setNodeText('#update-latest-label', tx('latestVersionLabel'));
+              document.querySelector('.update-version-grid')?.setAttribute('aria-label', tx('versionInformation'));
+              setNodeText('#update-author-label', tx('authorLabel'));
+              setNodeText('#update-github-label', tx('githubLabel'));
+              setNodeText('#btn_update_check', tx('checkAgain'));
+              setSidebarCollapsed(document.body.classList.contains('sidebar-collapsed'), false);
+              applyTheme(THEME_PREFERENCE, false);
               setNodeText('#run_settings_legend', tx('runSettings'));
               setNodeText('#search_panel > summary', tx('search'));
               setNodeText('.search-title', tx('searchTitle'));
@@ -609,29 +1518,60 @@
               setNodeText('#btn_today', tx('tonight'));
               setNodeText('#btn_tomorrow', tx('tomorrow'));
               setNodeText('#btn_weekend', tx('weekend'));
-              const labels = document.querySelectorAll('.search-grid .control-box label');
-              [tx('checkin'), tx('checkout'), tx('people'), tx('rooms'), tx('smoking'), tx('roomType'), tx('membership')].forEach((text, idx)=>{ if(labels[idx]) labels[idx].textContent=text; });
+              setNodeText('.quick-date-field > label', tx('quickDates'));
+              setLabelFor('start_date', tx('checkin'));
+              setLabelFor('end_date', tx('checkout'));
+              setLabelFor('people', tx('people'));
+              setLabelFor('rooms', tx('rooms'));
+              setLabelFor('smoking', tx('smoking'));
+              setLabelFor('room_requirement', tx('roomType'));
+              setLabelFor('membership_status', tx('membership'));
+              document.querySelectorAll('[data-step-target="people"]').forEach(button => {
+                button.setAttribute('aria-label', tx(button.dataset.stepDelta === '-1' ? 'decreasePeople' : 'increasePeople'));
+              });
+              document.querySelectorAll('[data-step-target="rooms"]').forEach(button => {
+                button.setAttribute('aria-label', tx(button.dataset.stepDelta === '-1' ? 'decreaseRooms' : 'increaseRooms'));
+              });
+              setNodeText('.provider-selector-title', tx('hotelBrands'));
+              ['toyoko','routeinn','dormy','mystays','daiwa'].forEach(provider => {
+                const label = document.getElementById(`provider_${provider}`)?.closest('.provider-choice')?.querySelector('span');
+                if (label) label.textContent = tx(`${provider}Provider`);
+              });
+              setNodeText('#btn_provider_all', tx('allBrands'));
               const areaSummary = document.querySelector('#area_picker_panel > summary');
               if (areaSummary) areaSummary.textContent = tx('areaPicker');
               setInlineLabel('#hotel_picker_mode_tabs label:nth-child(1)', tx('areaMode'));
               setInlineLabel('#hotel_picker_mode_tabs label:nth-child(2)', tx('radiusMode'));
-              const areaLabels = document.querySelectorAll('#area_mode_panel .row label');
-              if (areaLabels[0]) areaLabels[0].textContent = tx('region');
-              if (areaLabels[1]) areaLabels[1].textContent = tx('detailArea');
-              const radiusLabels = document.querySelectorAll('#radius_mode_panel .radius-grid label');
-              if (radiusLabels[0]) radiusLabels[0].textContent = tx('placeAddressCoordinates');
-              if (radiusLabels[1]) radiusLabels[1].textContent = tx('radius');
+              setLabelFor('area_region', tx('region'));
+              setLabelFor('area_detail', tx('detailArea'));
+              setLabelFor('radius_query', tx('placeAddressCoordinates'));
+              const radiusLabel = document.querySelector('label[for="radius_km"]');
+              if (radiusLabel) radiusLabel.innerHTML = `${escText(tx('radius'))} <b><span id="radius_km_val">${escText(document.getElementById('radius_km')?.value || '')}</span> km</b>`;
+              const radiusQuery = document.getElementById('radius_query');
+              if (radiusQuery) radiusQuery.placeholder = tx('radiusPlaceholder');
               setNodeText('#btn_radius_load', tx('loadNearby'));
-              const radiusHelp = document.querySelector('#radius_mode_panel .area-toolbar .help');
-              if (radiusHelp) radiusHelp.textContent = tx('radiusHelp');
               setNodeText('#btn_area_load', tx('loadHotels'));
               setNodeText('#btn_area_all', tx('selectAll'));
               setNodeText('#btn_area_none', tx('selectNone'));
+              setNodeText('#btn_area_selected_only', tx('selectedOnly'));
+              const sortLabel = document.querySelector('.hotel-sort-control > span');
+              if (sortLabel) sortLabel.textContent = tx('sort');
+              setSelectOptions('area_sort', {
+                default:tx('sortDefault'), distance:tx('sortDistance'), name:tx('sortName'), code:tx('sortCode')
+              });
+              const workspaceTabs = document.querySelectorAll('[data-hotel-workspace-view]');
+              if (workspaceTabs[0]) workspaceTabs[0].textContent = tx('listView');
+              if (workspaceTabs[1]) workspaceTabs[1].textContent = tx('mapView');
+              setNodeText('#btn_catalog_refresh', tx('catalogRefresh'));
+              setNodeText('#btn_catalog_ack', tx('catalogAcknowledge'));
               setNodeText('.selected-map-title', tx('selectedHotelMap'));
               const mapStatus = document.getElementById('area_map_status');
               if (mapStatus && !(Array.isArray(AREA_HOTELS) && AREA_HOTELS.length)) mapStatus.textContent = tx('selectedHotelMapHint');
+              renderHotelCatalog(LAST_CATALOG_STATUS);
+              renderProviderCatalog(LAST_PROVIDER_CATALOG_STATUS);
               const areaFilter = document.getElementById('area_filter');
               if (areaFilter) areaFilter.placeholder = tx('filterPlaceholder');
+              syncProviderAllButton();
               const historySummary = document.querySelector('details.box:not(#area_picker_panel):not(#search_panel):not(.settings-panel) summary');
               if (historySummary) historySummary.textContent = tx('history');
               setNodeText('#btn_history_refresh', tx('refresh'));
@@ -661,10 +1601,13 @@
                 if (labels[1]) labels[1].textContent = tx('workers');
               }
               setCheckboxLabel('smart_parallel_enabled', tx('enableSmartParallel'));
+              setCheckboxLabel('adaptive_backoff_enabled', tx('adaptiveBackoff'));
               const cadenceCard = document.querySelectorAll('.settings-card')[2];
               if (cadenceCard) {
                 const labels = cadenceCard.querySelectorAll('label');
                 [tx('roundInterval'), tx('perHotelDelay'), tx('requestJitter')].forEach((text, idx)=>{ if(labels[idx]) labels[idx].textContent=text; });
+                const backoffHelp = cadenceCard.querySelector('.adaptive-backoff-help');
+                if (backoffHelp) backoffHelp.textContent = tx('adaptiveBackoffHelp');
               }
 	              const reminderCard = document.querySelectorAll('.settings-card')[3];
 	              if (reminderCard) {
@@ -707,7 +1650,7 @@
               if (soundHelp && soundHelp.classList.contains('help')) soundHelp.textContent = tx('criticalSoundHelp');
               const localHelp = document.querySelector('#enable_local')?.closest('.settings-card')?.querySelector('.help');
               if (localHelp) localHelp.textContent = tx('localHelp');
-              document.querySelectorAll('.settings-card .help').forEach(help => {
+              document.querySelectorAll('.settings-card .help, #radius_mode_panel .radius-grid .help').forEach(help => {
                 if (help.querySelector('#smart_parallel_workers_val')) help.innerHTML = `${tx('current')}: <b><span id="smart_parallel_workers_val">${document.getElementById('smart_parallel_workers')?.value || ''}</span></b>（${tx('smartParallelHelp')}）`;
                 if (help.querySelector('#loop_interval_val')) help.innerHTML = `${tx('current')}: <b><span id="loop_interval_val">${document.getElementById('loop_interval')?.value || ''}</span></b> ${tx('seconds')}（${tx('recommended120')}）`;
                 if (help.querySelector('#per_hotel_delay_val')) help.innerHTML = `${tx('current')}: <b><span id="per_hotel_delay_val">${document.getElementById('per_hotel_delay')?.value || ''}</span></b> ${tx('seconds')}`;
@@ -725,35 +1668,54 @@
               setNodeText('.run-title', tx('runTitle'));
               setNodeText('.run-subtitle', tx('runSubtitle'));
               setAllText('.metric > span', [tx('status'), tx('loop'), tx('progress'), tx('uptime')]);
+              setNodeText('#snapshot-dates-label', tx('dates'));
+              setNodeText('#snapshot-hotels-label', tx('snapshotHotels'));
+              setNodeText('#snapshot-engine-label', tx('engineSummary'));
+              setNodeText('#snapshot-cadence-label', tx('roundSummary'));
+              setNodeText('#snapshot-safety-label', tx('safety'));
               setAllText('.result-stat span', [tx('available'), tx('unavailable'), tx('check'), tx('total')]);
               setAllText('.result-table:not(.result-log-table) th', [tx('code'), tx('hotel'), tx('status'), tx('minPrice'), tx('left'), tx('roomType')]);
               setAllText('.result-log-table th', [tx('code'), tx('hotel'), tx('availableSince'), tx('duration'), tx('minPrice'), tx('roomType')]);
               setNodeText('.push-subtitle', tx('pushSubtitle'));
-              setNodeText('#btn_start', tx('start'));
+              setNodeText('#btn_scan_once', tx('scanOnce'));
+              setNodeText('#btn_start', LAST_RUNNING ? tx('restart') : tx('start'));
               setNodeText('#btn_stop', tx('stop'));
               setNodeText('#btn_default', tx('defaults'));
               setNodeText('#btn_local_test', tx('testNotification'));
+              const resultFilterButtons = document.querySelectorAll('[data-result-filter]');
+              [tx('allFilter'), tx('available'), tx('unavailable'), tx('check'), tx('changesFilter')].forEach((text, idx) => {
+                if (resultFilterButtons[idx]) resultFilterButtons[idx].textContent = text;
+              });
+              const resultQuery = document.getElementById('result_query');
+              if (resultQuery) resultQuery.placeholder = tx('resultSearchPlaceholder');
+              setNodeText('#btn_results_refresh', tx('refreshResults'));
+              setNodeText('#btn_results_export', tx('exportResults'));
+              setLabelFor('result_query', tx('resultTitle'));
+              setLabelFor('results_sort', tx('sort'));
+              setSelectOptions('results_sort', {
+                default: tx('sortDefault'), status: tx('sortStatus'), price: tx('sortPrice'),
+                name: tx('sortName'), distance: tx('sortDistance')
+              });
               const langLabels = LANG_OPTION_TEXT[lang] || LANG_OPTION_TEXT.zh_cn;
               setSelectOptions('primary_language', langLabels);
+              const localizedOptions = ({
+                zh_cn:{noSmoking:'无烟房',Smoking:'吸烟房',all:'不限制',any:'不限制',single:'单人房',double:'大床房',twin:'双床房',member:'会员',non_member:'非会员',unknown:'未知',http:'HTTP/API（推荐轻量）',playwright:'Playwright（兼容模式）'},
+                zh_tw:{noSmoking:'禁菸房',Smoking:'吸菸房',all:'不限制',any:'不限制',single:'單人房',double:'雙人床房',twin:'雙床房',member:'會員',non_member:'非會員',unknown:'未知',http:'HTTP/API（推薦輕量）',playwright:'Playwright（相容模式）'},
+                ja:{noSmoking:'禁煙',Smoking:'喫煙',all:'指定なし',any:'指定なし',single:'シングル',double:'ダブル',twin:'ツイン',member:'会員',non_member:'非会員',unknown:'不明',http:'HTTP/API（推奨・軽量）',playwright:'Playwright（互換性重視）'},
+                ko:{noSmoking:'금연',Smoking:'흡연',all:'제한 없음',any:'제한 없음',single:'싱글',double:'더블',twin:'트윈',member:'회원',non_member:'비회원',unknown:'알 수 없음',http:'HTTP/API (권장, 경량)',playwright:'Playwright (호환성 우선)'},
+                en:{noSmoking:'Non-Smoking',Smoking:'Smoking',all:'Any',any:'Any',single:'Single',double:'Double',twin:'Twin',member:'Member',non_member:'Non-member',unknown:'Unknown',http:'HTTP/API (recommended, lightweight)',playwright:'Playwright (compatibility mode)'}
+              })[lang] || {};
               setSelectOptions('smoking', {
-                noSmoking: lang === 'ja' ? '禁煙 / Non-Smoking' : lang === 'ko' ? '금연 / Non-Smoking' : lang === 'zh_tw' ? '禁菸房 / Non-Smoking' : '无烟房 / Non-Smoking',
-                Smoking: lang === 'ja' ? '喫煙 / Smoking' : lang === 'ko' ? '흡연 / Smoking' : lang === 'zh_tw' ? '吸菸房 / Smoking' : '吸烟房 / Smoking',
-                all: lang === 'ja' ? '指定なし / Any' : lang === 'ko' ? '제한 없음 / Any' : lang === 'zh_tw' ? '不限制 / Any' : '不限制 / Any'
+                noSmoking: localizedOptions.noSmoking, Smoking: localizedOptions.Smoking, all: localizedOptions.all
               });
               setSelectOptions('room_requirement', {
-                any: lang === 'ja' ? '指定なし / Any' : lang === 'ko' ? '제한 없음 / Any' : lang === 'zh_tw' ? '不限制 / Any' : '不限制 / Any',
-                single: lang === 'ja' ? 'シングル / Single' : lang === 'ko' ? '싱글 / Single' : lang === 'zh_tw' ? '單人房 / Single' : '单人房 / Single',
-                double: lang === 'ja' ? 'ダブル / Double' : lang === 'ko' ? '더블 / Double' : lang === 'zh_tw' ? '雙人床房 / Double' : '大床房 / Double',
-                twin: lang === 'ja' ? 'ツイン / Twin' : lang === 'ko' ? '트윈 / Twin' : lang === 'zh_tw' ? '雙床房 / Twin' : '双床房 / Twin'
+                any: localizedOptions.any, single: localizedOptions.single, double: localizedOptions.double, twin: localizedOptions.twin
               });
               setSelectOptions('membership_status', {
-                member: lang === 'ja' ? '会員 / Member' : lang === 'ko' ? '회원 / Member' : lang === 'zh_tw' ? '會員 / Member' : '会员 / Member',
-                non_member: lang === 'ja' ? '非会員 / Non-member' : lang === 'ko' ? '비회원 / Non-member' : lang === 'zh_tw' ? '非會員 / Non-member' : '非会员 / Non-member',
-                unknown: lang === 'ja' ? '不明 / Unknown' : lang === 'ko' ? '알 수 없음 / Unknown' : lang === 'zh_tw' ? '未知 / Unknown' : '未知 / Unknown'
+                member: localizedOptions.member, non_member: localizedOptions.non_member, unknown: localizedOptions.unknown
               });
               setSelectOptions('engine', {
-                http: lang === 'ja' ? 'HTTP/API（推奨・軽量） / Recommended, lightweight' : lang === 'ko' ? 'HTTP/API (권장, 경량) / Recommended, lightweight' : lang === 'zh_tw' ? 'HTTP/API（推薦輕量） / Recommended, lightweight' : 'HTTP/API（推荐轻量） / Recommended, lightweight',
-                playwright: lang === 'ja' ? 'Playwright（互換性重視） / Compatibility mode' : lang === 'ko' ? 'Playwright (호환성 우선) / Compatibility mode' : lang === 'zh_tw' ? 'Playwright（相容模式） / Compatibility mode' : 'Playwright（兼容模式） / Compatibility mode'
+                http: localizedOptions.http, playwright: localizedOptions.playwright
               });
               const region = document.getElementById('area_region');
               if (region && region.options.length) {
@@ -778,8 +1740,22 @@
               populateAreaDetails(true);
               renderPushStatus(LAST_PUSH_STATUS || []);
               refreshSearchHistory();
-              if (LAST_UPDATE_STATUS) renderUpdateBanner(LAST_UPDATE_STATUS);
+              renderUpdateDialog(LAST_UPDATE_STATUS || null);
               if (Array.isArray(AREA_HOTELS)) renderSelectedHotelMap();
+              if (typeof updateAreaSelectionSummary === 'function') updateAreaSelectionSummary();
+              setConfigDirty(FORM_DIRTY);
+              setConnectionOnline(CONNECTION_ONLINE);
+              setRunning(LAST_RUNNING);
+              if (LAST_PROGRESS_STATE) renderProgress(LAST_PROGRESS_STATE);
+              else {
+                setNodeText('#snapshot-safety', tx('safetyNormal'));
+                setNodeText('#prog-text', `${tx('progressText')}: 0 / 0 (0%)`);
+                setNodeText('#time-text', `${tx('loopElapsed')}: 0s | ${tx('uptime')}: 0s`);
+                setNodeText('#action-text', `${tx('currentAction')}: (idle)`);
+              }
+              setNodeText('.result-log-table .empty-results', tx('noLog'));
+              updateResultsTimestamp();
+              if (Array.isArray(LAST_RESULTS)) renderRows();
             }
 
             function renderProgress(p){
@@ -806,6 +1782,18 @@
               document.getElementById('time-text').textContent = `${tx('loopElapsed')}: ${relH} | ${tx('uptime')}: ${upH}`;
               const uptimeEl = document.getElementById('uptime-text');
               if (uptimeEl) uptimeEl.textContent = upH;
+              const safety = document.getElementById('snapshot-safety');
+              if (safety) {
+                const multiplier = Math.max(1, Number(p.backoff_multiplier || 1));
+                const ratio = Math.max(0, Number(p.unknown_ratio_percent || 0));
+                safety.textContent = multiplier > 1
+                  ? fmt('safetyBackoff', {multiplier, ratio})
+                  : tx('safetyNormal');
+                safety.className = multiplier > 1 ? 'safety-backoff' : 'safety-normal';
+                safety.title = p.effective_interval_sec
+                  ? `${Number(p.effective_interval_sec)}s`
+                  : '';
+              }
               if (waiting && waitTotal > 0) startProgressSmoothing();
             }
 
@@ -830,7 +1818,21 @@
             }
 
             function renderSummary(cfg){
-              return;
+              if (!cfg) return;
+              const dates = `${cfg.start_date || '-'} → ${cfg.end_date || '-'}`;
+              const hotelCount = Array.isArray(cfg.hotel_codes)
+                ? cfg.hotel_codes.length
+                : (Array.isArray(cfg.selected_hotels) ? cfg.selected_hotels.length : 0);
+              const engine = cfg.engine === 'playwright' ? 'Playwright' : 'HTTP/API';
+              const cadence = `${Number(cfg.loop_interval_seconds || 30)}s`;
+              const set = (id, value) => {
+                const element = document.getElementById(id);
+                if (element) element.textContent = String(value);
+              };
+              set('snapshot-dates', dates);
+              set('snapshot-hotels', hotelCount);
+              set('snapshot-engine', engine);
+              set('snapshot-cadence', cadence);
             }
 
             function pad2(n){ return (n<10? '0':'') + n; }
@@ -870,6 +1872,9 @@
               const selected = new Set(selectedAreaCodes());
               return AREA_HOTELS.filter(h => selected.has(String(h.code))).map(h => ({
                 code: String(h.code || ''),
+                display_code: h.display_code || '',
+                provider: h.provider || 'toyoko',
+                brand: h.brand || '',
                 name: h.name || '',
                 name_primary: h.name_primary || '',
                 name_zh: h.name_zh || '',
@@ -880,13 +1885,25 @@
                 name_en: h.name_en || h.name || '',
                 url: h.url || '',
                 map_url: h.map_url || '',
+                reservation_url: h.reservation_url || '',
+                address: h.address || '',
+                access: h.access || '',
                 lat: h.lat ?? null,
                 lng: h.lng ?? null,
-                distance_km: h.distance_km ?? null
+                distance_km: h.distance_km ?? null,
+                booking_code: h.booking_code || '',
+                provider_hotel_id: h.provider_hotel_id || '',
+                search_keyword: h.search_keyword || '',
+                prefecture: h.prefecture || '',
+                region_id: h.region_id ?? null,
+                prefecture_id: h.prefecture_id ?? null
               }));
             }
             function currentSearchMode(){
               return document.querySelector('input[name="hotel_picker_mode"]:checked')?.value || 'area';
+            }
+            function enabledProviders(){
+              return PROVIDER_IDS.filter(provider => document.getElementById(`provider_${provider}`)?.checked);
             }
             function selectedOptionText(id){
               const el = document.getElementById(id);
@@ -906,6 +1923,7 @@
                 room_requirement: document.getElementById('room_requirement').value,
                 membership_status: document.getElementById('membership_status').value,
                 primary_language: document.getElementById('primary_language') ? document.getElementById('primary_language').value : 'zh_cn',
+                enabled_providers: enabledProviders(),
                 hotel_codes: selectedCodes,
                 hotel_codes_raw: '',
                 selected_hotels: selectedAreaHotels(),
@@ -951,6 +1969,7 @@
                 request_jitter_percent: Number(document.getElementById('request_jitter').value),
                 smart_parallel_enabled: document.getElementById('smart_parallel_enabled').checked,
                 smart_parallel_workers: Number(document.getElementById('smart_parallel_workers').value),
+                adaptive_backoff_enabled: document.getElementById('adaptive_backoff_enabled')?.checked ?? true,
                 engine: (document.getElementById('engine') ? document.getElementById('engine').value : 'http')
               };
             }
@@ -998,7 +2017,7 @@
             }
 
             ['start_date','end_date','people','rooms','smoking','room_requirement','membership_status','primary_language','engine',
-             'smart_parallel_enabled','smart_parallel_workers',
+             'smart_parallel_enabled','smart_parallel_workers','adaptive_backoff_enabled',
              'enable_telegram','bot_token','chat_id','enable_bark','bark_key','bark_server','bark_critical_enabled','bark_critical_volume','bark_critical_sound','enable_serverchan','serverchan_sendkey',
              'enable_local','enable_email','smtp_host','smtp_port','smtp_tls','smtp_user','smtp_pass','email_from','email_to',
              'notify_available','notify_unavailable','notify_availability_count_change','notify_start','notify_stop','notify_search_error',
@@ -1017,6 +2036,7 @@
               el.addEventListener('change', syncDisplayValues);
             });
             // Initial sync
+            initAppShell();
             syncDisplayValues();
             applyUiLanguage();
             function syncDisplayValues(){
@@ -1053,16 +2073,221 @@
             var LAST_UPDATE_STATUS = null;
             var AREA_SELECTED_MAP = null;
             var AREA_SELECTED_MARKERS = [];
+            var AREA_MARKERS_BY_CODE = new Map();
+            var AREA_SELECTED_ONLY = false;
+            var AREA_SORT = 'default';
             function escText(s){
               return String(s == null ? '' : s).replace(/[&<>"']/g, (m) => ({
                 '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
               }[m]));
+            }
+            function hotelInfoTravelText(mode, minutes){
+              const value = Number(minutes);
+              const n = Number.isFinite(value) ? value : '-';
+              const labels = {
+                zh_cn: {walk:`步行 ${n} 分钟 / ${n} min walk`, drive:`驾车 ${n} 分钟 / ${n} min drive`, bus:`巴士 ${n} 分钟 / ${n} min by bus`},
+                zh_tw: {walk:`步行 ${n} 分鐘 / ${n} min walk`, drive:`開車 ${n} 分鐘 / ${n} min drive`, bus:`巴士 ${n} 分鐘 / ${n} min by bus`},
+                ja: {walk:`徒歩 ${n}分 / ${n} min walk`, drive:`車で ${n}分 / ${n} min drive`, bus:`バスで ${n}分 / ${n} min by bus`},
+                ko: {walk:`도보 ${n}분 / ${n} min walk`, drive:`차량 ${n}분 / ${n} min drive`, bus:`버스 ${n}분 / ${n} min by bus`}
+              };
+              const dictionary = labels[currentLang()] || labels.zh_cn;
+              return dictionary[mode] || dictionary.walk;
+            }
+            function hotelInfoAccessSection(title, items, type){
+              if (!Array.isArray(items) || !items.length) return '';
+              const rows = items.map(item => {
+                let place = '';
+                let travelMode = 'walk';
+                if (type === 'train') place = [item.line, item.station, item.exit].filter(Boolean).join(' · ');
+                if (type === 'car') {
+                  place = [item.road, item.ic].filter(Boolean).join(' · ');
+                  travelMode = 'drive';
+                }
+                if (type === 'plane') {
+                  place = [item.airport].filter(Boolean).join(' · ');
+                  travelMode = item.transportation === 'walk' ? 'walk' : 'bus';
+                }
+                return `<li><span>${escText(place)}</span><b>${escText(hotelInfoTravelText(travelMode, item.time))}</b></li>`;
+              }).join('');
+              return `<section class="hotel-info-section"><h4>${escText(title)}</h4><ul>${rows}</ul></section>`;
+            }
+            function positionHotelInfoPopover(trigger){
+              const panel = document.getElementById('hotel-info-popover');
+              if (!panel || !trigger || panel.hidden) return;
+              const rect = trigger.getBoundingClientRect();
+              const gap = 12;
+              const margin = 12;
+              if (window.innerWidth <= 720) {
+                panel.style.left = `${margin}px`;
+                panel.style.right = `${margin}px`;
+                panel.style.width = 'auto';
+              } else {
+                panel.style.right = 'auto';
+                panel.style.width = '390px';
+                let left = rect.right + gap;
+                if (left + 390 > window.innerWidth - margin) left = Math.max(margin, rect.left - 390 - gap);
+                panel.style.left = `${left}px`;
+              }
+              const panelHeight = Math.min(panel.offsetHeight || 420, window.innerHeight - margin * 2);
+              const top = Math.max(margin, Math.min(rect.top - 8, window.innerHeight - panelHeight - margin));
+              panel.style.top = `${top}px`;
+            }
+            function renderHotelInfoLoading(trigger){
+              destroyHotelInfoMap();
+              const panel = document.getElementById('hotel-info-popover');
+              if (!panel) return;
+              panel.innerHTML = `<div class="hotel-info-head"><div><span>${escText(tx('hotelInfo'))}</span><h3>${escText(trigger.textContent || '')}</h3></div></div><div class="hotel-info-loading"><span></span><span></span><span></span><p>${escText(tx('loadingHotelInfo'))}</p></div>`;
+              panel.hidden = false;
+              positionHotelInfoPopover(trigger);
+            }
+            function renderHotelInfoPanel(info, trigger){
+              const panel = document.getElementById('hotel-info-popover');
+              if (!panel) return;
+              destroyHotelInfoMap();
+              const mapImage = info.map_image_url
+                ? `<a class="hotel-info-map-image" href="${escText(info.google_map_url || info.official_url)}" target="_blank" rel="noreferrer noopener"><img src="${escText(info.map_image_url)}${String(info.map_image_url).includes('toyoko-inn.imagewave.pictures') ? '?width=750' : ''}" alt="${escText(info.name || '')}"></a>`
+                : (Number.isFinite(Number(info.lat)) && Number.isFinite(Number(info.lng)) ? '<div id="hotel-info-mini-map" class="hotel-info-mini-map"></div>' : '');
+              const train = hotelInfoAccessSection(tx('byTrain'), info.train_access, 'train');
+              const car = hotelInfoAccessSection(tx('byCar'), info.car_access, 'car');
+              const plane = hotelInfoAccessSection(tx('byPlane'), info.plane_access, 'plane');
+              panel.innerHTML = `
+                <div class="hotel-info-head"><div><span>${escText(tx('officialReference'))}</span><h3>${escText(info.name || trigger.textContent || '')}</h3></div></div>
+                ${mapImage}
+                <section class="hotel-info-section hotel-info-address"><h4>${escText(tx('addressLabel'))}</h4><p>${escText(info.address || '-')}</p></section>
+                <div class="hotel-info-directions-title">${escText(tx('directionsLabel'))}</div>
+                ${train}${car}${plane}
+                ${info.access_remarks ? `<p class="hotel-info-remarks">${escText(info.access_remarks)}</p>` : ''}
+                <div class="hotel-info-links">
+                  <a href="${escText(info.official_url)}" target="_blank" rel="noreferrer noopener">${escText(tx('openOfficial'))}</a>
+                  ${info.google_map_url ? `<a href="${escText(info.google_map_url)}" target="_blank" rel="noreferrer noopener">${escText(tx('openMap'))}</a>` : ''}
+                </div>`;
+              panel.hidden = false;
+              const image = panel.querySelector('img');
+              if (image) image.addEventListener('error', () => image.closest('.hotel-info-map-image')?.remove(), {once:true});
+              const miniMap = panel.querySelector('#hotel-info-mini-map');
+              if (miniMap && typeof L !== 'undefined') {
+                HOTEL_INFO_MAP = L.map(miniMap, {zoomControl: false, attributionControl: false, dragging: false, scrollWheelZoom: false})
+                  .setView([Number(info.lat), Number(info.lng)], 15);
+                L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom: 19}).addTo(HOTEL_INFO_MAP);
+                L.marker([Number(info.lat), Number(info.lng)]).addTo(HOTEL_INFO_MAP);
+              }
+              requestAnimationFrame(() => positionHotelInfoPopover(trigger));
+            }
+            function renderHotelInfoError(trigger){
+              const panel = document.getElementById('hotel-info-popover');
+              if (!panel) return;
+              destroyHotelInfoMap();
+              panel.innerHTML = `<div class="hotel-info-head"><div><span>${escText(tx('hotelInfo'))}</span><h3>${escText(trigger.textContent || '')}</h3></div></div><div class="hotel-info-error">${escText(tx('hotelInfoUnavailable'))}</div>`;
+              panel.hidden = false;
+              positionHotelInfoPopover(trigger);
+            }
+            async function hotelInfoFor(code, language){
+              const key = `${code}:${language}`;
+              if (HOTEL_INFO_CACHE.has(key)) return HOTEL_INFO_CACHE.get(key);
+              if (!HOTEL_INFO_REQUESTS.has(key)) {
+                const requestPromise = fetch(`/hotel_info?code=${encodeURIComponent(code)}&language=${encodeURIComponent(language)}`)
+                  .then(async response => {
+                    const payload = await response.json();
+                    if (!response.ok || !payload.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+                    HOTEL_INFO_CACHE.set(key, payload.info);
+                    return payload.info;
+                  })
+                  .finally(() => HOTEL_INFO_REQUESTS.delete(key));
+                HOTEL_INFO_REQUESTS.set(key, requestPromise);
+              }
+              return HOTEL_INFO_REQUESTS.get(key);
+            }
+            async function showHotelInfo(trigger){
+              const rawCode = String(trigger?.dataset?.hotelCode || '').trim();
+              const code = /^\d{1,5}$/.test(rawCode) ? rawCode.padStart(5, '0') : rawCode;
+              if (!code || code.length > 160) return;
+              ACTIVE_HOTEL_INFO_TRIGGER = trigger;
+              const language = currentLang();
+              const requestKey = `${code}:${language}`;
+              renderHotelInfoLoading(trigger);
+              try {
+                const info = await hotelInfoFor(code, language);
+                if (ACTIVE_HOTEL_INFO_TRIGGER !== trigger || `${code}:${currentLang()}` !== requestKey) return;
+                renderHotelInfoPanel(info, trigger);
+              } catch(e) {
+                if (ACTIVE_HOTEL_INFO_TRIGGER === trigger) renderHotelInfoError(trigger);
+              }
+            }
+            function scheduleHotelInfoShow(trigger){
+              clearTimeout(HOTEL_INFO_HIDE_TIMER);
+              clearTimeout(HOTEL_INFO_SHOW_TIMER);
+              if (ACTIVE_HOTEL_INFO_TRIGGER === trigger && !document.getElementById('hotel-info-popover')?.hidden) return;
+              HOTEL_INFO_SHOW_TIMER = setTimeout(() => showHotelInfo(trigger), 350);
+            }
+            function hideHotelInfoNow(){
+              clearTimeout(HOTEL_INFO_SHOW_TIMER);
+              destroyHotelInfoMap();
+              const panel = document.getElementById('hotel-info-popover');
+              if (panel) panel.hidden = true;
+              ACTIVE_HOTEL_INFO_TRIGGER = null;
+            }
+            function destroyHotelInfoMap(){
+              if (!HOTEL_INFO_MAP) return;
+              try { HOTEL_INFO_MAP.remove(); } catch(e) {}
+              HOTEL_INFO_MAP = null;
+            }
+            function scheduleHotelInfoHide(){
+              clearTimeout(HOTEL_INFO_SHOW_TIMER);
+              clearTimeout(HOTEL_INFO_HIDE_TIMER);
+              HOTEL_INFO_HIDE_TIMER = setTimeout(hideHotelInfoNow, 180);
+            }
+            function initHotelInfoPreview(){
+              const panel = document.getElementById('hotel-info-popover');
+              if (!panel) return;
+              document.addEventListener('pointerover', event => {
+                const trigger = event.target.closest?.('.hotel-info-trigger');
+                if (!trigger || trigger.contains(event.relatedTarget)) return;
+                scheduleHotelInfoShow(trigger);
+              });
+              document.addEventListener('pointerout', event => {
+                const trigger = event.target.closest?.('.hotel-info-trigger');
+                if (!trigger || trigger.contains(event.relatedTarget) || panel.contains(event.relatedTarget)) return;
+                scheduleHotelInfoHide();
+              });
+              document.addEventListener('focusin', event => {
+                const trigger = event.target.closest?.('.hotel-info-trigger');
+                if (trigger) scheduleHotelInfoShow(trigger);
+              });
+              document.addEventListener('focusout', event => {
+                const trigger = event.target.closest?.('.hotel-info-trigger');
+                if (trigger && !panel.contains(event.relatedTarget)) scheduleHotelInfoHide();
+              });
+              panel.addEventListener('pointerenter', () => clearTimeout(HOTEL_INFO_HIDE_TIMER));
+              panel.addEventListener('pointerleave', scheduleHotelInfoHide);
+              panel.addEventListener('focusin', () => clearTimeout(HOTEL_INFO_HIDE_TIMER));
+              panel.addEventListener('focusout', event => {
+                if (!panel.contains(event.relatedTarget)) scheduleHotelInfoHide();
+              });
+              document.addEventListener('keydown', event => {
+                if (event.key === 'Escape') hideHotelInfoNow();
+              });
+              window.addEventListener('resize', () => {
+                if (ACTIVE_HOTEL_INFO_TRIGGER) positionHotelInfoPopover(ACTIVE_HOTEL_INFO_TRIGGER);
+              });
             }
             function setAreaStatus(text, isError=false){
               const el = document.getElementById('area_status');
               if (!el) return;
               el.textContent = text;
               el.style.color = isError ? '#a33a3a' : '#777';
+            }
+            function setAreaLoading(buttonId, loading){
+              const button = document.getElementById(buttonId);
+              if (!button) return;
+              if (loading) {
+                button.dataset.idleText = button.textContent;
+                button.textContent = tx('loadingHotels');
+              } else if (button.dataset.idleText) {
+                button.textContent = button.dataset.idleText;
+                delete button.dataset.idleText;
+              }
+              button.disabled = !!loading;
+              button.setAttribute('aria-busy', loading ? 'true' : 'false');
             }
             function validMapCoord(h){
               const lat = Number(h && h.lat);
@@ -1077,6 +2302,126 @@
               }
               return fmt('showingSelectedHotels', {count: coordCount});
             }
+            function catalogDateText(value){
+              if (!value) return tx('catalogNeverChecked');
+              const date = new Date(value);
+              if (Number.isNaN(date.getTime())) return tx('catalogNeverChecked');
+              const locale = {zh_cn:'zh-CN', zh_tw:'zh-TW', ja:'ja-JP', ko:'ko-KR', en:'en-US'}[currentLang()] || 'en-US';
+              const time = date.toLocaleString(locale, {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
+              return fmt('catalogCheckedAt', {time});
+            }
+            function catalogHotelLink(hotel){
+              const code = String(hotel?.code || '');
+              const name = bilingualText(hotel?.name_primary || hotel?.name || '', hotel?.name_en || hotel?.name || '');
+              const text = `${code}${name ? ` ${name}` : ''}`;
+              return hotel?.url
+                ? `<a href="${escText(hotel.url)}" target="_blank" rel="noreferrer noopener">${escText(text)}</a>`
+                : escText(text);
+            }
+            function renderHotelCatalog(status){
+              if (status) LAST_CATALOG_STATUS = status;
+              const data = LAST_CATALOG_STATUS;
+              const panel = document.getElementById('hotel_catalog_panel');
+              if (!panel || !data) return;
+              const state = String(data.state || 'idle');
+              panel.className = `catalog-status ${state}${data.cache_fresh === false ? ' stale' : ''}`;
+              const titleByState = {
+                checking: 'catalogChecking', failed: 'catalogFailed', updated: 'catalogUpdated',
+                fresh: 'catalogFresh', idle: 'catalogTitle'
+              };
+              const title = document.getElementById('hotel_catalog_title');
+              if (title) title.textContent = tx(titleByState[state] || 'catalogTitle');
+              const cacheText = tx(data.cache_fresh ? 'catalogCacheFresh' : 'catalogCacheStale');
+              let metaText = fmt('catalogMeta', {
+                open: Number(data.open_japan_count || 0),
+                coords: Number(data.coordinate_count || 0),
+                cache: cacheText,
+                checked: catalogDateText(data.checked_at)
+              });
+              const unresolved = Number(data.unresolved_coordinate_count || 0);
+              if (unresolved > 0) metaText += ` · ${fmt('catalogUnresolved', {count: unresolved})}`;
+              if (state === 'failed' && data.last_error) metaText += ` · ${String(data.last_error).slice(0, 180)}`;
+              const meta = document.getElementById('hotel_catalog_meta');
+              if (meta) meta.textContent = metaText;
+
+              const upcoming = Array.isArray(data.upcoming_hotels) ? data.upcoming_hotels : [];
+              const upcomingEl = document.getElementById('hotel_catalog_upcoming');
+              if (upcomingEl) {
+                const names = upcoming.slice(0, 4).map(h => `${h.code} ${h.name || ''}`.trim()).join(' · ');
+                upcomingEl.textContent = upcoming.length ? fmt('catalogUpcoming', {count: upcoming.length, hotels: names}) : '';
+                upcomingEl.hidden = !upcoming.length;
+              }
+
+              const newHotels = Array.isArray(data.new_hotels) ? data.new_hotels : [];
+              const newEl = document.getElementById('hotel_catalog_new');
+              if (newEl) {
+                newEl.innerHTML = newHotels.length
+                  ? `<strong>${escText(fmt('catalogNewTitle', {count: newHotels.length}))}</strong><div>${newHotels.map(catalogHotelLink).join(' · ')}</div>`
+                  : '';
+                newEl.hidden = !newHotels.length;
+              }
+              const ack = document.getElementById('btn_catalog_ack');
+              if (ack) ack.hidden = !newHotels.length;
+              const refresh = document.getElementById('btn_catalog_refresh');
+              if (refresh) refresh.disabled = state === 'checking';
+            }
+            function renderProviderCatalog(status){
+              LAST_PROVIDER_CATALOG_STATUS = status;
+              const meta = document.getElementById('provider_catalog_meta');
+              const newEl = document.getElementById('provider_catalog_new');
+              if (!meta || !status) return;
+              const records = status.providers || {};
+              const parts = ['routeinn','dormy','mystays','daiwa'].map(provider => {
+                const row = records[provider] || {};
+                return `${providerShort(provider)} ${Number(row.hotel_count || 0)}`;
+              });
+              const prefix = tx('providerCatalogDb');
+              meta.textContent = `${prefix}: ${parts.join(' · ')}${status.checking ? ` · ${tx('catalogUpdating')}` : ''}`;
+              const changes = [];
+              Object.entries(records).forEach(([provider, row]) => {
+                (Array.isArray(row.new_hotels) ? row.new_hotels : []).forEach(hotel => {
+                  changes.push(`${providerShort(provider)} · ${hotel.code} ${hotel.name || ''}`.trim());
+                });
+              });
+              if (newEl) {
+                newEl.innerHTML = changes.length
+                  ? `<strong>${escText(fmt('providerCatalogNew', {count: changes.length}))}</strong><div>${changes.map(escText).join(' · ')}</div>`
+                  : '';
+                newEl.hidden = !changes.length;
+              }
+            }
+            async function refreshHotelCatalog(){
+              setButtonBusy('btn_catalog_refresh', true);
+              try {
+                const [response, providerResponse] = await Promise.all([
+                  fetch('/hotel_catalog_refresh', {method:'POST'}),
+                  fetch('/provider_catalog_refresh', {method:'POST'})
+                ]);
+                const payload = await response.json();
+                const providerPayload = await providerResponse.json();
+                if (!response.ok || !payload.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+                if (!providerResponse.ok || !providerPayload.ok) throw new Error(providerPayload.error || `HTTP ${providerResponse.status}`);
+                renderHotelCatalog(payload.catalog);
+                const msg = document.getElementById('msg');
+                if (msg) msg.textContent = tx('catalogRefreshQueued');
+              } catch (error) {
+                const err = document.getElementById('err');
+                if (err) err.textContent = `${tx('catalogFailed')}: ${error}`;
+              } finally {
+                setButtonBusy('btn_catalog_refresh', false);
+              }
+            }
+            async function acknowledgeNewHotels(){
+              setButtonBusy('btn_catalog_ack', true);
+              try {
+                const response = await fetch('/hotel_catalog_acknowledge', {method:'POST'});
+                const payload = await response.json();
+                if (!response.ok || !payload.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+                renderHotelCatalog(payload.catalog);
+              } finally {
+                setButtonBusy('btn_catalog_ack', false);
+              }
+            }
             function clearSelectedHotelMap(){
               if (AREA_SELECTED_MAP && Array.isArray(AREA_SELECTED_MARKERS)) {
                 AREA_SELECTED_MARKERS.forEach(marker => {
@@ -1084,20 +2429,69 @@
                 });
               }
               AREA_SELECTED_MARKERS = [];
+              AREA_MARKERS_BY_CODE.clear();
+            }
+            function updateAreaSelectionSummary(){
+              const selected = selectedAreaCodes().length;
+              const total = Array.isArray(AREA_HOTELS) ? AREA_HOTELS.length : 0;
+              const summary = document.getElementById('area_selection_summary');
+              if (summary) summary.textContent = fmt('selectedSummary', {selected, total});
+              const dockSummary = document.getElementById('dock-summary');
+              if (dockSummary) {
+                dockSummary.textContent = selected > 0
+                  ? fmt('dockSelected', {count: selected})
+                  : tx('dockNoHotels');
+              }
+              const sidebarCount = document.getElementById('sidebar-hotel-count');
+              if (sidebarCount) sidebarCount.textContent = fmt('sidebarHotelCount', {count:selected});
+            }
+            function syncProviderAllButton(){
+              const button = document.getElementById('btn_provider_all');
+              if (!button) return;
+              const allEnabled = enabledProviders().length === PROVIDER_IDS.length;
+              button.classList.toggle('active', allEnabled);
+              button.setAttribute('aria-pressed', allEnabled ? 'true' : 'false');
+            }
+            function focusAreaMarker(code, scrollRow=false){
+              const marker = AREA_MARKERS_BY_CODE.get(String(code || ''));
+              if (marker) {
+                try {
+                  AREA_SELECTED_MAP?.panTo(marker.getLatLng(), {animate:true, duration:.35});
+                  marker.openPopup();
+                } catch(e) {}
+              }
+              if (!scrollRow) return;
+              const row = document.querySelector(`.hotel-item[data-hotel-code="${CSS.escape(String(code || ''))}"]`);
+              if (!row) return;
+              row.scrollIntoView({behavior:'smooth', block:'nearest'});
+              row.classList.add('map-highlight');
+              setTimeout(() => row.classList.remove('map-highlight'), 1400);
             }
             function renderSelectedHotelMap(){
               const panel = document.getElementById('area_map_panel');
               const status = document.getElementById('area_map_status');
+              const legend = document.getElementById('area_map_legend');
               const mapEl = document.getElementById('area_selected_map');
               if (!panel || !status || !mapEl) return;
               const selected = selectedAreaHotels();
               const withCoords = selected.map(h => ({hotel: h, coord: validMapCoord(h)})).filter(x => x.coord);
+              if (legend) {
+                const providers = [...new Set(withCoords.map(({hotel}) => PROVIDER_IDS.includes(hotel.provider) ? hotel.provider : 'toyoko'))];
+                legend.innerHTML = providers.map(provider =>
+                  `<span><i class="map-legend-dot ${provider}"></i>${escText(providerShort(provider))}</span>`
+                ).join('');
+              }
               if (!AREA_HOTELS.length || selected.length === 0){
                 panel.hidden = true;
                 clearSelectedHotelMap();
+                const mapButton = document.querySelector('[data-hotel-workspace-view="map"]');
+                if (mapButton) mapButton.disabled = true;
+                setHotelWorkspaceView('list');
                 return;
               }
               panel.hidden = false;
+              const mapButton = document.querySelector('[data-hotel-workspace-view="map"]');
+              if (mapButton) mapButton.disabled = false;
               status.textContent = mapStatusText(withCoords.length, selected.length);
               if (!withCoords.length){
                 clearSelectedHotelMap();
@@ -1119,13 +2513,24 @@
               withCoords.forEach(({hotel, coord}) => {
                 const name = bilingualText(hotel.name_primary || hotel.name_zh || hotel.name || '', hotel.name_en || hotel.name || '(Hotel name not found)');
                 const popup = `
-                  <div class="map-popup-title">${escText(hotel.code)} · ${escText(name)}</div>
+                  <div class="map-popup-title">${escText(hotel.display_code || hotel.code)} · ${escText(name)}</div>
                   <div class="map-popup-links">
                     <a href="${escText(hotel.url || '#')}" target="_blank" rel="noreferrer noopener">${escText(tx('official'))}</a>
                     ${hotel.map_url ? `<a href="${escText(hotel.map_url)}" target="_blank" rel="noreferrer noopener">${escText(tx('openMap'))}</a>` : ''}
                   </div>
                 `;
-                const marker = L.marker([coord.lat, coord.lng]).addTo(AREA_SELECTED_MAP).bindPopup(popup);
+                const provider = PROVIDER_IDS.includes(hotel.provider) ? hotel.provider : 'toyoko';
+                const icon = L.divIcon({
+                  className: 'provider-map-marker-wrap',
+                  html: `<span class="provider-map-marker ${provider}"><i></i></span>`,
+                  iconSize: [26, 34],
+                  iconAnchor: [13, 32],
+                  popupAnchor: [0, -30]
+                });
+                const marker = L.marker([coord.lat, coord.lng], {icon}).addTo(AREA_SELECTED_MAP).bindPopup(popup);
+                const code = String(hotel.code || '');
+                AREA_MARKERS_BY_CODE.set(code, marker);
+                marker.on('click', () => focusAreaMarker(code, true));
                 AREA_SELECTED_MARKERS.push(marker);
                 points.push([coord.lat, coord.lng]);
               });
@@ -1145,6 +2550,19 @@
               setAreaStatus(next === 'radius'
                 ? tx('radiusModeStatus')
                 : tx('areaHint'));
+            }
+            function setHotelWorkspaceView(view){
+              const next = view === 'map' ? 'map' : 'list';
+              const workspace = document.getElementById('hotel_workspace');
+              if (workspace) workspace.dataset.mobileView = next;
+              document.querySelectorAll('[data-hotel-workspace-view]').forEach(button => {
+                const active = button.dataset.hotelWorkspaceView === next;
+                button.classList.toggle('active', active);
+                button.setAttribute('aria-pressed', active ? 'true' : 'false');
+              });
+              if (next === 'map') setTimeout(() => {
+                try { AREA_SELECTED_MAP?.invalidateSize(); } catch(e) {}
+              }, 80);
             }
             async function initAreaPicker(){
               try{
@@ -1207,9 +2625,15 @@
               if (AREA_HOTELS.length && !(AREA_SELECTED_CODES instanceof Set)) {
                 AREA_SELECTED_CODES = new Set(AREA_HOTELS.map(h => String(h.code || '')));
               }
+              const normalizedName = (hotel) => bilingualText(
+                hotel.name_primary || hotel.name_zh || hotel.name || '',
+                hotel.name_en || hotel.name || ''
+              ).toLocaleLowerCase();
               const hotels = AREA_HOTELS.filter(h => {
+                if (AREA_SELECTED_ONLY && !AREA_SELECTED_CODES?.has(String(h.code || ''))) return false;
                 if (!filter) return true;
                 return String(h.code || '').toLowerCase().includes(filter)
+                  || String(h.display_code || '').toLowerCase().includes(filter)
                   || String(h.name || '').toLowerCase().includes(filter)
                   || String(h.name_en || '').toLowerCase().includes(filter)
                   || String(h.name_primary || '').toLowerCase().includes(filter)
@@ -1219,19 +2643,36 @@
                   || String(h.name_ja || '').toLowerCase().includes(filter)
                   || String(h.name_ko || '').toLowerCase().includes(filter);
               });
+              if (AREA_SORT !== 'default') {
+                hotels.sort((a, b) => {
+                  if (AREA_SORT === 'distance') {
+                    const ad = Number(a.distance_km);
+                    const bd = Number(b.distance_km);
+                    const aValue = Number.isFinite(ad) ? ad : Number.POSITIVE_INFINITY;
+                    const bValue = Number.isFinite(bd) ? bd : Number.POSITIVE_INFINITY;
+                    return aValue - bValue || normalizedName(a).localeCompare(normalizedName(b));
+                  }
+                  if (AREA_SORT === 'name') return normalizedName(a).localeCompare(normalizedName(b));
+                  return String(a.display_code || a.code || '').localeCompare(String(b.display_code || b.code || ''), undefined, {numeric:true});
+                });
+              }
+              const visibleSummary = document.getElementById('area_visible_summary');
+              if (visibleSummary) visibleSummary.textContent = fmt('visibleHotels', {shown:hotels.length, total:AREA_HOTELS.length});
               if (!hotels.length){
                 wrap.innerHTML = `<div class="hotel-picker-empty">${escText(tx('noMatchingHotels'))}</div>`;
+                updateAreaSelectionSummary();
                 renderSelectedHotelMap();
                 return;
               }
               wrap.innerHTML = hotels.map(h => `
-                <div class="hotel-item">
+                <div class="hotel-item ${AREA_SELECTED_CODES?.has(String(h.code || '')) ? 'selected' : ''}" data-hotel-code="${escText(h.code)}">
                   <label>
 	                    <input class="area-hotel-check" type="checkbox" value="${escText(h.code)}" ${AREA_SELECTED_CODES?.has(String(h.code || '')) ? 'checked' : ''}>
-                    <span class="hotel-code">${escText(h.code)}</span>
+                    <span class="hotel-code">${escText(h.display_code || h.code)}</span>
                     <span class="hotel-name hotel-actions">
                       <span>
-                        <a href="${escText(h.url || '#')}" target="_blank" rel="noreferrer noopener">${escText(bilingualText(h.name_primary || h.name_zh || h.name || '', h.name_en || h.name || '(Hotel name not found)'))}</a>
+                        <a class="hotel-info-trigger" data-hotel-code="${escText(h.code)}" href="${escText(h.url || '#')}" target="_blank" rel="noreferrer noopener">${escText(bilingualText(h.name_primary || h.name_zh || h.name || '', h.name_en || h.name || '(Hotel name not found)'))}</a>
+                        <span class="source-badge ${escText(h.provider || 'toyoko')}">${escText(providerShort(h.provider || 'toyoko'))}</span>
                         ${h.distance_km != null ? `<span class="distance-badge">${escText(h.distance_km)} km</span>` : ''}
                       </span>
                       <a class="hotel-map" href="${escText(h.map_url || '#')}" target="_blank" rel="noreferrer noopener">${escText(tx('openMap'))}</a>
@@ -1244,9 +2685,25 @@
                   if (!(AREA_SELECTED_CODES instanceof Set)) AREA_SELECTED_CODES = new Set();
                   if (el.checked) AREA_SELECTED_CODES.add(String(el.value));
                   else AREA_SELECTED_CODES.delete(String(el.value));
+                  el.closest('.hotel-item')?.classList.toggle('selected', el.checked);
+                  markEdited('hotel_codes');
+                  BLOCK_REMOTE_OVERWRITE = true;
+                  updateAreaSelectionSummary();
                   renderSelectedHotelMap();
+                  if (AREA_SELECTED_ONLY) renderAreaHotels();
                 });
               });
+              wrap.querySelectorAll('.hotel-item').forEach(row => {
+                const code = String(row.dataset.hotelCode || '');
+                const showMarker = () => focusAreaMarker(code);
+                row.addEventListener('mouseenter', showMarker);
+                row.addEventListener('focusin', showMarker);
+                row.addEventListener('click', (event) => {
+                  if (event.target.closest('a,button,input,label')) return;
+                  focusAreaMarker(code);
+                });
+              });
+              updateAreaSelectionSummary();
               renderSelectedHotelMap();
             }
             async function loadAreaHotels(){
@@ -1257,25 +2714,46 @@
                 setAreaStatus(tx('selectRegionFirst'), true);
                 return;
               }
+              const providers = enabledProviders();
+              if (!providers.length){
+                setAreaStatus(tx('providerRequired'), true);
+                return;
+              }
               setAreaStatus(tx('loadingHotels'));
+              setAreaLoading('btn_area_load', true);
               try{
                 const r = await fetch('/area_hotels', {
                   method:'POST',
                   headers:{'Content-Type':'application/json'},
-                  body: JSON.stringify({region_id: regionId, detail_id: detailSel?.value || '', primary_language: document.getElementById('primary_language')?.value || 'zh_cn'})
+                  body: JSON.stringify({
+                    region_id: regionId,
+                    detail_id: detailSel?.value || '',
+                    primary_language: document.getElementById('primary_language')?.value || 'zh_cn',
+                    providers
+                  })
                 });
                 const j = await r.json();
                 if (!j.ok) throw new Error(j.error || 'load failed');
                 AREA_HOTELS = Array.isArray(j.hotels) ? j.hotels : [];
                 AREA_SELECTED_CODES = new Set(AREA_HOTELS.map(h => String(h.code || '')));
+                markEdited('hotel_codes');
+                BLOCK_REMOTE_OVERWRITE = true;
                 renderAreaHotels();
                 const n = AREA_HOTELS.length;
-                setAreaStatus(fmt('loadedHotels', {count: n}));
+                const counts = j.provider_counts || {};
+                const parts = [];
+                PROVIDER_IDS.forEach(provider => {
+                  if (counts[provider] != null) parts.push(`${providerShort(provider)} ${counts[provider]}`);
+                });
+                const warning = Object.keys(j.provider_errors || {}).length ? ` · ${tx('partialProviderFailure')}` : '';
+                setAreaStatus(`${fmt('loadedHotels', {count: n})}${parts.length ? ` · ${parts.join(' / ')}` : ''}${warning}`);
 	              }catch(e){
 	                AREA_HOTELS = [];
 	                AREA_SELECTED_CODES = null;
-	                renderAreaHotels();
+                renderAreaHotels();
                 setAreaStatus(tx('hotelLoadingFailed') + e, true);
+              } finally {
+                setAreaLoading('btn_area_load', false);
               }
             }
             async function loadRadiusHotels(){
@@ -1289,16 +2767,24 @@
               setAreaStatus(looksLikeCoord
                 ? tx('filteringByCoords')
                 : tx('geocodingAddress'));
+              setAreaLoading('btn_radius_load', true);
               try{
                 const r = await fetch('/radius_hotels', {
                   method:'POST',
                   headers:{'Content-Type':'application/json'},
-                  body: JSON.stringify({query, radius_km: radiusKm, primary_language: document.getElementById('primary_language')?.value || 'zh_cn'})
+                  body: JSON.stringify({
+                    query,
+                    radius_km: radiusKm,
+                    primary_language: document.getElementById('primary_language')?.value || 'zh_cn',
+                    providers: enabledProviders()
+                  })
                 });
                 const j = await r.json();
                 if (!j.ok) throw new Error(j.error || 'radius load failed');
                 AREA_HOTELS = Array.isArray(j.hotels) ? j.hotels : [];
                 AREA_SELECTED_CODES = new Set(AREA_HOTELS.map(h => String(h.code || '')));
+                markEdited('hotel_codes');
+                BLOCK_REMOTE_OVERWRITE = true;
                 if (j.center){
                   document.getElementById('radius_lat').value = j.center.lat ?? '';
                   document.getElementById('radius_lng').value = j.center.lng ?? '';
@@ -1306,18 +2792,27 @@
                 renderAreaHotels();
                 const n = AREA_HOTELS.length;
                 const centerText = j.center ? `${j.center.lat}, ${j.center.lng}` : query;
-                setAreaStatus(fmt('loadedHotelsCenter', {count: n, center: centerText}));
+                const counts = j.provider_counts || {};
+                const parts = [];
+                PROVIDER_IDS.forEach(provider => {
+                  if (counts[provider] != null) parts.push(`${providerShort(provider)} ${counts[provider]}`);
+                });
+                setAreaStatus(`${fmt('loadedHotelsCenter', {count: n, center: centerText})}${parts.length ? ` · ${parts.join(' / ')}` : ''}`);
 	              }catch(e){
 	                AREA_HOTELS = [];
 	                AREA_SELECTED_CODES = null;
-	                renderAreaHotels();
+                renderAreaHotels();
                 setAreaStatus(tx('radiusSearchFailed') + e, true);
+              } finally {
+                setAreaLoading('btn_radius_load', false);
               }
             }
             function setAreaHotelChecks(checked){
               AREA_SELECTED_CODES = checked ? new Set(AREA_HOTELS.map(h => String(h.code || ''))) : new Set();
               document.querySelectorAll('.area-hotel-check').forEach(el => { el.checked = checked; });
-              renderSelectedHotelMap();
+              markEdited('hotel_codes');
+              BLOCK_REMOTE_OVERWRITE = true;
+              renderAreaHotels();
             }
             initAreaPicker();
             setPickerMode(currentSearchMode());
@@ -1326,6 +2821,9 @@
               const hotels = Array.isArray(record.selected_hotels) ? record.selected_hotels : [];
               if (hotels.length) return hotels.map(h => ({
                 code: String(h.code || ''),
+                display_code: h.display_code || '',
+                provider: h.provider || (String(h.code || '').includes(':') ? String(h.code).split(':', 1)[0] : 'toyoko'),
+                brand: h.brand || '',
                 name: h.name || h.name_en || h.name_zh || '',
                 name_primary: h.name_primary || '',
                 name_zh: h.name_zh || '',
@@ -1334,11 +2832,20 @@
                 name_ja: h.name_ja || '',
                 name_ko: h.name_ko || '',
                 name_en: h.name_en || h.name || '',
-                url: h.url || `https://www.toyoko-inn.com/eng/search/detail/${String(h.code || '').padStart(5,'0')}/`,
+                url: h.url || (String(h.code || '').includes(':') ? '' : `https://www.toyoko-inn.com/eng/search/detail/${String(h.code || '').padStart(5,'0')}/`),
                 map_url: h.map_url || '',
+                reservation_url: h.reservation_url || '',
+                address: h.address || '',
+                access: h.access || '',
                 lat: h.lat ?? null,
                 lng: h.lng ?? null,
-                distance_km: h.distance_km ?? null
+                distance_km: h.distance_km ?? null,
+                booking_code: h.booking_code || '',
+                provider_hotel_id: h.provider_hotel_id || '',
+                search_keyword: h.search_keyword || '',
+                prefecture: h.prefecture || '',
+                region_id: h.region_id ?? null,
+                prefecture_id: h.prefecture_id ?? null
               })).filter(h => h.code);
               return (Array.isArray(record.hotel_codes) ? record.hotel_codes : []).map(code => ({
                 code: String(code),
@@ -1361,19 +2868,12 @@
               }
               wrap.innerHTML = records.slice(0, 10).map((r, idx) => {
                 const count = Array.isArray(r.hotel_codes) ? r.hotel_codes.length : 0;
-                const useStoredAreaText = currentLang() === 'zh_cn' || currentLang() === 'zh_tw';
-                const region = useStoredAreaText && r.area_region_label ? r.area_region_label : historyAreaFallback('region', r.area_region);
-                const detail = useStoredAreaText && r.area_detail_label ? r.area_detail_label : historyAreaFallback('detail', r.area_detail);
+                const region = historyAreaFallback('region', r.area_region);
+                const detail = historyAreaFallback('detail', r.area_detail);
                 const scope = r.search_mode === 'radius'
                   ? `${escText(r.radius_query || '')} · ${escText(r.radius_km || 5)} km`
                   : `${escText(region)} · ${escText(detail)}`;
-                const title = currentLang() === 'ja'
-                  ? `${escText(r.start_date || '')} → ${escText(r.end_date || '')} · ${count} 件のホテル / ${count} hotels`
-                  : currentLang() === 'ko'
-                    ? `${escText(r.start_date || '')} → ${escText(r.end_date || '')} · ${count}개 호텔 / ${count} hotels`
-                    : currentLang() === 'zh_tw'
-                      ? `${escText(r.start_date || '')} → ${escText(r.end_date || '')} · ${count} 家飯店 / ${count} hotels`
-                      : `${escText(r.start_date || '')} → ${escText(r.end_date || '')} · ${count} 家酒店 / ${count} hotels`;
+                const title = `${escText(r.start_date || '')} → ${escText(r.end_date || '')} · ${escText(fmt('historyHotelCount', {count}))}`;
                 const meta = scope;
                 const params = `${escText(r.people || 1)}${escText(tx('guestUnit'))} · ${escText(r.rooms || 1)}${escText(tx('roomUnit'))} · ${escText(r.smoking || 'all')} · ${escText(r.room_requirement || 'any')} · ${escText(r.membership_status || 'member')} · ${escText(r.primary_language || 'zh_cn')}`;
                 return `<div class="history-item">
@@ -1484,9 +2984,16 @@
               setValue('room_requirement', record.room_requirement || 'any');
               setValue('membership_status', record.membership_status || 'member');
               setValue('primary_language', record.primary_language || 'zh_cn');
+              const historyProviders = Array.isArray(record.enabled_providers) ? record.enabled_providers : PROVIDER_IDS;
+              PROVIDER_IDS.forEach(provider => {
+                const checkbox = document.getElementById(`provider_${provider}`);
+                if (checkbox) checkbox.checked = historyProviders.includes(provider);
+              });
               setValue('engine', record.engine || 'http');
               const parallelEl = document.getElementById('smart_parallel_enabled');
               if (parallelEl) parallelEl.checked = !!record.smart_parallel_enabled;
+              const backoffEl = document.getElementById('adaptive_backoff_enabled');
+              if (backoffEl) backoffEl.checked = record.adaptive_backoff_enabled !== false;
               setValue('smart_parallel_workers', record.smart_parallel_workers || 1);
               setValue('loop_interval', record.loop_interval_seconds || 30);
               setValue('per_hotel_delay', record.per_hotel_delay_seconds || 1);
@@ -1511,11 +3018,17 @@
               syncDisplayValues();
               setAreaStatus(fmt('loadedHistory', {count: AREA_HOTELS.length}));
               Object.keys(EDIT_TS).forEach(k => delete EDIT_TS[k]);
+              markEdited('search_history');
               BLOCK_REMOTE_OVERWRITE = true;
             }
 
             function restoreAreaFromConfig(cfg){
               if (!cfg || BLOCK_REMOTE_OVERWRITE) return;
+              const configuredProviders = Array.isArray(cfg.enabled_providers) ? cfg.enabled_providers : PROVIDER_IDS;
+              PROVIDER_IDS.forEach(provider => {
+                const checkbox = document.getElementById(`provider_${provider}`);
+                if (checkbox && !recentlyEdited(`provider_${provider}`)) checkbox.checked = configuredProviders.includes(provider);
+              });
               const hotels = Array.isArray(cfg.selected_hotels) ? cfg.selected_hotels : [];
               if (hotels.length && AREA_HOTELS.length === 0){
                 setValueIfExists('radius_query', cfg.radius_query || '');
@@ -1540,43 +3053,84 @@
               }
             }
 
-            async function callStart(){
+            function setButtonBusy(id, busy){
+              const button = document.getElementById(id);
+              if (!button) return;
+              if (busy) button.disabled = true;
+              else if (id === 'btn_stop') button.disabled = !LAST_RUNNING;
+              else if (id === 'btn_scan_once') button.disabled = LAST_RUNNING;
+              else button.disabled = false;
+              button.setAttribute('aria-busy', busy ? 'true' : 'false');
+            }
+            function preflightSearch(){
               const payload = collectPayload();
-              if (!validateBarkKeyInput()) return;
-              if (!Array.isArray(payload.hotel_codes) || payload.hotel_codes.length === 0){
-                document.getElementById('err').textContent = tx('selectHotelsFirst');
-                document.getElementById('msg').textContent = '';
-                return;
+              const error = document.getElementById('err');
+              const message = document.getElementById('msg');
+              if (!payload.start_date || !payload.end_date || payload.end_date <= payload.start_date){
+                switchAppView('search', {instant:true});
+                if (error) error.textContent = tx('invalidDates');
+                if (message) message.textContent = '';
+                setPanelOpen('#search_panel', true);
+                document.getElementById('start_date')?.focus();
+                return null;
               }
+              if (!validateBarkKeyInput()) return null;
+              if (!Array.isArray(payload.hotel_codes) || payload.hotel_codes.length === 0){
+                switchAppView('search', {instant:true});
+                if (error) error.textContent = tx('selectHotelsFirst');
+                if (message) message.textContent = '';
+                expandSearchAreaPicker();
+                document.getElementById('area_picker_panel')?.scrollIntoView({behavior:'smooth', block:'center'});
+                return null;
+              }
+              return payload;
+            }
+            async function callStart(runOnce=false){
+              const payload = preflightSearch();
+              if (!payload) return;
+              payload.run_once = !!runOnce;
+              const buttonId = runOnce ? 'btn_scan_once' : 'btn_start';
+              setButtonBusy(buttonId, true);
               try {
                 const r = await fetch('/start', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
                 const j = await r.json();
                 if (j.ok) {
-                  document.getElementById('msg').textContent = j.restarted ? tx('restartedMessage') : tx('startedMessage');
+                  document.getElementById('msg').textContent = runOnce
+                    ? tx('scanningOnce')
+                    : (j.restarted ? tx('restartedMessage') : tx('startedMessage'));
                   document.getElementById('err').textContent = '';
-	                  document.getElementById('running-pill').textContent = tx('running');
-	                  document.getElementById('running-pill').className = 'pill on';
+	                  setRunning(true);
+	                  Object.keys(EDIT_TS).forEach(key => delete EDIT_TS[key]);
+	                  BLOCK_REMOTE_OVERWRITE = false;
+	                  setConfigDirty(false);
+	                  renderSummary(payload);
+	                  RESULT_CHANGED_CODES.clear();
+	                  RESULT_CHANGE_CLASSES.clear();
+	                  const changeNote = document.getElementById('result-change-note');
+	                  if (changeNote) changeNote.hidden = true;
 	                  collapseSearchPanels();
 	                  refreshSearchHistory();
                 } else {
-                  document.getElementById('err').textContent = tx('failedToStart');
+                  document.getElementById('err').textContent = j.error || tx('failedToStart');
                   document.getElementById('msg').textContent = '';
                 }
                 refreshStatus();
               } catch(e) {
                 document.getElementById('err').textContent = e;
                 document.getElementById('msg').textContent = '';
+              } finally {
+                setButtonBusy(buttonId, false);
               }
             }
             async function callStop(){
+              setButtonBusy('btn_stop', true);
               try {
                 const r = await fetch('/stop', {method:'POST'});
                 const j = await r.json();
                 if (j.ok) {
                   document.getElementById('msg').textContent = tx('stoppedMessage');
                   document.getElementById('err').textContent = '';
-	                  document.getElementById('running-pill').textContent = tx('stopped');
-	                  document.getElementById('running-pill').className = 'pill off';
+	                  setRunning(false);
 	                  expandSearchAreaPicker();
                 } else {
                   document.getElementById('err').textContent = tx('failedToStop');
@@ -1585,6 +3139,8 @@
               } catch(e) {
                 document.getElementById('err').textContent = e;
                 document.getElementById('msg').textContent = '';
+              } finally {
+                setButtonBusy('btn_stop', false);
               }
             }
             async function callLocalTest(){
@@ -1660,39 +3216,74 @@
               }
             }
 
-            function renderUpdateBanner(update){
-              LAST_UPDATE_STATUS = update;
-              const banner = document.getElementById('update-banner');
-              if (!banner || !update) return;
-              const title = document.getElementById('update-title');
-              const message = document.getElementById('update-message');
-              const button = document.getElementById('btn_upgrade');
-              const state = update.state || 'idle';
-              if (state === 'update_available') {
-                banner.hidden = false;
-                if (title) title.textContent = tx('updateAvailableTitle');
-                if (message) message.textContent = fmt('updateAvailableMessage', {current: update.current_version || '-', latest: update.latest_version || '-'});
-                if (button) {
-                  button.hidden = false;
-                  button.disabled = false;
-                  button.textContent = tx('updateButton');
-                }
+            function versionLabel(value){
+              const text = String(value || '').trim();
+              if (!text) return '-';
+              return /^v/i.test(text) ? text : `v${text}`;
+            }
+            function renderUpdateDialog(update){
+              if (update) LAST_UPDATE_STATUS = update;
+              const data = update || LAST_UPDATE_STATUS || {};
+              const state = data.state || 'idle';
+              const current = versionLabel(data.current_version || document.body.dataset.appVersion);
+              const latest = versionLabel(data.latest_version);
+              setNodeText('#update-current-version', current);
+              setNodeText('#update-latest-version', latest);
+
+              const row = document.getElementById('update-state-row');
+              const title = document.getElementById('update-state-title');
+              const message = document.getElementById('update-state-message');
+              const upgradeButton = document.getElementById('btn_upgrade');
+              const checkButton = document.getElementById('btn_update_check');
+              const openButton = document.getElementById('update-open-button');
+              if (row) row.dataset.state = state;
+              openButton?.classList.toggle('has-update', state === 'update_available');
+
+              let titleText = tx('updateUnknown');
+              let messageText = '';
+              let upgradeText = tx('updateButton');
+              let canUpgrade = false;
+              if (state === 'checking') {
+                titleText = tx('checkingUpdate');
+                messageText = tx('checkingUpdateMessage');
+                upgradeText = tx('updateButton');
+              } else if (state === 'up_to_date') {
+                titleText = tx('upToDate');
+                messageText = tx('upToDateMessage');
+                upgradeText = tx('upToDate');
+              } else if (state === 'update_available') {
+                titleText = tx('updateAvailableTitle');
+                messageText = tx('updateAvailableDetail');
+                upgradeText = tx('updateButton');
+                canUpgrade = true;
               } else if (state === 'upgrading') {
-                banner.hidden = false;
-                if (title) title.textContent = tx('upgradingTitle');
-                if (message) message.textContent = tx('upgradingMessage');
-                if (button) {
-                  button.hidden = false;
-                  button.disabled = true;
-                  button.textContent = tx('updatingButton');
-                }
+                titleText = tx('upgradingTitle');
+                messageText = tx('upgradingMessage');
+                upgradeText = tx('updatingButton');
               } else if (state === 'upgraded') {
-                banner.hidden = false;
-                if (title) title.textContent = tx('upgradedTitle');
-                if (message) message.textContent = tx('upgradedMessage');
-                if (button) button.hidden = true;
-              } else {
-                banner.hidden = true;
+                titleText = tx('upgradedTitle');
+                messageText = tx('upgradedMessage');
+                upgradeText = tx('upgradedTitle');
+              } else if (state === 'failed') {
+                titleText = tx('updateFailedTitle');
+                messageText = data.message ? `${tx('updateFailedMessage')} ${String(data.message).slice(0, 180)}` : tx('updateFailedMessage');
+              }
+              if (title) title.textContent = titleText;
+              if (message) message.textContent = messageText;
+              if (upgradeButton) {
+                upgradeButton.textContent = upgradeText;
+                upgradeButton.disabled = !canUpgrade;
+              }
+              if (checkButton) {
+                checkButton.textContent = state === 'checking' ? tx('checkingUpdate') : tx('checkAgain');
+                checkButton.disabled = state === 'checking' || state === 'upgrading';
+              }
+
+              const latestKey = String(data.latest_version || '');
+              const modal = document.getElementById('update-modal');
+              if (state === 'update_available' && latestKey && UPDATE_AUTO_PROMPTED_VERSION !== latestKey && modal?.hidden) {
+                UPDATE_AUTO_PROMPTED_VERSION = latestKey;
+                setTimeout(() => openUpdateDialog(true), 0);
               }
             }
 
@@ -1700,8 +3291,27 @@
               try{
                 const r = await fetch('/update_status');
                 const j = await r.json();
-                renderUpdateBanner(j.update || null);
+                renderUpdateDialog(j.update || null);
               }catch(e){}
+            }
+
+            async function checkForUpdates(){
+              try{
+                renderUpdateDialog({
+                  ...(LAST_UPDATE_STATUS || {}),
+                  state:'checking',
+                  current_version:LAST_UPDATE_STATUS?.current_version || document.body.dataset.appVersion
+                });
+                const r = await fetch('/update_check', {method:'POST'});
+                const j = await r.json();
+                renderUpdateDialog(j.update || null);
+              }catch(e){
+                renderUpdateDialog({
+                  ...(LAST_UPDATE_STATUS || {}),
+                  state:'failed',
+                  message:String(e)
+                });
+              }
             }
 
             async function callUpgrade(){
@@ -1710,23 +3320,239 @@
                 if (button) button.disabled = true;
                 const r = await fetch('/upgrade', {method:'POST'});
                 const j = await r.json();
-                renderUpdateBanner(j.update || null);
+                renderUpdateDialog(j.update || null);
               }catch(e){
-                const err = document.getElementById('err');
-                if (err) err.textContent = String(e);
+                renderUpdateDialog({
+                  ...(LAST_UPDATE_STATUS || {}),
+                  state:'failed',
+                  message:String(e)
+                });
               }
+            }
+
+            function setMobileAccessState(state, title, message){
+              const box = document.getElementById('mobile-access-state');
+              if (box) box.dataset.state = state;
+              setNodeText('#mobile-access-state-title', title);
+              setNodeText('#mobile-access-state-message', message || '');
+            }
+
+            function mobileConnectionInfo(data, mode){
+              const connections = data?.connections || {};
+              if (connections[mode]) return connections[mode];
+              if (mode === 'lan') {
+                const urls = Array.isArray(data?.urls) ? data.urls : [];
+                return {available:!!urls.length, online:!!urls.length, url:urls[0] || '', urls};
+              }
+              return {available:false, online:false, url:''};
+            }
+
+            function mobileConnectionIsAvailable(data, mode){
+              const info = mobileConnectionInfo(data, mode);
+              return !!(info.available && info.url && info.online !== false);
+            }
+
+            function mobileConnectionTitle(mode){
+              if (mode === 'tailscale') return tx('mobileTailscaleTitle');
+              if (mode === 'public') return tx('mobilePublicTitle');
+              return tx('mobileLanTitle');
+            }
+
+            function renderMobileConnection(data, requestedMode=MOBILE_CONNECTION_MODE){
+              const modes = ['lan', 'tailscale', 'public'];
+              const selectedMode = requestedMode === 'public'
+                ? 'public'
+                : mobileConnectionIsAvailable(data, requestedMode)
+                ? requestedMode
+                : (modes.find(mode => mobileConnectionIsAvailable(data, mode)) || 'lan');
+              MOBILE_CONNECTION_MODE = selectedMode;
+              localStorage.setItem('toyoko-chan-mobile-connection-v1', selectedMode);
+
+              modes.forEach(mode => {
+                const button = document.querySelector(`[data-mobile-connection="${mode}"]`);
+                const available = mobileConnectionIsAvailable(data, mode);
+                if (button) {
+                  button.disabled = !available && mode !== 'public';
+                  button.classList.toggle('active', mode === selectedMode);
+                  button.setAttribute('aria-pressed', mode === selectedMode ? 'true' : 'false');
+                  button.dataset.online = available ? 'true' : 'false';
+                }
+                setNodeText(
+                  `#mobile-${mode}-status`,
+                  available ? tx('mobileAvailable') : (mode === 'public' ? tx('mobileNeedsSetup') : tx('mobileUnavailable'))
+                );
+              });
+
+              const selected = mobileConnectionInfo(data, selectedMode);
+              const url = selected.url || '';
+              const urlInput = document.getElementById('mobile_access_url');
+              const openLink = document.getElementById('btn_mobile_access_open');
+              const qrWrap = document.getElementById('mobile-access-qr-wrap');
+              const qrImage = document.getElementById('mobile_access_qr');
+              if (urlInput) urlInput.value = url;
+              if (urlInput) {
+                urlInput.readOnly = selectedMode !== 'public';
+                urlInput.placeholder = selectedMode === 'public' ? tx('mobilePublicPlaceholder') : '';
+              }
+              if (openLink) {
+                openLink.href = url || '#';
+                openLink.setAttribute('aria-disabled', url ? 'false' : 'true');
+              }
+              setNodeText('#mobile-access-qr-mode', mobileConnectionTitle(selectedMode));
+
+              const showQr = !!(data.local_request && data.enabled && data.runtime_lan && url && data.qr_available);
+              if (qrWrap) qrWrap.hidden = !showQr;
+              if (qrImage && showQr) {
+                qrImage.src = `/mobile_access_qr?connection=${encodeURIComponent(selectedMode)}&v=${encodeURIComponent(data.revision || Date.now())}`;
+                qrImage.alt = tx('mobileQr');
+              }
+
+              const noteKey = selectedMode === 'tailscale' ? 'mobileTailscaleNote' : (selectedMode === 'public' ? 'mobilePublicNote' : 'mobileLanNote');
+              const qrHelp = data.local_request && data.enabled && data.runtime_lan && !data.qr_available ? ` ${tx('mobileQrMissing')}` : '';
+              setNodeText('#mobile-access-note', `${tx(noteKey)}${qrHelp}`);
+            }
+
+            function selectMobileConnection(mode){
+              if (!LAST_MOBILE_ACCESS_STATUS || (mode !== 'public' && !mobileConnectionIsAvailable(LAST_MOBILE_ACCESS_STATUS, mode))) return;
+              MOBILE_CONNECTION_MODE = mode;
+              renderMobileConnection(LAST_MOBILE_ACCESS_STATUS, mode);
+            }
+
+            function renderMobileAccess(data){
+              LAST_MOBILE_ACCESS_STATUS = data || null;
+              if (!data) return;
+              const toggle = document.getElementById('mobile_access_enabled');
+              const controls = document.getElementById('mobile-access-host-controls');
+              const details = document.getElementById('mobile-access-details');
+              const codeInput = document.getElementById('mobile_access_code');
+              if (toggle) toggle.checked = !!data.enabled;
+              if (controls) controls.hidden = !data.local_request;
+              if (details) details.hidden = !(data.local_request && data.enabled);
+              if (codeInput) codeInput.value = data.pairing_code || '';
+
+              if (!data.local_request) {
+                setMobileAccessState('ready', tx('mobileRemote'), tx('mobileRemoteHelp'));
+              } else if (data.restart_required) {
+                setMobileAccessState('restart', tx('mobileRestart'), data.enabled ? tx('mobileRestartEnable') : tx('mobileRestartDisable'));
+              } else if (data.enabled && data.runtime_lan) {
+                setMobileAccessState('ready', tx('mobileReady'), tx('mobileReadyHelp'));
+              } else {
+                setMobileAccessState('idle', tx('mobileDisabled'), tx('mobileDisabledHelp'));
+              }
+
+              if (data.local_request) renderMobileConnection(data);
+            }
+
+            async function refreshMobileAccess(){
+              try{
+                setMobileAccessState('loading', tx('mobileLoading'), '');
+                const response = await fetch('/mobile_access');
+                const data = await response.json();
+                if (!response.ok || !data.ok) throw new Error(data.error || `HTTP ${response.status}`);
+                renderMobileAccess(data);
+              }catch(error){
+                setMobileAccessState('error', tx('mobileError'), String(error));
+              }
+            }
+
+            async function saveMobileAccess(rotate=false){
+              const button = document.getElementById(rotate ? 'btn_mobile_access_rotate' : 'btn_mobile_access_apply');
+              try{
+                if (button) button.disabled = true;
+                const response = await fetch('/mobile_access', {
+                  method:'POST',
+                  headers:{'Content-Type':'application/json'},
+                  body:JSON.stringify({
+                    enabled:document.getElementById('mobile_access_enabled')?.checked || false,
+                    rotate:!!rotate,
+                    restart:!rotate,
+                    public_url:MOBILE_CONNECTION_MODE === 'public'
+                      ? (document.getElementById('mobile_access_url')?.value || '').trim()
+                      : (LAST_MOBILE_ACCESS_STATUS?.connections?.public?.configured_url || '')
+                  })
+                });
+                const data = await response.json();
+                if (!response.ok || !data.ok) throw new Error(data.error || `HTTP ${response.status}`);
+                renderMobileAccess(data);
+                if (data.restart_scheduled) await waitForMobileRestart(!!data.enabled);
+              }catch(error){
+                setMobileAccessState('error', tx('mobileError'), String(error));
+              }finally{
+                if (button) button.disabled = false;
+              }
+            }
+
+            function mobileRestartPause(milliseconds){
+              return new Promise(resolve => setTimeout(resolve, milliseconds));
+            }
+
+            async function waitForMobileRestart(targetEnabled){
+              setMobileAccessState('restart', tx('mobileRestarting'), tx('mobileRestartingHelp'));
+              await mobileRestartPause(1000);
+              const deadline = Date.now() + 20000;
+              while (Date.now() < deadline) {
+                try{
+                  const response = await fetch(`/mobile_access?restart=${Date.now()}`, {cache:'no-store'});
+                  if (response.ok) {
+                    const data = await response.json();
+                    if (data.ok && data.runtime_lan === targetEnabled && !data.restart_required) {
+                      window.location.reload();
+                      return true;
+                    }
+                  }
+                }catch(error){}
+                await mobileRestartPause(650);
+              }
+              setMobileAccessState('error', tx('mobileError'), tx('mobileRestartFailed'));
+              return false;
+            }
+
+            async function copyMobileAccessUrl(){
+              const value = document.getElementById('mobile_access_url')?.value || '';
+              if (!value) return;
+              try{
+                await navigator.clipboard.writeText(value);
+                setMobileAccessState('ready', tx('mobileCopied'), value);
+              }catch(error){
+                setMobileAccessState('error', tx('mobileError'), String(error));
+              }
+            }
+
+            function registerServiceWorker(){
+              if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
+              navigator.serviceWorker.register('/service-worker.js').catch(() => {});
             }
 
             function setRunning(is){
               const pill = document.getElementById('running-pill');
-              pill.textContent = is ? tx('running') : tx('stopped');
-              pill.className = 'pill ' + (is ? 'on' : 'off');
+              const wasRunning = LAST_RUNNING;
+              LAST_RUNNING = !!is;
+              if (pill) {
+                pill.textContent = is ? tx('running') : tx('stopped');
+                pill.className = 'pill ' + (is ? 'on' : 'off');
+              }
+              const dockStatus = document.getElementById('dock-status');
+              if (dockStatus) dockStatus.textContent = is ? tx('running') : tx('stopped');
+              document.getElementById('command-dot')?.classList.toggle('running', !!is);
+              document.getElementById('sidebar-status-dot')?.classList.toggle('running', !!is);
+              document.querySelector('.nav-live-dot')?.classList.toggle('running', !!is);
+              const sidebarStatus = document.getElementById('sidebar-status-text');
+              if (sidebarStatus) sidebarStatus.textContent = is ? tx('running') : tx('stopped');
+              const startButton = document.getElementById('btn_start');
+              const stopButton = document.getElementById('btn_stop');
+              const scanButton = document.getElementById('btn_scan_once');
+              const defaultButton = document.getElementById('btn_default');
+              if (startButton) startButton.textContent = is ? tx('restart') : tx('start');
+              if (stopButton && stopButton.getAttribute('aria-busy') !== 'true') stopButton.disabled = !is;
+              if (scanButton && scanButton.getAttribute('aria-busy') !== 'true') scanButton.disabled = !!is;
+              if (defaultButton) defaultButton.disabled = !!is;
+              if (!!is !== wasRunning) switchAppView(is ? 'monitor' : 'search', {instant:true});
             }
 
             function statusInfo(r, status){
+                if (status === '❗' || r.requirement_unmet) return {cls:'warn', row:'', label:tx('check')};
                 if (status === '✅' || r.available === true) return {cls:'available', row:'row-available', label:tx('available')};
                 if (status === '❌' || r.available === false) return {cls:'unavailable', row:'row-unavailable', label:tx('unavailable')};
-                if (status === '❗' || r.requirement_unmet) return {cls:'warn', row:'', label:tx('check')};
                 return {cls:'unknown', row:'', label:tx('check')};
             }
 
@@ -1745,6 +3571,199 @@
                 set('stat-unavailable', stats.unavailable);
                 set('stat-unknown', stats.unknown);
                 set('stat-total', stats.total);
+            }
+
+            function resultKind(result){
+                if (result && result.available === true && !result.requirement_unmet) return 'available';
+                if (result && result.available === false && !result.requirement_unmet) return 'unavailable';
+                return 'check';
+            }
+
+            function resultPrice(result){
+                const candidates = [
+                    result?.min_member_price_text,
+                    result?.min_price_text,
+                    ...(Array.isArray(result?.offers_display)
+                        ? result.offers_display.flatMap(offer => [offer.member_price_text, offer.price_text])
+                        : [])
+                ];
+                for (const value of candidates){
+                    const parsed = Number(String(value || '').replace(/[^0-9.]/g, ''));
+                    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+                }
+                return Number.POSITIVE_INFINITY;
+            }
+
+            function resultDistance(result){
+                const hotel = AREA_HOTELS.find(item => String(item.code || '') === String(result?.code || ''));
+                const distance = Number(hotel?.distance_km);
+                return Number.isFinite(distance) ? distance : Number.POSITIVE_INFINITY;
+            }
+
+            function visibleResults(results){
+                const query = RESULT_QUERY.trim().toLocaleLowerCase();
+                let visible = results.filter(result => {
+                    const matchesFilter = RESULT_FILTER === 'all'
+                        || (RESULT_FILTER === 'changes'
+                            ? RESULT_CHANGED_CODES.has(String(result.code || ''))
+                            : resultKind(result) === RESULT_FILTER);
+                    if (!matchesFilter) return false;
+                    if (!query) return true;
+                    const offers = Array.isArray(result.offers_display) ? result.offers_display : [];
+                    const searchable = [
+                        result.display_code, result.code, result.name, result.name_primary, result.name_en, result.name_zh,
+                        result.name_zh_cn, result.name_zh_tw, result.name_ja, result.name_ko,
+                        result.min_price_room, result.error_summary,
+                        ...offers.flatMap(offer => [offer.room_title, offer.room_title_primary])
+                    ].filter(Boolean).join(' ').toLocaleLowerCase();
+                    return searchable.includes(query);
+                });
+                const kindRank = {available: 0, check: 1, unavailable: 2};
+                visible = [...visible].sort((left, right) => {
+                    if (RESULT_SORT === 'status') return kindRank[resultKind(left)] - kindRank[resultKind(right)];
+                    if (RESULT_SORT === 'price') return resultPrice(left) - resultPrice(right);
+                    if (RESULT_SORT === 'name') {
+                        const leftName = left.name_primary || left.name_en || left.name || '';
+                        const rightName = right.name_primary || right.name_en || right.name || '';
+                        return String(leftName).localeCompare(String(rightName), currentLang().replace('_', '-'));
+                    }
+                    if (RESULT_SORT === 'distance') return resultDistance(left) - resultDistance(right);
+                    return 0;
+                });
+                return visible;
+            }
+
+            function saveResultViewPrefs(){
+                try {
+                    localStorage.setItem(RESULT_VIEW_PREFS_KEY, JSON.stringify({
+                        filter: RESULT_FILTER === 'changes' ? 'all' : RESULT_FILTER,
+                        sort: RESULT_SORT,
+                        query: RESULT_QUERY
+                    }));
+                } catch(e) {}
+            }
+
+            function restoreResultViewPrefs(){
+                try {
+                    const saved = JSON.parse(localStorage.getItem(RESULT_VIEW_PREFS_KEY) || '{}');
+                    const filters = new Set(['all', 'available', 'unavailable', 'check']);
+                    const sorts = new Set(['default', 'status', 'price', 'name', 'distance']);
+                    if (filters.has(saved.filter)) RESULT_FILTER = saved.filter;
+                    if (sorts.has(saved.sort)) RESULT_SORT = saved.sort;
+                    RESULT_QUERY = typeof saved.query === 'string' ? saved.query.slice(0, 120) : '';
+                } catch(e) {}
+                const query = document.getElementById('result_query');
+                const sort = document.getElementById('results_sort');
+                if (query) query.value = RESULT_QUERY;
+                if (sort) sort.value = RESULT_SORT;
+            }
+
+            function csvCell(value){
+                return `"${String(value == null ? '' : value).replace(/"/g, '""')}"`;
+            }
+
+            function exportVisibleResults(){
+                const results = visibleResults(Array.isArray(LAST_RESULTS) ? LAST_RESULTS : []);
+                if (!results.length) {
+                    document.getElementById('err').textContent = tx('exportNoResults');
+                    document.getElementById('msg').textContent = '';
+                    return;
+                }
+                const rows = [[
+                    'Code', 'Hotel Primary', 'Hotel English', 'Status', 'Price', 'Member Price',
+                    'Left', 'Room Type Primary', 'Room Type English', 'Smoking', 'Distance km',
+                    'Checked At', 'Elapsed ms', 'Engine', 'Error', 'URL'
+                ]];
+                results.forEach(result => {
+                    const offers = Array.isArray(result.offers_display) && result.offers_display.length
+                        ? result.offers_display
+                        : [{
+                            price_text: result.min_price_text,
+                            member_price_text: result.min_member_price_text,
+                            remaining_norm: result.min_remaining,
+                            room_title: result.min_price_room,
+                            room_title_primary: ''
+                        }];
+                    offers.forEach(offer => {
+                        const smoking = offer.room_smoking === 'smoking'
+                            ? 'Smoking'
+                            : (offer.room_smoking === 'non_smoking' ? 'Non-Smoking' : '');
+                        const distance = resultDistance(result);
+                        rows.push([
+                            result.display_code || result.code || '', result.name_primary || result.name_zh || '', result.name_en || result.name || '',
+                            resultKind(result), offer.price_text || '', offer.member_price_text || '', offer.remaining_norm || '',
+                            offer.room_title_primary || '', offer.room_title || '', smoking,
+                            Number.isFinite(distance) ? distance : '', result.checked_at || '', result.elapsed_ms ?? '',
+                            result.engine_used || '', result.error_summary || '', result.url || ''
+                        ]);
+                    });
+                });
+                const csv = '\ufeff' + rows.map(row => row.map(csvCell).join(',')).join('\r\n');
+                const blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
+                const link = document.createElement('a');
+                const now = new Date();
+                const stamp = now.toISOString().replace(/[-:]/g, '').slice(0, 15);
+                link.href = URL.createObjectURL(blob);
+                link.download = `toyoko-results-${stamp}.csv`;
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+                URL.revokeObjectURL(link.href);
+                document.getElementById('err').textContent = '';
+            }
+
+            function resultRoomCount(result){
+                const values = Array.isArray(result?.offers_display) && result.offers_display.length
+                    ? result.offers_display.map(offer => offer.remaining_norm)
+                    : [result?.min_remaining];
+                return values.reduce((total, value) => {
+                    const parsed = Number(String(value || '').replace(/[^0-9]/g, ''));
+                    return total + (Number.isFinite(parsed) ? parsed : 0);
+                }, 0);
+            }
+
+            function detectResultChanges(previousResults, nextResults){
+                const note = document.getElementById('result-change-note');
+                RESULT_CHANGE_CLASSES = new Map();
+                if (!Array.isArray(previousResults) || previousResults.length === 0) {
+                    if (note) note.hidden = true;
+                    return;
+                }
+                const previousByCode = new Map(previousResults.map(result => [String(result.code || ''), result]));
+                const counts = {available: 0, unavailable: 0, count: 0};
+                const changedCodes = new Set();
+                nextResults.forEach(result => {
+                    const code = String(result.code || '');
+                    const previous = previousByCode.get(code);
+                    if (!previous) return;
+                    const previousKind = resultKind(previous);
+                    const nextKind = resultKind(result);
+                    if (previousKind !== 'available' && nextKind === 'available') {
+                        counts.available += 1;
+                        changedCodes.add(code);
+                        RESULT_CHANGE_CLASSES.set(code, 'result-new-available');
+                    } else if (previousKind === 'available' && nextKind !== 'available') {
+                        counts.unavailable += 1;
+                        changedCodes.add(code);
+                        RESULT_CHANGE_CLASSES.set(code, 'result-lost-available');
+                    } else if (nextKind === 'available' && resultRoomCount(previous) !== resultRoomCount(result)) {
+                        counts.count += 1;
+                        changedCodes.add(code);
+                        RESULT_CHANGE_CLASSES.set(code, 'result-count-changed');
+                    }
+                });
+                const messages = [];
+                if (counts.available) messages.push(fmt('resultBecameAvailable', {count: counts.available}));
+                if (counts.unavailable) messages.push(fmt('resultNoLongerAvailable', {count: counts.unavailable}));
+                if (counts.count) messages.push(fmt('resultRoomCountChanged', {count: counts.count}));
+                if (note) {
+                    note.textContent = messages.join(' · ');
+                    note.hidden = messages.length === 0;
+                }
+                if (messages.length) {
+                    RESULT_CHANGED_CODES = changedCodes;
+                    RESULT_CHANGE_TOKEN += 1;
+                }
             }
 
             function renderPushStatus(items){
@@ -1776,7 +3795,8 @@
                 grid.innerHTML = items.map(item => {
                     const state = item.state || (item.enabled ? 'waiting' : 'disabled');
                     const enabledText = item.enabled ? tx('enabled') : tx('disabled');
-                    const age = (typeof item.age_sec === 'number' && item.state !== 'disabled') ? ` · ${item.age_sec}s ago` : '';
+                    const age = (typeof item.age_sec === 'number' && item.state !== 'disabled')
+                        ? ` · ${fmt('secondsAgo', {seconds:item.age_sec})}` : '';
                     const msg = item.message ? `${safe(localizedMessage(item.message))}${age}` : (item.enabled ? `${safe(tx('waitingTrigger'))}${age}` : safe(tx('notEnabled')));
                     return `<div class="push-card">
                         <div class="push-name">${safe(channelName(item.key, item.label_en))}</div>
@@ -1787,7 +3807,19 @@
                 }).join('');
             }
 
-            function renderRows(results){
+            function renderRows(results, force=false){
+                const incoming = Array.isArray(results);
+                if (incoming) {
+                    const fingerprint = JSON.stringify(results);
+                    if (!force && fingerprint === LAST_RESULTS_FINGERPRINT) return;
+                    detectResultChanges(LAST_RESULTS, results);
+                    LAST_RESULTS = results;
+                    LAST_RESULTS_FINGERPRINT = fingerprint;
+                } else {
+                    force = true;
+                }
+                const sourceResults = Array.isArray(LAST_RESULTS) ? LAST_RESULTS : [];
+                const displayedResults = visibleResults(sourceResults);
                 const tbody = document.getElementById('results-body');
                 const membership = document.getElementById('membership_status')?.value || 'member';
                 const safe = (s) => String(s || '').replace(/[&<>"']/g, (m) => ({
@@ -1797,7 +3829,9 @@
                     const primary = r.name_primary || r.name_zh || '';
                     const en = r.name_en || r.name || '(Hotel name not found)';
                     const inner = safe(bilingualText(primary, en));
-                    return `<a href="${safe(r.url)}" target="_blank">${inner}</a>`;
+                    const triggerClass = 'hotel-info-trigger';
+                    const source = providerShort(r.provider || 'toyoko');
+                    return `<a class="${triggerClass}" data-hotel-code="${safe(r.code)}" href="${safe(r.url)}" target="_blank" rel="noreferrer noopener">${inner}</a><span class="source-badge ${safe(r.provider || 'toyoko')}">${safe(source)}</span>`;
                 };
                 const roomTitleZh = (title) => {
                     const lang = document.getElementById('primary_language')?.value || 'zh_cn';
@@ -1850,26 +3884,58 @@
                     const label = `${safe(bilingualText(zh, en))}${safe(smoke)}`;
                     return `<a href="${safe(url || '#')}" target="_blank">${label}</a>`;
                 };
-                setResultStats(results);
-                if (!Array.isArray(results) || results.length === 0){
+                const telemetryHtmlFor = (result) => {
+                    const parts = [];
+                    if (result.engine_used) parts.push(String(result.engine_used).toUpperCase());
+                    if (Number.isFinite(Number(result.elapsed_ms))) {
+                        const elapsed = Number(result.elapsed_ms);
+                        parts.push(elapsed >= 1000 ? `${(elapsed / 1000).toFixed(1)}s` : `${elapsed}ms`);
+                    }
+                    if (result.checked_at) {
+                        const checked = new Date(result.checked_at);
+                        if (!Number.isNaN(checked.getTime())) {
+                            parts.push(checked.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'}));
+                        }
+                    }
+                    const meta = parts.length ? `<div class="result-telemetry">${safe(parts.join(' · '))}</div>` : '';
+                    const error = result.error_summary
+                        ? `<div class="result-error" title="${safe(result.error_summary)}">${safe(result.error_summary)}</div>`
+                        : '';
+                    return meta + error;
+                };
+                setResultStats(sourceResults);
+                const count = document.getElementById('results_filter_count');
+                if (count) count.textContent = fmt('showingResults', {shown: displayedResults.length, total: sourceResults.length});
+                document.querySelectorAll('[data-result-filter]').forEach(button => {
+                    const active = button.dataset.resultFilter === RESULT_FILTER;
+                    button.classList.toggle('active', active);
+                    button.setAttribute('aria-pressed', active ? 'true' : 'false');
+                });
+                if (sourceResults.length === 0){
                     tbody.innerHTML = `<tr><td colspan="6" class="empty-results">${safe(tx('noData'))}</td></tr>`;
+                    return;
+                }
+                if (displayedResults.length === 0){
+                    tbody.innerHTML = `<tr><td colspan="6" class="empty-results">${safe(tx('noFilteredResults'))}</td></tr>`;
                     return;
                 }
 
                 const rows = [];
 
-                results.forEach(r => {
+                displayedResults.forEach(r => {
                     const nameHtml  = hotelNameHtml(r);
 
                     // 生成一行的帮助函数：是否显示Code/Name由首行决定
                     const addRow = (showCode, showName, status, priceHtml, leftHtml, roomHtml) => {
                         const info = statusInfo(r, status);
                         const statusHtml = status ? `<span class="status-badge ${info.cls}">${status} ${info.label}</span>` : '';
+                        const telemetryHtml = showCode ? telemetryHtmlFor(r) : '';
+                        const changeClass = RESULT_CHANGE_CLASSES.get(String(r.code || '')) || '';
                         rows.push(
-                            `<tr class="${info.row}">
-                              <td class="code-cell">${showCode ? safe(r.code) : ''}</td>
+                            `<tr class="${info.row} ${changeClass}">
+                              <td class="code-cell">${showCode ? safe(r.display_code || r.code) : ''}</td>
                               <td class="hotel-cell">${showName ? nameHtml : ''}</td>
-                              <td>${statusHtml}</td>
+                              <td>${statusHtml}${telemetryHtml}</td>
                               <td class="price-cell">${priceHtml}</td>
                               <td class="center-cell">${safe(leftHtml)}</td>
                               <td>${roomHtml}</td>
@@ -1904,6 +3970,18 @@
                 });
 
                 tbody.innerHTML = rows.join('');
+                if (RESULT_CHANGE_CLASSES.size) {
+                    const changeToken = RESULT_CHANGE_TOKEN;
+                    setTimeout(() => {
+                        if (changeToken !== RESULT_CHANGE_TOKEN) return;
+                        document.querySelectorAll('.result-new-available,.result-lost-available,.result-count-changed').forEach(row => {
+                            row.classList.remove('result-new-available', 'result-lost-available', 'result-count-changed');
+                        });
+                        const note = document.getElementById('result-change-note');
+                        if (note) note.hidden = true;
+                        RESULT_CHANGE_CLASSES.clear();
+                    }, 8000);
+                }
             }
 
             function hms(seconds){
@@ -1938,10 +4016,17 @@
               }).join('');
             }
 
-            async function refreshStatus(){
+            async function refreshStatus(manual=false){
+              if (STATUS_REFRESH_IN_FLIGHT || (document.hidden && !manual)) return;
+              STATUS_REFRESH_IN_FLIGHT = true;
+              if (manual) setButtonBusy('btn_results_refresh', true);
               try{
                 const r = await fetch('/status');
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
                 const j = await r.json();
+                LAST_STATUS_UPDATED_AT = new Date();
+                updateResultsTimestamp();
+                setConnectionOnline(true);
                 setRunning(!!j.running);
                 renderProgress(j.progress);
                 if (j && j.config){
@@ -1952,11 +4037,17 @@
                   setIfNotFocused('smoking', j.config.smoking);
                   setIfNotFocused('room_requirement', (j.config.room_requirement || j.config.om_requirement || 'any'));
                   setIfNotFocused('membership_status', j.config.membership_status || 'member');
-                  setIfNotFocused('primary_language', j.config.primary_language || 'zh_cn');
+                  const activeProviders = Array.isArray(j.config.enabled_providers) ? j.config.enabled_providers : PROVIDER_IDS;
+                  PROVIDER_IDS.forEach(provider => {
+                    const checkbox = document.getElementById(`provider_${provider}`);
+                    if (checkbox && !recentlyEdited(`provider_${provider}`) && !BLOCK_REMOTE_OVERWRITE) checkbox.checked = activeProviders.includes(provider);
+                  });
                   setIfNotFocused('engine', j.config.engine || 'http');
                   setIfNotFocused('smart_parallel_workers', j.config.smart_parallel_workers || 1);
                   const elParallel = document.getElementById('smart_parallel_enabled');
                   if (elParallel && !recentlyEdited('smart_parallel_enabled') && !BLOCK_REMOTE_OVERWRITE) elParallel.checked = !!j.config.smart_parallel_enabled;
+                  const elBackoff = document.getElementById('adaptive_backoff_enabled');
+                  if (elBackoff && !recentlyEdited('adaptive_backoff_enabled') && !BLOCK_REMOTE_OVERWRITE) elBackoff.checked = j.config.adaptive_backoff_enabled !== false;
 
                   const elLocal = document.getElementById('enable_local');
                   if (elLocal && !recentlyEdited('enable_local') && !BLOCK_REMOTE_OVERWRITE) elLocal.checked = !!j.config.enable_local;
@@ -2011,13 +4102,22 @@
                 renderRows(j.results || []);
                 renderAvailabilityLogs(j.availability_logs || []);
                 renderPushStatus(j.notification_status || []);
+                renderHotelCatalog(j.hotel_catalog || null);
+                renderProviderCatalog(j.provider_catalog || null);
                 const act = (j && j.action) ? j.action : '(idle)';
                 const age = (j && (typeof j.action_age_sec === 'number')) ? j.action_age_sec : null;
                 const actLine = `${tx('currentAction')}: ${act}${age!=null ? ` (${age}s ago)` : ''}`;
                 const actEl = document.getElementById('action-text');
                 if (actEl) actEl.textContent = actLine;
               }catch(e){
-                // ignore
+                setConnectionOnline(false);
+                if (manual) {
+                  document.getElementById('err').textContent = tx('connectionOffline');
+                  document.getElementById('msg').textContent = '';
+                }
+              }finally{
+                STATUS_REFRESH_IN_FLIGHT = false;
+                if (manual) setButtonBusy('btn_results_refresh', false);
               }
             }
 
@@ -2032,8 +4132,39 @@
               el.value = value;
             }
 
-            document.getElementById('btn_start').addEventListener('click', (e)=>{e.preventDefault(); callStart();});
+            document.getElementById('btn_scan_once').addEventListener('click', (e)=>{e.preventDefault(); callStart(true);});
+            document.getElementById('btn_start').addEventListener('click', (e)=>{e.preventDefault(); callStart(false);});
             document.getElementById('btn_stop').addEventListener('click', (e)=>{e.preventDefault(); callStop();});
+            document.querySelectorAll('[data-result-filter]').forEach(button => {
+              button.addEventListener('click', (event) => {
+                event.preventDefault();
+                RESULT_FILTER = button.dataset.resultFilter || 'all';
+                saveResultViewPrefs();
+                renderRows();
+              });
+            });
+            const resultSort = document.getElementById('results_sort');
+            if (resultSort) resultSort.addEventListener('change', () => {
+              RESULT_SORT = resultSort.value || 'default';
+              saveResultViewPrefs();
+              renderRows();
+            });
+            const resultQuery = document.getElementById('result_query');
+            if (resultQuery) resultQuery.addEventListener('input', () => {
+              RESULT_QUERY = resultQuery.value || '';
+              saveResultViewPrefs();
+              renderRows();
+            });
+            const resultRefresh = document.getElementById('btn_results_refresh');
+            if (resultRefresh) resultRefresh.addEventListener('click', (event) => {
+              event.preventDefault();
+              refreshStatus(true);
+            });
+            const resultExport = document.getElementById('btn_results_export');
+            if (resultExport) resultExport.addEventListener('click', (event) => {
+              event.preventDefault();
+              exportVisibleResults();
+            });
             document.getElementById('btn_today').addEventListener('click', (e)=>{e.preventDefault(); setDateRange(new Date(), 1);});
             document.getElementById('btn_tomorrow').addEventListener('click', (e)=>{e.preventDefault(); const d=new Date(); d.setDate(d.getDate()+1); setDateRange(d, 1);});
             document.getElementById('btn_weekend').addEventListener('click', (e)=>{e.preventDefault(); setNextWeekend();});
@@ -2046,6 +4177,8 @@
             if (barkSoundButton) barkSoundButton.addEventListener('click', (e)=>{e.preventDefault(); callBarkSoundTest();});
             const upgradeButton = document.getElementById('btn_upgrade');
             if (upgradeButton) upgradeButton.addEventListener('click', (e)=>{e.preventDefault(); callUpgrade();});
+            const updateCheckButton = document.getElementById('btn_update_check');
+            if (updateCheckButton) updateCheckButton.addEventListener('click', (e)=>{e.preventDefault(); checkForUpdates();});
             const barkKeyInput = document.getElementById('bark_key');
             if (barkKeyInput) barkKeyInput.addEventListener('input', ()=>{
               if ((barkKeyInput.value || '').trim().length > 48) validateBarkKeyInput();
@@ -2056,17 +4189,48 @@
 	            if (areaDetail) areaDetail.addEventListener('change', ()=>{ AREA_HOTELS = []; AREA_SELECTED_CODES = null; renderAreaHotels(); });
             const areaFilter = document.getElementById('area_filter');
             if (areaFilter) areaFilter.addEventListener('input', renderAreaHotels);
+            const areaSort = document.getElementById('area_sort');
+            if (areaSort) areaSort.addEventListener('change', () => {
+              AREA_SORT = areaSort.value || 'default';
+              renderAreaHotels();
+            });
+            const selectedOnlyButton = document.getElementById('btn_area_selected_only');
+            if (selectedOnlyButton) selectedOnlyButton.addEventListener('click', (event) => {
+              event.preventDefault();
+              AREA_SELECTED_ONLY = !AREA_SELECTED_ONLY;
+              selectedOnlyButton.classList.toggle('active', AREA_SELECTED_ONLY);
+              selectedOnlyButton.setAttribute('aria-pressed', AREA_SELECTED_ONLY ? 'true' : 'false');
+              renderAreaHotels();
+            });
+            document.querySelectorAll('[data-hotel-workspace-view]').forEach(button => {
+              button.addEventListener('click', () => setHotelWorkspaceView(button.dataset.hotelWorkspaceView));
+            });
+            document.querySelectorAll('.step-button[data-step-target]').forEach(button => {
+              button.addEventListener('click', () => {
+                const input = document.getElementById(button.dataset.stepTarget || '');
+                if (!input) return;
+                const delta = Number(button.dataset.stepDelta || 0);
+                const minimum = Number(input.min || Number.NEGATIVE_INFINITY);
+                const maximum = Number(input.max || Number.POSITIVE_INFINITY);
+                input.value = String(Math.min(maximum, Math.max(minimum, Number(input.value || minimum) + delta)));
+                input.dispatchEvent(new Event('input', {bubbles:true}));
+                input.dispatchEvent(new Event('change', {bubbles:true}));
+              });
+            });
             document.querySelectorAll('input[name="hotel_picker_mode"]').forEach(el => {
               el.addEventListener('change', () => {
 	                setPickerMode(currentSearchMode());
 	                AREA_HOTELS = [];
 	                AREA_SELECTED_CODES = null;
 	                renderAreaHotels();
+                markEdited('hotel_picker_mode');
                 BLOCK_REMOTE_OVERWRITE = true;
               });
             });
             const primaryLanguage = document.getElementById('primary_language');
             if (primaryLanguage) primaryLanguage.addEventListener('change', ()=>{
+              storageSet(LANGUAGE_KEY, primaryLanguage.value || 'zh_cn');
+              hideHotelInfoNow();
               applyUiLanguage();
               renderAreaHotels();
               if (currentSearchMode() === 'area' && document.getElementById('area_region')?.value) loadAreaHotels();
@@ -2079,6 +4243,38 @@
             if (btnAreaAll) btnAreaAll.addEventListener('click', (e)=>{ e.preventDefault(); setAreaHotelChecks(true); });
             const btnAreaNone = document.getElementById('btn_area_none');
             if (btnAreaNone) btnAreaNone.addEventListener('click', (e)=>{ e.preventDefault(); setAreaHotelChecks(false); });
+            const btnProviderAll = document.getElementById('btn_provider_all');
+            if (btnProviderAll) btnProviderAll.addEventListener('click', (event) => {
+              event.preventDefault();
+              PROVIDER_IDS.forEach(provider => {
+                const checkbox = document.getElementById(`provider_${provider}`);
+                if (checkbox) checkbox.checked = true;
+              });
+              AREA_HOTELS = [];
+              AREA_SELECTED_CODES = null;
+              renderAreaHotels();
+              syncProviderAllButton();
+              setAreaStatus(tx('areaHint'));
+              markEdited('enabled_providers');
+              BLOCK_REMOTE_OVERWRITE = true;
+            });
+            PROVIDER_IDS.forEach(provider => {
+              const checkbox = document.getElementById(`provider_${provider}`);
+              if (checkbox) checkbox.addEventListener('change', () => {
+                if (!enabledProviders().length) checkbox.checked = true;
+                AREA_HOTELS = [];
+                AREA_SELECTED_CODES = null;
+                renderAreaHotels();
+                setAreaStatus(tx('areaHint'));
+                syncProviderAllButton();
+                markEdited(`provider_${provider}`);
+                BLOCK_REMOTE_OVERWRITE = true;
+              });
+            });
+            const btnCatalogRefresh = document.getElementById('btn_catalog_refresh');
+            if (btnCatalogRefresh) btnCatalogRefresh.addEventListener('click', (e)=>{ e.preventDefault(); refreshHotelCatalog(); });
+            const btnCatalogAck = document.getElementById('btn_catalog_ack');
+            if (btnCatalogAck) btnCatalogAck.addEventListener('click', (e)=>{ e.preventDefault(); acknowledgeNewHotels(); });
             document.getElementById('btn_default').addEventListener('click', (e)=>{e.preventDefault();
               // 恢复默认（不会立刻写磁盘）
               document.getElementById('start_date').value = todayStr();
@@ -2089,7 +4285,11 @@
               document.getElementById('room_requirement').value = 'any';
               document.getElementById('membership_status').value = 'member';
               const langEl = document.getElementById('primary_language');
-              if (langEl) langEl.value = 'zh_cn';
+              if (langEl) {
+                langEl.value = 'zh_cn';
+                storageSet(LANGUAGE_KEY, 'zh_cn');
+              }
+              PROVIDER_IDS.forEach(name => { const provider = document.getElementById(`provider_${name}`); if (provider) provider.checked = true; });
               applyUiLanguage();
               const engineEl = document.getElementById('engine');
               if (engineEl) engineEl.value = 'http';
@@ -2099,6 +4299,8 @@
               ['enable_telegram','enable_local','enable_email','enable_bark','enable_serverchan','smart_parallel_enabled','bark_critical_enabled'].forEach(id=>{
                 const c = document.getElementById(id); if (c) c.checked = false;
               });
+              const adaptiveBackoff = document.getElementById('adaptive_backoff_enabled');
+              if (adaptiveBackoff) adaptiveBackoff.checked = true;
               ['notify_available','notify_unavailable','notify_availability_count_change','notify_start','notify_stop'].forEach(id=>{
                 const c = document.getElementById(id); if (c) c.checked = true;
               });
@@ -2119,13 +4321,40 @@
               document.getElementById('radius_lat').value = '';
               document.getElementById('radius_lng').value = '';
               document.getElementById('radius_km').value = 5;
+              AREA_SELECTED_ONLY = false;
+              AREA_SORT = 'default';
+              const selectedOnly = document.getElementById('btn_area_selected_only');
+              if (selectedOnly) {
+                selectedOnly.classList.remove('active');
+                selectedOnly.setAttribute('aria-pressed', 'false');
+              }
+              const areaSort = document.getElementById('area_sort');
+              if (areaSort) areaSort.value = 'default';
+              syncProviderAllButton();
               setPickerMode('area');
+              setHotelWorkspaceView('list');
               syncDisplayValues();
+              updateAreaSelectionSummary();
+              markEdited('defaults');
               BLOCK_REMOTE_OVERWRITE = true;
             });
+            window.addEventListener('beforeunload', (event) => {
+              if (!FORM_DIRTY) return;
+              event.preventDefault();
+              event.returnValue = '';
+            });
+            document.addEventListener('visibilitychange', () => {
+              if (!document.hidden) refreshStatus();
+            });
+            restoreResultViewPrefs();
             initAnimatedDetails();
+            initHotelInfoPreview();
+            updateAreaSelectionSummary();
+            renderRows();
             refreshStatus();
             refreshSearchHistory();
             refreshUpdateStatus();
+            refreshMobileAccess();
+            registerServiceWorker();
             setInterval(refreshStatus, 2000);
             setInterval(refreshUpdateStatus, 10000);

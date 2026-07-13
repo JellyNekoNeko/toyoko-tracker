@@ -1,41 +1,27 @@
 from __future__ import annotations
 
-import atexit
-import ipaddress
-import logging
-import os
-import threading
-from datetime import datetime
-from urllib.parse import urlsplit
-
-from flask import Flask, Response, jsonify, request
+from flask import Flask, Response
 
 from . import runtime as _runtime
 from .app_compat import *  # noqa: F403 - legacy public API lives outside the route layer.
-from .settings import AUTO_SAVE_PATH, INSTANCE_STATE_PATH, LEGACY_AUTO_SAVE_PATH, __version__
+from .mobile_access import (
+    configure_flask_app,
+    logout as _mobile_logout,
+    manifest_response,
+    pairing_page,
+    protect_request,
+    qr_svg_response,
+    service_worker_response,
+    settings_endpoint,
+)
 
 app = Flask(__name__)
+configure_flask_app(app)
 
 
 @app.before_request
 def protect_local_api():
-    try:
-        if not ipaddress.ip_address(request.remote_addr or "").is_loopback:
-            return jsonify({"ok": False, "error": "Local access only"}), 403
-    except ValueError:
-        return jsonify({"ok": False, "error": "Local access only"}), 403
-
-    if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
-        return None
-    if request.headers.get("Sec-Fetch-Site", "").lower() == "cross-site":
-        return jsonify({"ok": False, "error": "Cross-site request blocked"}), 403
-    origin = request.headers.get("Origin")
-    if origin:
-        source = urlsplit(origin)
-        target = urlsplit(request.host_url)
-        if (source.scheme, source.netloc) != (target.scheme, target.netloc):
-            return jsonify({"ok": False, "error": "Origin not allowed"}), 403
-    return None
+    return protect_request()
 
 
 @app.after_request
@@ -51,6 +37,41 @@ def add_local_security_headers(response: Response) -> Response:
 @app.route("/")
 def home() -> Response:
     return _runtime.home()
+
+
+@app.route("/pair", methods=["GET", "POST"])
+def pair() -> Response:
+    return pairing_page()
+
+
+@app.route("/mobile_access", methods=["GET", "POST"])
+def mobile_access() -> Response:
+    from .server import schedule_restart
+
+    return settings_endpoint(
+        bool(app.config.get("TOYOKO_LAN_BOUND", False)),
+        restart_callback=schedule_restart,
+    )
+
+
+@app.route("/mobile_access_qr")
+def mobile_access_qr() -> Response:
+    return qr_svg_response()
+
+
+@app.route("/mobile_logout", methods=["POST"])
+def mobile_logout() -> Response:
+    return _mobile_logout()
+
+
+@app.route("/manifest.webmanifest")
+def manifest() -> Response:
+    return manifest_response()
+
+
+@app.route("/service-worker.js")
+def service_worker() -> Response:
+    return service_worker_response()
 
 
 @app.route("/start", methods=["POST"])
@@ -83,6 +104,11 @@ def status() -> Response:
     return _runtime.status()
 
 
+@app.route("/hotel_info")
+def hotel_info() -> Response:
+    return _runtime.hotel_info()
+
+
 @app.route("/health")
 def health() -> Response:
     return _runtime.health()
@@ -91,6 +117,36 @@ def health() -> Response:
 @app.route("/update_status")
 def update_status() -> Response:
     return _runtime.update_status()
+
+
+@app.route("/update_check", methods=["POST"])
+def update_check() -> Response:
+    return _runtime.update_check()
+
+
+@app.route("/hotel_catalog_status")
+def hotel_catalog_status() -> Response:
+    return _runtime.hotel_catalog_status()
+
+
+@app.route("/hotel_catalog_refresh", methods=["POST"])
+def hotel_catalog_refresh() -> Response:
+    return _runtime.hotel_catalog_refresh()
+
+
+@app.route("/hotel_catalog_acknowledge", methods=["POST"])
+def hotel_catalog_acknowledge() -> Response:
+    return _runtime.hotel_catalog_acknowledge()
+
+
+@app.route("/provider_catalog_status")
+def provider_catalog_status() -> Response:
+    return _runtime.provider_catalog_status()
+
+
+@app.route("/provider_catalog_refresh", methods=["POST"])
+def provider_catalog_refresh() -> Response:
+    return _runtime.provider_catalog_refresh()
 
 
 @app.route("/upgrade", methods=["POST"])
@@ -124,48 +180,9 @@ def radius_hotels() -> Response:
 
 
 def main() -> None:
-    try:
-        logging.getLogger("werkzeug").setLevel(logging.ERROR)
-    except Exception:
-        pass
+    from .server import run
 
-    try:
-        if _runtime._load_config_with_legacy(AUTO_SAVE_PATH, LEGACY_AUTO_SAVE_PATH):
-            _runtime._save_config_to_file(AUTO_SAVE_PATH)
-    except Exception as e:
-        _runtime._log(f"[boot] auto-load skipped: {e}")
-    _runtime._check_pypi_latest_async()
-
-    host = "127.0.0.1"
-    port = _runtime._find_free_port(4170)
-    url = f"http://{host}:{port}"
-
-    _runtime._atomic_write_json(INSTANCE_STATE_PATH, {
-        "app": "toyoko-tracker",
-        "version": __version__,
-        "pid": os.getpid(),
-        "url": url,
-        "started_at": datetime.now().isoformat(timespec="seconds"),
-    })
-
-    def cleanup_instance_state() -> None:
-        try:
-            import json
-            with open(INSTANCE_STATE_PATH, "r", encoding="utf-8") as stream:
-                state = json.load(stream)
-            if int(state.get("pid") or 0) == os.getpid():
-                os.unlink(INSTANCE_STATE_PATH)
-        except (OSError, ValueError, TypeError):
-            pass
-
-    atexit.register(cleanup_instance_state)
-
-    try:
-        threading.Thread(target=_runtime._open_browser_when_ready, args=(url, host, port), daemon=True).start()
-    except Exception:
-        pass
-
-    app.run(host=host, port=port, debug=False)
+    run(app)
 
 
 def __getattr__(name: str):

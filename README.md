@@ -89,7 +89,8 @@ The default HTTP/API engine does **not** require Playwright.
 Only install Playwright Chromium if you want to use the compatibility browser engine:
 
 ```bash
-playwright install chromium
+pip install --upgrade "toyoko-tracker[playwright]"
+python -m playwright install chromium
 ```
 
 ---
@@ -112,7 +113,34 @@ After launching:
 
 ---
 
-### 1.6 Version Info
+### 1.6 Optional: Phone and LAN Access
+
+Install the lightweight mobile extras for the Waitress WSGI server and local QR generation:
+
+```bash
+pip install --upgrade "toyoko-tracker[mobile]"
+```
+
+Then use one of these workflows:
+
+1. Open **Interface Settings → Mobile Access**, enable LAN access, and restart Toyoko Chan.
+2. Or start it directly with `toyoko-tracker --lan`.
+3. On the Mac, open **Interface Settings** again and scan the QR code with the phone, or open the displayed LAN address.
+4. Enter the pairing code if it was not filled automatically.
+
+Remote LAN requests are blocked until pairing succeeds. Pairing failures are rate-limited, the session uses an HttpOnly cookie, rotating the code invalidates existing phone sessions, and access settings can only be changed from the host Mac. Use this only on a trusted home or personal network. Do not expose the port directly to the public internet.
+
+To return to local-only mode, disable the setting and restart, or run:
+
+```bash
+toyoko-tracker --local-only
+```
+
+The WebUI includes a PWA manifest and can be added to the phone home screen. Full Service Worker support requires an HTTPS secure context; plain LAN HTTP still supports the responsive WebUI and paired control. Tailscale HTTPS is the recommended future path for access away from home.
+
+---
+
+### 1.7 Version Info
 
 - Current version: `v0.6.0`
 - App name: `东横酱 Toyoko Chan`
@@ -126,8 +154,10 @@ After launching:
 
 Toyoko Tracker supports two ways to choose hotels:
 
-1. **Area mode**: choose a region and optional detail area
-2. **Radius mode**: enter a place, address, or coordinates and choose a 1–50 km radius
+1. **Area mode**: choose a region and optional detail area; supports all enabled hotel sources
+2. **Radius mode**: enter a place, address, or coordinates and choose a 1–50 km radius; searches all enabled hotel sources
+
+The search form supports **Toyoko Inn**, **Route Inn Hotels**, **Dormy Inn**, **MYSTAYS Hotel**, and **Daiwa Roynet** as independent sources. Route Inn Hotels includes Route Inn, Route Inn Grandia, Grandvrio, and ARK under one source. Every source uses its own official hotel catalog and booking API adapter.
 
 ---
 
@@ -162,6 +192,19 @@ In the WebUI:
 5. Review the map and select the hotels to monitor
 
 Coordinates are parsed locally. Place names and addresses use OpenStreetMap/Nominatim for geocoding.
+
+Route Inn Hotels are not currently included in the radius coordinate pool; use Area mode to select them.
+
+---
+
+### 2.3 Automatic Hotel Data Updates
+
+- A separate background task checks the official Toyoko Inn hotel list without blocking the WebUI or vacancy scans
+- The official catalog is checked every 6 hours, and the radius coordinate cache has a 24-hour TTL
+- An expired cache remains usable until a successful refresh atomically replaces it
+- Newly opened hotels are detected by comparing hotel codes with the previous official snapshot and are shown in the hotel picker
+- Upcoming hotels, last check time, cache health, and coordinate coverage appear in the hotel data status row
+- Click **Refresh Hotel Data** to queue an immediate background check
 
 ---
 
@@ -227,7 +270,8 @@ Advantages:
 Requires:
 
 ```bash
-playwright install chromium
+pip install --upgrade "toyoko-tracker[playwright]"
+python -m playwright install chromium
 ```
 
 ---
@@ -694,7 +738,8 @@ pip install --upgrade toyoko-tracker
 Install Chromium:
 
 ```bash
-playwright install chromium
+pip install --upgrade "toyoko-tracker[playwright]"
+python -m playwright install chromium
 ```
 
 Then restart Toyoko Tracker.

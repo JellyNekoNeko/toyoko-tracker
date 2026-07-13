@@ -1,5 +1,6 @@
 import sys
 import json
+import importlib
 import tempfile
 import unittest
 from pathlib import Path
@@ -24,6 +25,272 @@ def _rendered(html: str) -> tracker_app.RenderedPage:
 
 @unittest.skipIf(tracker_app is None, f"runtime dependencies missing: {IMPORT_ERROR}")
 class AppParserTests(unittest.TestCase):
+    def test_routeinn_hotel_list_parser_unifies_supported_subbrands(self):
+        from toyoko_tracker.routeinn import parse_hotel_list_html
+
+        html = """
+        <div class="p-hotel"><ul>
+          <li><p class="name">ホテルルートイン札幌駅前北口</p><div class="txt_address">北海道札幌市</div>
+            <ul class="btns"><li class="c-btn1"><a href="/hotel_list/hokkaido/index_hotel_id_241/">ホテル詳細</a></li>
+            <li class="c-btn1 c-btn1--black"><a href="/map">MAP</a></li>
+            <li class="c-btn1 c-btn1--rsv"><a href="/hotel_list/hokkaido/index_hotel_id_241/plan/">予約</a></li></ul></li>
+          <li><p class="name">ルートイングランティア函館駅前</p>
+            <ul class="btns"><li class="c-btn1"><a href="https://www.hotel-grantia.co.jp/hakodate-st/">ホテル詳細</a></li>
+            <li class="c-btn1 c-btn1--rsv"><a href="https://reserve.route-inn.co.jp/booking/result?code=95bc855d-d147-4422-868c-68f7cbf17f3f&type=plan">予約</a></li></ul></li>
+          <li><p class="name">BIZCOURT CABINすすきの</p><ul class="btns"><li class="c-btn1"><a href="#">詳細</a></li><li class="c-btn1 c-btn1--rsv"><a href="#">予約</a></li></ul></li>
+        </ul></div>
+        """
+
+        hotels = parse_hotel_list_html(html, "https://www.route-inn.co.jp/hotel_list/?area=1", "zh_cn")
+
+        self.assertEqual(len(hotels), 2)
+        self.assertEqual(hotels[0]["code"], "routeinn:241")
+        self.assertEqual(hotels[0]["display_code"], "RI-241")
+        self.assertEqual(hotels[0]["provider"], "routeinn")
+        self.assertTrue(hotels[0]["name_primary"].startswith("露樱酒店"))
+        self.assertEqual(hotels[1]["brand"], "grandia")
+        self.assertTrue(hotels[1]["name_primary"].startswith("露樱Grandia"))
+
+    def test_routeinn_storelocator_point_provides_radius_coordinates(self):
+        from toyoko_tracker.routeinn import _storelocator_hotel
+
+        hotel = _storelocator_hotel({
+            "key": "241",
+            "name": "ホテルルートイン札幌駅前北口",
+            "latitude": 43.0691895,
+            "longitude": 141.3493104,
+            "address": "北海道札幌市北区北7条西4丁目2-2",
+            "is_active": True,
+            "extra_fields": {
+                "name.en": "HOTEL ROUTE INN SAPPORO EKIMAE KITAGUCHI",
+                "詳細ページへのリンク": "https://www.route-inn.co.jp/hotel_list/hokkaido/index_hotel_id_241/",
+                "予約ページURL（PC）": "https://reserve.route-inn.co.jp/booking/result?code=booking-code",
+            },
+        }, "zh_cn")
+
+        self.assertEqual(hotel["code"], "routeinn:241")
+        self.assertEqual(hotel["display_code"], "RI-241")
+        self.assertEqual(hotel["provider"], "routeinn")
+        self.assertEqual(hotel["lat"], 43.0691895)
+        self.assertEqual(hotel["lng"], 141.3493104)
+        self.assertIn("43.0691895,141.3493104", hotel["map_url"])
+
+    def test_routeinn_offer_adapter_returns_bilingual_member_prices(self):
+        from toyoko_tracker import routeinn
+
+        hotel = {
+            "code": "routeinn:241", "display_code": "RI-241", "provider": "routeinn", "brand": "routeinn",
+            "name_primary": "露樱酒店 札幌站前北口", "name_en": "Hotel Route-Inn Sapporo Ekimae Kitaguchi",
+            "url": "https://example.test/hotel", "reservation_url": "https://reserve.example.test/?code=booking-code",
+        }
+        primary_payload = {"plans": [{"name": "标准方案", "rooms": [{
+            "room_plan_code": "single-basic", "availability": "available", "room_type_name": "本馆禁烟单人房",
+            "is_smoking": False, "inventory": 3, "total_price": 9000, "tax": 900,
+            "sign_in_discount": {"total_price_after_discount": 8700, "total_price_after_discount_tax": 870},
+        }]}]}
+        english_payload = {"plans": [{"name": "Basic", "rooms": [{
+            "room_plan_code": "single-basic", "availability": "available", "room_type_name": "Main Building Non-Smoking Single",
+        }]}]}
+
+        def fake_api(path, locale, params=None):
+            if path.endswith("/rooms"):
+                return english_payload if locale == "en" else primary_payload
+            return {"booking_widget_setting_attributes": {"hotel_name": "Route Inn Sapporo Ekimae Kitaguchi"}}
+
+        with patch.object(routeinn, "resolve_booking_code", return_value="booking-code"), \
+             patch.object(routeinn, "_api_get", side_effect=fake_api):
+            primary, english, booking_url, offers, stats = routeinn.fetch_offers(
+                hotel, "2026-07-20", "2026-07-21", 1, 1, "zh_cn"
+            )
+
+        self.assertTrue(primary.startswith("露樱酒店"))
+        self.assertTrue(english.startswith("Hotel Route-Inn"))
+        self.assertIn("checkin_date=2026-07-20", booking_url)
+        self.assertEqual(offers[0]["price_text"], "¥9,900")
+        self.assertEqual(offers[0]["member_price_text"], "¥9,570")
+        self.assertEqual(offers[0]["remaining_norm"], "3")
+        self.assertEqual(offers[0]["room_title_primary"], "本馆禁烟单人房")
+        self.assertEqual(offers[0]["room_title"], "Main Building Non-Smoking Single")
+        self.assertEqual(offers[0]["room_smoking"], "non_smoking")
+        self.assertTrue(stats["had_any_offer"])
+
+    def test_dormy_offer_adapter_keeps_room_smoking_and_inventory(self):
+        from toyoko_tracker import chain_providers
+
+        hotel = {
+            "code": "dormy:347", "display_code": "DM-347", "provider": "dormy",
+            "provider_hotel_id": "347", "search_keyword": "ドーミーイン千歳",
+            "name_primary": "ドーミーイン千歳", "name_en": "Dormy Inn Chitose",
+            "reservation_url": "https://example.test/reserve",
+        }
+        payload = {"data": [{"hotel": {"id": 347}, "rooms": [{
+            "name": "【禁煙】ダブルルーム", "tags": [{"value": "禁煙"}, {"value": "ダブル"}],
+            "inventories": [{"year": "2026", "month_day": "07/18", "price": 29250, "stock": 14, "is_available": True}],
+        }]}]}
+        with patch.object(chain_providers, "_dormy_get", return_value=payload):
+            _, _, _, offers, _ = chain_providers.fetch_dormy_offers(
+                hotel, "2026-07-18", "2026-07-19", 1, 1, "zh_cn"
+            )
+
+        self.assertEqual(offers[0]["room_smoking"], "non_smoking")
+        self.assertEqual(offers[0]["remaining_norm"], "14")
+        self.assertEqual(offers[0]["price_text"], "¥29,250")
+
+    def test_routeinn_selection_metadata_survives_config_cleaning(self):
+        from toyoko_tracker import runtime
+
+        cleaned = runtime._clean_selected_hotels([{
+            "code": "routeinn:241",
+            "display_code": "RI-241",
+            "provider": "routeinn",
+            "brand": "routeinn",
+            "name_primary": "露樱酒店 札幌站前北口",
+            "name_en": "Hotel Route-Inn Sapporo Ekimae Kitaguchi",
+            "url": "https://example.test/hotel",
+            "reservation_url": "https://example.test/booking?code=abc",
+        }])
+
+        self.assertEqual(cleaned[0]["code"], "routeinn:241")
+        self.assertEqual(cleaned[0]["display_code"], "RI-241")
+        self.assertEqual(cleaned[0]["provider"], "routeinn")
+        self.assertIn("booking?code=abc", cleaned[0]["reservation_url"])
+
+    def test_official_hotel_catalog_parser(self):
+        from toyoko_tracker.hotel_catalog import parse_official_catalog_html
+
+        payload = {
+            "props": {"pageProps": {"nested": [{
+                "hotelCode": "00374",
+                "name": "Toyoko Inn Kure-eki",
+                "hotelStatus": "opened",
+                "openDate": "2026-07-02T15:00:00.000Z",
+                "country": 1,
+                "prefecture": 34,
+                "address": "3-33 Takara-machi",
+            }]}}
+        }
+        html = f'<script id="__NEXT_DATA__" type="application/json">{json.dumps(payload)}</script>'
+
+        hotels = parse_official_catalog_html(html)
+
+        self.assertEqual(len(hotels), 1)
+        self.assertEqual(hotels[0]["code"], "00374")
+        self.assertEqual(hotels[0]["status"], "opened")
+        self.assertEqual(hotels[0]["country"], 1)
+
+    def test_catalog_refresh_detects_new_hotel_and_updates_coordinate_cache(self):
+        from toyoko_tracker import hotel_catalog
+
+        current = []
+        previous = []
+        cached = []
+        for number in range(1, 301):
+            code = str(number).zfill(5)
+            current.append({
+                "code": code, "name": f"Hotel {code}", "name_en": f"Hotel {code}",
+                "status": "operation", "country": 1, "prefecture": 13,
+                "url": f"https://example.test/{code}",
+            })
+            if number < 300:
+                previous.append({"code": code, "name": f"Hotel {code}", "status": "operation"})
+                cached.append({"code": code, "name": f"Hotel {code}", "lat": 35.0, "lng": 139.0})
+
+        class FakeResponse:
+            text = "unused"
+
+            def raise_for_status(self):
+                return None
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            snapshot_path = str(Path(tmp_dir) / "catalog.json")
+            cache_path = str(Path(tmp_dir) / "radius.json")
+            Path(snapshot_path).write_text(json.dumps({"checked_at": "2026-07-01T00:00:00+00:00", "current_hotels": previous}), encoding="utf-8")
+            Path(cache_path).write_text(json.dumps({"generated_at": "2026-07-01T00:00:00+00:00", "hotels": cached}), encoding="utf-8")
+
+            with patch.object(hotel_catalog, "HOTEL_CATALOG_SNAPSHOT_PATH", snapshot_path), \
+                 patch.object(hotel_catalog, "RADIUS_HOTELS_CACHE_PATH", cache_path), \
+                 patch.object(hotel_catalog, "parse_official_catalog_html", return_value=current), \
+                 patch.object(hotel_catalog, "_resolve_official_coordinates", return_value=(35.1, 139.1)), \
+                 patch.object(hotel_catalog.requests, "get", return_value=FakeResponse()):
+                status = hotel_catalog.refresh_catalog(force=True)
+
+            updated_cache = json.loads(Path(cache_path).read_text(encoding="utf-8"))
+            updated_snapshot = json.loads(Path(snapshot_path).read_text(encoding="utf-8"))
+
+        self.assertEqual(status["state"], "updated")
+        self.assertEqual([item["code"] for item in status["new_hotels"]], ["00300"])
+        self.assertEqual(len(updated_cache["hotels"]), 300)
+        self.assertEqual(updated_cache["hotels"][-1]["lat"], 35.1)
+        self.assertEqual(updated_snapshot["last_new_hotels"][0]["code"], "00300")
+
+    def test_expired_coordinate_cache_can_still_be_used_while_refreshing(self):
+        from toyoko_tracker import hotel_catalog
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cache_path = str(Path(tmp_dir) / "radius.json")
+            Path(cache_path).write_text(json.dumps({
+                "generated_at": "2020-01-01T00:00:00+00:00",
+                "hotels": [{"code": "00001", "lat": 35.0, "lng": 139.0}],
+            }), encoding="utf-8")
+            with patch.object(hotel_catalog, "RADIUS_HOTELS_CACHE_PATH", cache_path):
+                stale_allowed = hotel_catalog.load_coordinate_cache(allow_stale=True)
+                fresh_only = hotel_catalog.load_coordinate_cache(allow_stale=False)
+
+        self.assertEqual(stale_allowed[0]["code"], "00001")
+        self.assertIsNone(fresh_only)
+
+    def test_official_hotel_info_parser_and_locale_urls(self):
+        hotel_info = importlib.import_module("toyoko_tracker.hotel_info")
+        hotel_data = {
+            "hotelCode": "00119",
+            "name": "东横INN 东京门前仲町永代桥",
+            "zipcode": "135-0034",
+            "city": "Koto-ku",
+            "address": "1-15-3 Eitai",
+            "googleMapUrl": "https://maps.example.test/hotel",
+            "accessImage": {"image": "https://toyoko-inn.imagewave.pictures/test-map"},
+            "trainAccess": [{"line": "地铁东西线", "station": "门前仲町站", "exit": "3号出口", "transportation": "walk", "time": 6}],
+            "carAccess": [{"road": "首都高速", "ic": "福住出口", "time": 3}],
+            "planeAccess": [{"airport": "羽田机场", "transportation": "bus", "time": 45}],
+            "accessRemarks": "Official remark",
+        }
+        next_data = {
+            "props": {"pageProps": {"trpcState": {"json": {"queries": [{"state": {"data": hotel_data}}]}}}}
+        }
+        schema = {
+            "@context": "https://schema.org",
+            "@type": "Hotel",
+            "address": {
+                "@type": "PostalAddress",
+                "streetAddress": "1-15-3 Eitai",
+                "addressLocality": "Koto-ku",
+                "addressRegion": "Tokyo",
+                "postalCode": "135-0034",
+            },
+        }
+        html = (
+            '<script type="application/ld+json">' + json.dumps(schema) + "</script>"
+            '<script id="__NEXT_DATA__" type="application/json">' + json.dumps(next_data) + "</script>"
+        )
+
+        info = hotel_info.parse_hotel_info_html(
+            html,
+            "00119",
+            "zh_cn",
+            "https://www.toyoko-inn.com/china_cn/search/detail/00119/",
+        )
+
+        self.assertEqual(info["name"], "东横INN 东京门前仲町永代桥")
+        self.assertEqual(info["map_image_url"], "https://toyoko-inn.imagewave.pictures/test-map")
+        self.assertIn("1-15-3 Eitai", info["address"])
+        self.assertEqual(info["train_access"][0]["time"], 6)
+        self.assertEqual(info["car_access"][0]["time"], 3)
+        self.assertEqual(info["plane_access"][0]["time"], 45)
+        self.assertIn("/china_cn/", hotel_info.official_hotel_url("00119", "zh_cn"))
+        self.assertIn("/china/", hotel_info.official_hotel_url("00119", "zh_tw"))
+        self.assertIn("/korea/", hotel_info.official_hotel_url("00119", "ko"))
+        self.assertEqual(hotel_info.official_hotel_url("00119", "ja"), "https://www.toyoko-inn.com/search/detail/00119/")
+
     def test_parse_price_and_remaining(self):
         self.assertEqual(tracker_app._parse_price_int("¥8,700"), 8700)
         self.assertEqual(tracker_app._parse_price_int("Club Card Member Price ¥12,300"), 12300)
@@ -362,6 +629,48 @@ class AppParserTests(unittest.TestCase):
         self.assertFalse(cfg.bark_critical_enabled)
         self.assertEqual(cfg.bark_critical_volume, 5)
         self.assertEqual(cfg.bark_critical_sound, "alarm")
+        self.assertTrue(cfg.adaptive_backoff_enabled)
+        self.assertEqual(cfg.enabled_providers, ["toyoko", "routeinn", "dormy", "mystays", "daiwa"])
+
+    def test_adaptive_backoff_escalates_and_recovers(self):
+        unknown = tracker_app.HotelResult(code="00001", url="#", name=None, available=None)
+        healthy = tracker_app.HotelResult(code="00002", url="#", name="Test", available=False)
+
+        multiplier, consecutive, ratio = tracker_app._adaptive_backoff_state([unknown, healthy], 0, True)
+        self.assertEqual((multiplier, consecutive, ratio), (2, 1, 50))
+
+        multiplier, consecutive, ratio = tracker_app._adaptive_backoff_state([unknown, healthy], consecutive, True)
+        self.assertEqual((multiplier, consecutive, ratio), (4, 2, 50))
+
+        multiplier, consecutive, ratio = tracker_app._adaptive_backoff_state([healthy, healthy], consecutive, True)
+        self.assertEqual((multiplier, consecutive, ratio), (1, 0, 0))
+
+        multiplier, consecutive, ratio = tracker_app._adaptive_backoff_state([unknown], 2, False)
+        self.assertEqual((multiplier, consecutive, ratio), (1, 0, 100))
+
+    def test_failed_hotel_check_includes_telemetry(self):
+        from toyoko_tracker import runtime
+
+        cfg = tracker_app.AppConfig()
+        cfg.engine = "http"
+
+        with patch.object(runtime, "_HAS_PLAYWRIGHT", False), \
+             patch.object(runtime.requests, "get", side_effect=RuntimeError("network unavailable")):
+            result = tracker_app.check_hotel(cfg, None, "00001", "2026-07-17", "2026-07-18")
+
+        self.assertIsNone(result.available)
+        self.assertEqual(result.engine_used, "http")
+        self.assertIsInstance(result.elapsed_ms, int)
+        self.assertIsNotNone(result.checked_at)
+        self.assertIn("network unavailable", result.error_summary)
+
+    def test_adaptive_backoff_setting_can_be_disabled(self):
+        from toyoko_tracker import runtime
+
+        cfg = tracker_app.AppConfig()
+        runtime._apply_payload_to_config(cfg, {"adaptive_backoff_enabled": False})
+
+        self.assertFalse(cfg.adaptive_backoff_enabled)
 
     def test_available_notification_switch_still_returns_watch_code(self):
         from toyoko_tracker import notifications
@@ -447,7 +756,30 @@ class AppParserTests(unittest.TestCase):
             notifications.process_notifications(cfg, [second], "2026-05-16", "2026-05-17")
 
         self.assertEqual(mock_notify.call_count, 1)
-        self.assertIn("Available Room Count Changed", mock_notify.call_args.args[1])
+        self.assertIn("可用房间数量变动", mock_notify.call_args.args[1])
+        self.assertNotIn("Available Room Count Changed", mock_notify.call_args.args[1])
+
+    def test_english_notifications_do_not_include_chinese_labels(self):
+        from toyoko_tracker import notifications
+
+        cfg = tracker_app.AppConfig()
+        cfg.primary_language = "en"
+        cfg.notify_available = True
+        notifications.clear_alert_state()
+        result = tracker_app.HotelResult(
+            code="00001", url="https://example.test", name="Test Hotel", name_en="Test Hotel",
+            available=True, min_remaining="1", min_price_text="JPY 8,000", min_price_room="Single",
+        )
+
+        with patch.object(notifications, "notify_push_channels") as mock_notify:
+            notifications.process_notifications(cfg, [result], "2026-05-16", "2026-05-17")
+
+        title = mock_notify.call_args.args[1]
+        message = mock_notify.call_args.args[2]
+        self.assertIn("Room Available", title)
+        self.assertIn("Hotel: Test Hotel", message)
+        self.assertNotIn("发现空房", title)
+        self.assertNotIn("酒店:", message)
 
     def test_availability_log_tracks_closed_duration(self):
         from toyoko_tracker import notifications
@@ -527,6 +859,134 @@ class AppRouteSecurityTests(unittest.TestCase):
         self.assertNotIn("telegram-secret", body)
         self.assertNotIn("smtp-secret", body)
 
+    def test_home_includes_result_search_refresh_and_export_tools(self):
+        body = self.client.get("/").get_data(as_text=True)
+
+        self.assertIn('id="result_query"', body)
+        self.assertIn('data-result-filter="changes"', body)
+        self.assertIn('id="btn_results_refresh"', body)
+        self.assertIn('id="btn_results_export"', body)
+        self.assertIn('id="results_updated_at"', body)
+        self.assertIn('id="hotel_catalog_panel"', body)
+        self.assertIn('id="btn_catalog_refresh"', body)
+        self.assertIn('id="provider_toyoko"', body)
+        self.assertIn('id="provider_routeinn"', body)
+        self.assertIn('id="provider_dormy"', body)
+        self.assertIn('id="provider_mystays"', body)
+        self.assertIn('id="provider_daiwa"', body)
+        self.assertIn('id="btn_provider_all"', body)
+        self.assertIn('data-step-target="people"', body)
+        self.assertIn('data-step-target="rooms"', body)
+        self.assertIn('id="btn_area_selected_only"', body)
+        self.assertIn('id="area_sort"', body)
+        self.assertIn('id="hotel_workspace"', body)
+        self.assertEqual(body.count('data-hotel-workspace-view='), 2)
+        self.assertIn('id="app-sidebar"', body)
+        self.assertIn('id="sidebar-collapse-button"', body)
+        self.assertIn('class="sidebar-utilities"', body)
+        self.assertIn('/static/toyoko-chan-mascot.png', body)
+        self.assertIn('data-app-view="search"', body)
+        self.assertIn('data-app-view="monitor"', body)
+        self.assertIn('id="view-interface"', body)
+        self.assertIn('id="language-menu-button"', body)
+        self.assertIn('data-language="en"', body)
+        self.assertIn("<option value='en'", body)
+        self.assertIn('id="theme-toggle-button"', body)
+        self.assertIn('id="guide-open-button"', body)
+        self.assertIn('id="update-open-button"', body)
+        self.assertIn('id="update-modal"', body)
+        self.assertIn('id="update-current-version"', body)
+        self.assertIn('id="update-latest-version"', body)
+        self.assertIn('id="btn_update_check"', body)
+        self.assertIn('id="btn_upgrade"', body)
+        self.assertNotIn('id="footer-app-name"', body)
+        self.assertEqual(body.count("https://space.bilibili.com/4955287"), 1)
+        self.assertEqual(body.count("https://github.com/JellyNekoNeko/toyoko-tracker"), 1)
+        self.assertIn('id="guide-modal"', body)
+        self.assertIn('id="guide-progress"', body)
+        self.assertEqual(body.count('data-guide-jump='), 5)
+        self.assertIn('data-app-version="v0.6.0"', body)
+        self.assertIn('data-theme-choice="system"', body)
+
+    def test_home_renders_after_search_results_exist(self):
+        from toyoko_tracker import runtime
+
+        result = tracker_app.HotelResult(
+            code="00001",
+            url="https://example.test/hotel",
+            name="Test & Hotel",
+            available=False,
+        )
+        with patch.object(runtime, "_LAST_RESULTS", [result]):
+            response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Test &amp; Hotel", response.get_data(as_text=True))
+
+    def test_webui_guide_is_version_aware(self):
+        script = self.client.get("/static/app.js").get_data(as_text=True)
+
+        self.assertIn("GUIDE_SEEN_KEY", script)
+        self.assertIn("guideAppVersion()", script)
+        self.assertIn("storageGet(GUIDE_SEEN_KEY", script)
+        self.assertIn("storageSet(GUIDE_SEEN_KEY, guideAppVersion())", script)
+
+    def test_update_check_runs_in_background(self):
+        from toyoko_tracker import runtime
+
+        with patch.object(runtime, "_check_pypi_latest_async") as check:
+            response = self.client.post("/update_check")
+
+        self.assertEqual(response.status_code, 202)
+        self.assertTrue(response.get_json()["ok"])
+        check.assert_called_once_with()
+
+    def test_hotel_catalog_routes_delegate_to_background_service(self):
+        from toyoko_tracker import runtime
+
+        catalog = {"state": "fresh", "open_japan_count": 349}
+        with patch.object(runtime, "_catalog_status_snapshot", return_value=catalog):
+            response = self.client.get("/hotel_catalog_status")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["catalog"], catalog)
+
+        queued = {"state": "checking"}
+        with patch.object(runtime, "_request_catalog_refresh", return_value=queued) as refresh:
+            response = self.client.post("/hotel_catalog_refresh")
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.get_json()["catalog"], queued)
+        refresh.assert_called_once_with(force=True)
+
+    def test_hotel_info_route_returns_official_preview(self):
+        from toyoko_tracker import runtime
+
+        expected = {"code": "00119", "name": "Official Hotel", "address": "Official Address"}
+        with patch.object(runtime, "_get_hotel_info", return_value=expected) as mock_get:
+            response = self.client.get("/hotel_info?code=00119&language=ja")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["info"], expected)
+        mock_get.assert_called_once_with("00119", "ja")
+
+    def test_hotel_info_route_rejects_invalid_code(self):
+        response = self.client.get("/hotel_info?code=invalid&language=zh_cn")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(response.get_json()["ok"])
+
+    def test_hotel_info_route_supports_database_providers(self):
+        from toyoko_tracker import runtime
+
+        hotel = {"code": "dormy:291", "provider": "dormy", "url": "https://hotel.example/"}
+        expected = {"code": "dormy:291", "provider": "dormy", "name": "Dormy Test"}
+        with patch.object(runtime, "_db_load_hotel", return_value=hotel) as mock_load, \
+             patch.object(runtime, "_get_provider_hotel_info", return_value=expected) as mock_info:
+            response = self.client.get("/hotel_info?code=dormy:291&language=ja")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["info"], expected)
+        mock_load.assert_called_once_with("dormy:291", "ja")
+        mock_info.assert_called_once_with(hotel, "ja")
+
     def test_atomic_json_write_replaces_complete_document(self):
         from toyoko_tracker import runtime
 
@@ -538,6 +998,51 @@ class AppRouteSecurityTests(unittest.TestCase):
                 payload = json.load(stream)
 
         self.assertEqual(payload, {"version": 2, "ready": True})
+
+    def test_start_route_passes_single_scan_flag_to_worker(self):
+        from toyoko_tracker import runtime
+
+        created_threads = []
+
+        class FakeThread:
+            def __init__(self, *, target, args, name, daemon):
+                self.target = target
+                self.args = args
+                self.name = name
+                self.daemon = daemon
+                self.started = False
+                created_threads.append(self)
+
+            def start(self):
+                self.started = True
+
+            def is_alive(self):
+                return False
+
+        cfg = tracker_app.AppConfig()
+        payload = {
+            "run_once": True,
+            "start_date": "2026-07-17",
+            "end_date": "2026-07-18",
+            "hotel_codes": ["00001"],
+            "selected_hotels": [{"code": "00001", "name": "Test Hotel"}],
+        }
+        with patch.object(runtime, "_CONFIG", cfg), \
+             patch.object(runtime, "_worker_thread", None), \
+             patch.object(runtime.threading, "Thread", FakeThread), \
+             patch.object(runtime, "_save_config_to_file"), \
+             patch.object(runtime, "_remember_search"), \
+             patch.object(runtime, "clear_alert_state"), \
+             patch.object(runtime, "send_start_notifications"):
+            response = self.client.post("/start", json=payload)
+
+        body = response.get_json()
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(body["ok"])
+        self.assertTrue(body["run_once"])
+        self.assertEqual(body["message"], "scan_once_started")
+        self.assertEqual(created_threads[0].args, (True,))
+        self.assertTrue(created_threads[0].started)
 
 
 if __name__ == "__main__":

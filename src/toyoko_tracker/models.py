@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 from .settings import (
     DEFAULT_AVAILABLE_ALERT_REPEAT,
     DEFAULT_AVAILABLE_ALERT_REPEAT_INTERVAL_SEC,
+    DEFAULT_ADAPTIVE_BACKOFF_ENABLED,
     DEFAULT_BARK_KEY,
     DEFAULT_BARK_SERVER,
     DEFAULT_BARK_CRITICAL_ENABLED,
@@ -23,6 +24,7 @@ from .settings import (
     DEFAULT_ENABLE_SERVERCHAN,
     DEFAULT_ENABLE_TELEGRAM,
     DEFAULT_END_DATE,
+    DEFAULT_ENABLED_PROVIDERS,
     DEFAULT_ENGINE,
     DEFAULT_HOTEL_CODES,
     DEFAULT_LOOP_INTERVAL_SECONDS,
@@ -72,6 +74,12 @@ class HotelResult:
     min_remaining: Optional[str] = None
     offers_display: Optional[List[Dict[str, Any]]] = None
     requirement_unmet: bool = False
+    checked_at: Optional[str] = None
+    elapsed_ms: Optional[int] = None
+    engine_used: Optional[str] = None
+    error_summary: Optional[str] = None
+    provider: str = "toyoko"
+    display_code: Optional[str] = None
 
 
 @dataclass
@@ -121,11 +129,13 @@ class AppConfig:
     engine: str = DEFAULT_ENGINE
     smart_parallel_enabled: bool = DEFAULT_SMART_PARALLEL_ENABLED
     smart_parallel_workers: int = DEFAULT_SMART_PARALLEL_WORKERS
+    adaptive_backoff_enabled: bool = DEFAULT_ADAPTIVE_BACKOFF_ENABLED
     area_region: str = ""
     area_detail: str = ""
     area_region_label: str = ""
     area_detail_label: str = ""
     search_mode: str = DEFAULT_SEARCH_MODE
+    enabled_providers: List[str] = None
     radius_query: str = ""
     radius_lat: Optional[float] = None
     radius_lng: Optional[float] = None
@@ -137,3 +147,5 @@ class AppConfig:
             self.hotel_codes = list(DEFAULT_HOTEL_CODES)
         if self.selected_hotels is None:
             self.selected_hotels = []
+        if self.enabled_providers is None:
+            self.enabled_providers = list(DEFAULT_ENABLED_PROVIDERS)
