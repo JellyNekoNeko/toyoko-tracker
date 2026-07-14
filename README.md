@@ -123,9 +123,11 @@ installed through the system package manager.
 The `Desktop bundles` GitHub Actions workflow builds all three platforms for
 desktop version tags (`desktop-v*`) and also supports manual runs. Tag builds publish a GitHub
 Release containing all platform archives and `SHA256SUMS.txt`. Frozen desktop
-apps check this release channel and use the independent version in
-`desktop_version.py`, while pip-installed WebUI instances use the version in
-`pyproject.toml` and continue to check and upgrade through PyPI.
+apps check this release channel. The desktop version declared in
+`desktop_version.py` must match the WebUI version in `pyproject.toml`; CI blocks
+mismatched releases. Separate tags and update sources prevent the matching
+version numbers from crossing channels. Pip-installed WebUI instances continue
+to check and upgrade through PyPI.
 
 All three builds use the Toyoko Chan application icons under
 `packaging/icons/`. The Linux artifact also includes `ToyokoTracker.desktop`

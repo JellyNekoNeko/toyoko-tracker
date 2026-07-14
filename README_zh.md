@@ -121,8 +121,10 @@ python build_desktop.py
 GitHub Actions 的 `Desktop bundles` 工作流会在桌面版本标签（`desktop-v*`）推送时同时
 生成三平台构建产物，也可以在 Actions 页面手动运行。版本标签构建完成后会
 创建 GitHub Release，上传三平台压缩包和 `SHA256SUMS.txt`；桌面版通过该
-Release 检查和下载新版本。桌面版本号在 `desktop_version.py` 中独立维护；
-pip/WebUI 版本继续使用 `pyproject.toml` 的版本号，并通过 PyPI 检查和更新。
+Release 检查和下载新版本。桌面版本号在 `desktop_version.py` 中声明，并与
+`pyproject.toml` 的 WebUI 主版本号保持一致；CI 会阻止两个版本号不一致的
+发布。两者使用不同标签和更新源，所以相同版本号不会互相干扰。pip/WebUI
+版本仍通过 PyPI 检查和更新。
 
 三平台构建均使用 `packaging/icons/` 中的东横酱应用图标。Linux 产物同时
 包含 `ToyokoTracker.desktop` 和 `toyoko-tracker.png`，安装桌面快捷方式时

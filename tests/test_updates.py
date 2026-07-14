@@ -1,10 +1,16 @@
 from unittest.mock import patch
+from importlib.metadata import version
 
 from toyoko_tracker import runtime
+from toyoko_tracker.desktop_version import DESKTOP_VERSION
 
 
 def test_version_keys_treat_trailing_zero_as_equal():
     assert runtime._version_key("v0.6") == runtime._version_key("0.6.0")
+
+
+def test_desktop_version_tracks_webui_version():
+    assert DESKTOP_VERSION == version("toyoko-tracker")
 
 
 def test_desktop_asset_name_for_macos_arm():

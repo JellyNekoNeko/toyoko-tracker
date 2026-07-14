@@ -48,6 +48,7 @@ jobs:
         shell: bash
         run: |
           expected="desktop-v$(python -c 'from toyoko_tracker.desktop_version import DESKTOP_VERSION; print(DESKTOP_VERSION)')"
+          python -c 'from importlib.metadata import version; from toyoko_tracker.desktop_version import DESKTOP_VERSION; assert DESKTOP_VERSION == version("toyoko-tracker"), "desktop and WebUI versions must match"'
           test "$GITHUB_REF_NAME" = "$expected" || {
             echo "Tag $GITHUB_REF_NAME does not match desktop version $expected"
             exit 1
