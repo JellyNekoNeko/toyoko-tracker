@@ -1,6 +1,6 @@
-# 东横INN 空房追踪器 WebUI
+# 东横INN 空房追踪器 —— WebUI 与桌面版
 
-*一个可爱的 [东横INN](https://www.toyoko-inn.com/) 酒店空房监控工具，基于 Flask + HTTP/API + 可选 Playwright 构建。*
+*一个可爱的跨平台 [东横INN](https://www.toyoko-inn.com/) 酒店空房监控工具，同时提供 Python WebUI 以及 macOS、Windows、Linux 桌面应用。*
 
 🌏 [📖 English Guide](./README.md)
 
@@ -12,11 +12,14 @@
 
 ### 1.1 简介
 
-**Toyoko Tracker（东横追踪器 / 东横酱 Toyoko Chan）** 是一个本地 WebUI 工具，用于自动检测 **东横INN** 酒店空房状态。
+**Toyoko Tracker（东横追踪器 / 东横酱 Toyoko Chan）** 用于自动检测
+**东横INN** 酒店空房状态，既可以从 PyPI 安装为本地 Python WebUI，
+也可以直接使用打包好的桌面应用。
 
 它支持：
 
 - 🌐 本地网页界面，实时显示空房结果
+- 🖥 提供 macOS、Windows 和 Linux 原生桌面应用包
 - ⚡ 默认使用轻量 HTTP/API 查询引擎
 - 🧭 可选 Playwright 浏览器渲染引擎，用于兼容模式
 - 🏨 按地区加载和选择酒店
@@ -58,14 +61,37 @@
 - **macOS**：打开 Launchpad，搜索并打开 **终端**。
 - **Linux**：按 `Ctrl + Alt + T`，或在应用菜单中搜索 Terminal。
 
-执行：
+东横酒店空房追踪器是一个命令行应用。对于 macOS（Homebrew Python）以及启用
+PEP 668 保护的 Linux 发行版，推荐使用 [pipx](https://pipx.pypa.io/)
+安装，让应用与系统管理的 Python 环境保持隔离：
 
 ```bash
-pip install --upgrade pip
-pip install --upgrade toyoko-tracker
+# macOS
+brew install pipx
+pipx ensurepath
+pipx install toyoko-tracker
 ```
 
-如果你的 Python 环境不允许全局 pip 安装，建议使用虚拟环境：
+Linux 请先使用系统包管理器安装 `pipx`，然后执行：
+
+```bash
+pipx ensurepath
+pipx install toyoko-tracker
+```
+
+Windows：
+
+```powershell
+py -m pip install --upgrade toyoko-tracker
+```
+
+重新打开终端后，启动 WebUI：
+
+```bash
+toyoko-tracker
+```
+
+也可以使用 `pip` 安装到虚拟环境：
 
 ```bash
 python3 -m venv .venv
@@ -777,14 +803,17 @@ TOYOKO_TRACKER_CONFIG_DIR=/path/to/config toyoko-tracker
 如果提示 `toyoko-tracker: command not found`，可以尝试：
 
 ```bash
-python -m toyoko_tracker
+pipx ensurepath
 ```
 
-或重新安装：
+重新打开终端，或重新安装应用：
 
 ```bash
-pip install --upgrade toyoko-tracker
+pipx reinstall toyoko-tracker
 ```
+
+如果使用虚拟环境，请先激活环境，再执行
+`python -m toyoko_tracker`。
 
 ---
 
@@ -845,8 +874,11 @@ brew install terminal-notifier
 从 PyPI 升级：
 
 ```bash
-pip install --upgrade toyoko-tracker
+pipx upgrade toyoko-tracker
 ```
+
+如果通过 `pip` 安装，请视情况先激活对应环境，然后执行
+`python -m pip install --upgrade toyoko-tracker`。
 
 查看版本：
 

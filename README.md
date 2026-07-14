@@ -1,6 +1,6 @@
-# Toyoko Inn Room Vacancy Tracker WebUI
+# Toyoko Inn Room Vacancy Tracker — WebUI & Desktop
 
-*A cute room availability tracker for [Toyoko Inn](https://www.toyoko-inn.com/), powered by Flask + HTTP/API + optional Playwright.*
+*A cute cross-platform room availability tracker for [Toyoko Inn](https://www.toyoko-inn.com/), available as a Python WebUI and native desktop bundles for macOS, Windows, and Linux.*
 
 🌏 [📖 中文说明书](./README_zh.md)
 
@@ -12,11 +12,14 @@
 
 ### 1.1 Introduction
 
-**Toyoko Tracker** is a local WebUI tool for automatically checking **Toyoko Inn** room availability.
+**Toyoko Tracker** automatically checks **Toyoko Inn** room availability. It
+can run as a local Python WebUI installed from PyPI or as a packaged desktop
+application.
 
 It supports:
 
 - 🌐 Local WebUI for real-time vacancy tracking
+- 🖥 Native desktop bundles for macOS, Windows, and Linux
 - ⚡ Lightweight HTTP/API search engine by default
 - 🧭 Optional Playwright browser-rendering engine for compatibility
 - 🏨 Area-based hotel picker
@@ -60,14 +63,38 @@ Open a terminal:
 - **macOS**: Open Launchpad → Terminal.
 - **Linux**: Press `Ctrl + Alt + T`.
 
-Run:
+Toyoko Tracker is a command-line application. On macOS (Homebrew Python) and
+Linux distributions that enforce PEP 668, the recommended installation method
+is [pipx](https://pipx.pypa.io/), which keeps the app isolated from the
+system-managed Python environment:
 
 ```bash
-pip install --upgrade pip
-pip install --upgrade toyoko-tracker
+# macOS
+brew install pipx
+pipx ensurepath
+pipx install toyoko-tracker
 ```
 
-If your Python environment blocks global pip installation, use a virtual environment:
+On Linux, install `pipx` with your package manager and then run:
+
+```bash
+pipx ensurepath
+pipx install toyoko-tracker
+```
+
+On Windows:
+
+```powershell
+py -m pip install --upgrade toyoko-tracker
+```
+
+After reopening the terminal, start the WebUI with:
+
+```bash
+toyoko-tracker
+```
+
+Alternatively, install into a virtual environment with `pip`:
 
 ```bash
 python3 -m venv .venv
@@ -781,14 +808,17 @@ TOYOKO_TRACKER_CONFIG_DIR=/path/to/config toyoko-tracker
 If `toyoko-tracker` is not found, try:
 
 ```bash
-python -m toyoko_tracker
+pipx ensurepath
 ```
 
-or reinstall:
+Reopen the terminal, or reinstall the application:
 
 ```bash
-pip install --upgrade toyoko-tracker
+pipx reinstall toyoko-tracker
 ```
+
+When using a virtual environment, activate it first and run
+`python -m toyoko_tracker`.
 
 ---
 
@@ -849,8 +879,11 @@ System Settings → Notifications
 Upgrade from PyPI:
 
 ```bash
-pip install --upgrade toyoko-tracker
+pipx upgrade toyoko-tracker
 ```
+
+When installed with `pip`, activate its environment if applicable and use
+`python -m pip install --upgrade toyoko-tracker` instead.
 
 Check installed version:
 
