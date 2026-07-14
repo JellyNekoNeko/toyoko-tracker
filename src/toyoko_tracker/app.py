@@ -104,6 +104,26 @@ def status() -> Response:
     return _runtime.status()
 
 
+@app.route("/api/v1/runtime")
+def runtime_status() -> Response:
+    return _runtime.runtime_status()
+
+
+@app.route("/api/v1/results")
+def results_status() -> Response:
+    return _runtime.results_status()
+
+
+@app.route("/api/v1/availability-logs")
+def availability_logs_status() -> Response:
+    return _runtime.availability_logs_status()
+
+
+@app.route("/api/v1/logs")
+def logs_status() -> Response:
+    return _runtime.logs_status()
+
+
 @app.route("/hotel_info")
 def hotel_info() -> Response:
     return _runtime.hotel_info()

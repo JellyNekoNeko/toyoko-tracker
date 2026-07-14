@@ -162,6 +162,16 @@
           .progress-fill.waiting{background:linear-gradient(90deg,#f6b73c,#ffd166);}
           @keyframes progressShine{to{transform:translateX(100%);}}
           .run-meta{display:grid;grid-template-columns:1fr 1fr 1.4fr;gap:8px;margin-top:10px;color:#667085;font-size:12px;}
+          .provider-health{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:11px;padding-top:10px;border-top:1px solid #edf1f5;}
+          .provider-health[hidden]{display:none;}
+          .provider-health-title{font-size:11px;font-weight:800;color:#667085;text-transform:uppercase;letter-spacing:.04em;margin-right:2px;}
+          .provider-health-chip{display:inline-flex;align-items:center;gap:6px;min-height:27px;padding:4px 8px;border:1px solid #dce3ec;border-radius:999px;background:#f8fafc;color:#526071;font-size:11px;}
+          .provider-health-chip strong{color:#27364a;font-size:11px;}
+          .provider-health-chip::before{content:'';width:7px;height:7px;border-radius:50%;background:#98a2b3;box-shadow:0 0 0 3px rgba(152,162,179,.13);}
+          .provider-health-chip.healthy::before{background:#3f9654;box-shadow:0 0 0 3px rgba(63,150,84,.13);}
+          .provider-health-chip.degraded::before{background:#d28a22;box-shadow:0 0 0 3px rgba(210,138,34,.14);}
+          .provider-health-chip.cooldown::before{background:#c94d4d;box-shadow:0 0 0 3px rgba(201,77,77,.13);}
+          .provider-health-chip small{color:#7b8492;font-size:10px;}
           .notice{margin-top:10px;padding:8px 10px;border-radius:8px;font-size:13px;display:none;}
           .notice:not(:empty){display:block;}
           .notice.success{background:#edf8ef;color:#246b37;border:1px solid #cfead6;}
@@ -804,6 +814,10 @@
           body[data-theme="dark"] .hotel-info-head h3,body[data-theme="dark"] .hotel-info-directions-title{color:#eef1f5;}
           body[data-theme="dark"] .hotel-info-section,body[data-theme="dark"] .hotel-info-remarks{border-color:#383d45;}
           body[data-theme="dark"] .progress-track{background:#343941;}
+          body[data-theme="dark"] .provider-health{border-color:#383d45;}
+          body[data-theme="dark"] .provider-health-title,body[data-theme="dark"] .provider-health-chip small{color:#a8afb9;}
+          body[data-theme="dark"] .provider-health-chip{border-color:#41464f;background:#292c32;color:#b9c0ca;}
+          body[data-theme="dark"] .provider-health-chip strong{color:#edf0f4;}
           body[data-theme="dark"] .guide-dialog{border-color:#3b414a;background:#202329;color:#e8ebef;}
           body[data-theme="dark"] .guide-header,body[data-theme="dark"] .guide-stage{border-color:#383d45;}
           body[data-theme="dark"] .guide-brand h2,body[data-theme="dark"] .guide-copy h3{color:#f2f4f7;}

@@ -746,7 +746,7 @@ class AppParserTests(unittest.TestCase):
             runtime._PROGRESS["done"] = 0
             runtime._PROGRESS["total"] = len(codes)
         runtime._stop_event.clear()
-        with patch.object(runtime._HotelStartLimiter, "wait", return_value=True), \
+        with patch.object(runtime, "_jittered_spacing", return_value=0.0), \
              patch.object(runtime, "check_hotel", side_effect=fake_check), \
              patch.object(runtime, "_publish_partial_result") as mock_publish:
             results = runtime._check_hotels_parallel_http(cfg, codes, "2026-07-18", "2026-07-19")
@@ -755,6 +755,60 @@ class AppParserTests(unittest.TestCase):
         self.assertEqual(mock_publish.call_count, len(codes))
         with runtime._PROGRESS_LOCK:
             self.assertEqual(runtime._PROGRESS["done"], len(codes))
+
+    def test_provider_scheduler_interleaves_brands_but_spaces_same_brand(self):
+        from toyoko_tracker import runtime
+
+        cfg = tracker_app.AppConfig()
+        cfg.selected_hotels = [
+            {"code": "00001", "provider": "toyoko"},
+            {"code": "00002", "provider": "toyoko"},
+            {"code": "routeinn:1", "provider": "routeinn"},
+            {"code": "dormy:1", "provider": "dormy"},
+        ]
+        codes = ["00001", "00002", "routeinn:1", "dormy:1"]
+        scheduler = runtime._ProviderAwareScheduler(cfg, codes, workers=3, base_delay=1, jitter_percent=0)
+
+        with patch.object(runtime, "_provider_cooldown_until", return_value=0.0):
+            first, _ = scheduler.pop_ready(now_mono=100.0)
+            blocked, delay = scheduler.pop_ready(now_mono=100.0)
+            second, _ = scheduler.pop_ready(now_mono=100.34)
+            third, _ = scheduler.pop_ready(now_mono=100.68)
+            fourth, _ = scheduler.pop_ready(now_mono=101.02)
+
+        self.assertEqual(first[2], "toyoko")
+        self.assertIsNone(blocked)
+        self.assertGreater(delay, 0)
+        self.assertEqual(second[2], "routeinn")
+        self.assertEqual(third[2], "dormy")
+        self.assertEqual(fourth[2], "toyoko")
+
+    def test_provider_health_enters_cooldown_and_recovers(self):
+        from toyoko_tracker import runtime
+
+        runtime._reset_provider_health(["routeinn"])
+        failed = tracker_app.HotelResult(
+            code="routeinn:1", url="#", name=None, available=None, elapsed_ms=500,
+            error_summary="temporary provider failure", provider="routeinn",
+        )
+        healthy = tracker_app.HotelResult(
+            code="routeinn:1", url="#", name="Test", available=False, elapsed_ms=200,
+            provider="routeinn",
+        )
+
+        with patch.object(runtime, "_now_mono", return_value=100.0):
+            runtime._record_provider_result("routeinn", failed)
+            runtime._record_provider_result("routeinn", failed)
+            runtime._record_provider_result("routeinn", failed)
+            cooling = runtime.provider_health_snapshot()["routeinn"]
+            runtime._record_provider_result("routeinn", healthy)
+            recovered = runtime.provider_health_snapshot()["routeinn"]
+
+        self.assertEqual(cooling["state"], "cooldown")
+        self.assertEqual(cooling["cooldown_remaining_sec"], 4)
+        self.assertEqual(cooling["consecutive_failures"], 3)
+        self.assertEqual(recovered["state"], "healthy")
+        self.assertEqual(recovered["consecutive_failures"], 0)
 
     def test_available_notification_switch_still_returns_watch_code(self):
         from toyoko_tracker import notifications
@@ -918,6 +972,44 @@ class AppRouteSecurityTests(unittest.TestCase):
         for key in ("bot_token", "bark_key", "serverchan_sendkey", "smtp_pass"):
             self.assertNotIn(key, public_config)
             self.assertTrue(public_config["configured_secrets"][key])
+
+    def test_runtime_status_is_lightweight(self):
+        payload = self.client.get("/api/v1/runtime").get_json()
+
+        self.assertTrue(payload["ok"])
+        self.assertIn("progress", payload)
+        self.assertIn("provider_health", payload)
+        self.assertIn("results_revision", payload)
+        self.assertIn("availability_logs_revision", payload)
+        for heavy_key in ("config", "results", "logs", "availability_logs", "hotel_catalog", "provider_catalog"):
+            self.assertNotIn(heavy_key, payload)
+
+    def test_results_status_uses_revision_to_skip_unchanged_payload(self):
+        from toyoko_tracker import runtime
+
+        result = tracker_app.HotelResult(
+            code="00001", url="https://example.test/00001", name="Test", available=False,
+        )
+        with patch.object(runtime, "_LAST_RESULTS", [result]), patch.object(runtime, "_RESULTS_REVISION", 7):
+            unchanged = self.client.get("/api/v1/results?since=7").get_json()
+            changed = self.client.get("/api/v1/results?since=6").get_json()
+
+        self.assertFalse(unchanged["changed"])
+        self.assertNotIn("results", unchanged)
+        self.assertTrue(changed["changed"])
+        self.assertEqual(changed["revision"], 7)
+        self.assertEqual(changed["results"][0]["code"], "00001")
+
+    def test_log_cursor_returns_only_new_lines(self):
+        from toyoko_tracker import runtime
+
+        with patch.object(runtime, "_LOG_LINES", ["first", "second", "third"]), \
+             patch.object(runtime, "_LOG_SEQUENCE", 3):
+            payload = self.client.get("/api/v1/logs?after=1").get_json()
+
+        self.assertEqual(payload["cursor"], 3)
+        self.assertFalse(payload["reset"])
+        self.assertEqual(payload["logs"], ["second", "third"])
 
     def test_cross_site_write_request_is_rejected(self):
         response = self.client.post(

@@ -21,8 +21,9 @@ import webbrowser
 import socket
 import subprocess
 import tempfile
+from collections import deque
 from urllib.parse import quote, unquote
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, as_completed, wait
 from copy import deepcopy
 from dataclasses import asdict
 from datetime import datetime
@@ -70,6 +71,7 @@ from .hotel_database import (
     sync_provider as _db_sync_provider,
 )
 from .notifications import (
+    availability_log_revision,
     availability_log_snapshot,
     clear_alert_state,
     notification_status_snapshot,
@@ -149,8 +151,10 @@ def _now_mono() -> float:
 # ========= Global Status =========
 _LOG_LINES: List[str] = []
 _LOG_LOCK = threading.Lock()
+_LOG_SEQUENCE = 0
 _LAST_RESULTS: List[HotelResult] = []
 _RESULTS_LOCK = threading.Lock()
+_RESULTS_REVISION = 0
 _START_TIME = _now_wall()
 _PROGRESS = {
     "round": 0,
@@ -180,6 +184,8 @@ _UPDATE_STATUS: Dict[str, Any] = {
 }
 _CONFIG = AppConfig()
 _CONFIG_LOCK = threading.Lock()
+_PROVIDER_HEALTH: Dict[str, Dict[str, Any]] = {}
+_PROVIDER_HEALTH_LOCK = threading.Lock()
 
 _SECRET_CONFIG_FIELDS = {"bot_token", "bark_key", "serverchan_sendkey", "smtp_pass"}
 
@@ -200,9 +206,11 @@ def _safe_print(text: str) -> None:
 
 
 def _log(msg: str) -> None:
+    global _LOG_SEQUENCE
     line = f"[{datetime.now().strftime('%H:%M:%S')}] {msg}"
     with _LOG_LOCK:
         _LOG_LINES.append(line)
+        _LOG_SEQUENCE += 1
         if len(_LOG_LINES) > 500:
             del _LOG_LINES[: len(_LOG_LINES) - 500]
     _safe_print(line)
@@ -1055,32 +1063,157 @@ def _jittered_delay(base_seconds: int, jitter_percent: int) -> float:
     return max(1.0, random.uniform(low, high))
 
 
-class _HotelStartLimiter:
-    def __init__(self, base_delay: int, jitter_percent: int) -> None:
+def _jittered_spacing(base_seconds: float, jitter_percent: int) -> float:
+    base = max(0.05, float(base_seconds))
+    jitter = max(0, min(100, int(jitter_percent))) / 100.0
+    if jitter <= 0:
+        return base
+    return max(0.05, random.uniform(base * (1.0 - jitter), base * (1.0 + jitter)))
+
+
+def _provider_for_code(cfg: AppConfig, code: str) -> str:
+    hotel = _selected_hotel_for_code(cfg, code)
+    return str(hotel.get("provider") or (str(code).split(":", 1)[0] if ":" in str(code) else "toyoko"))
+
+
+def _reset_provider_health(providers: List[str]) -> None:
+    with _PROVIDER_HEALTH_LOCK:
+        _PROVIDER_HEALTH.clear()
+        for provider in dict.fromkeys(providers):
+            _PROVIDER_HEALTH[provider] = {
+                "checks": 0,
+                "successful_checks": 0,
+                "access_failures": 0,
+                "consecutive_failures": 0,
+                "average_elapsed_ms": 0,
+                "cooldown_until_mono": 0.0,
+                "last_error": "",
+                "last_checked_at": None,
+            }
+
+
+def _provider_cooldown_until(provider: str) -> float:
+    with _PROVIDER_HEALTH_LOCK:
+        return float(_PROVIDER_HEALTH.get(provider, {}).get("cooldown_until_mono") or 0.0)
+
+
+def _record_provider_result(provider: str, result: HotelResult) -> None:
+    now_mono = _now_mono()
+    with _PROVIDER_HEALTH_LOCK:
+        state = _PROVIDER_HEALTH.setdefault(provider, {
+            "checks": 0,
+            "successful_checks": 0,
+            "access_failures": 0,
+            "consecutive_failures": 0,
+            "average_elapsed_ms": 0,
+            "cooldown_until_mono": 0.0,
+            "last_error": "",
+            "last_checked_at": None,
+        })
+        state["checks"] += 1
+        elapsed_ms = max(0, int(result.elapsed_ms or 0))
+        previous_average = int(state.get("average_elapsed_ms") or 0)
+        state["average_elapsed_ms"] = elapsed_ms if state["checks"] == 1 else int(round(previous_average * 0.75 + elapsed_ms * 0.25))
+        state["last_checked_at"] = result.checked_at or datetime.now().astimezone().isoformat(timespec="seconds")
+        if result.available is None:
+            state["access_failures"] += 1
+            state["consecutive_failures"] += 1
+            state["last_error"] = str(result.error_summary or "access check failed")[:180]
+            if state["consecutive_failures"] >= 3:
+                cooldown_seconds = min(30, 2 ** min(5, state["consecutive_failures"] - 1))
+                state["cooldown_until_mono"] = max(
+                    float(state.get("cooldown_until_mono") or 0.0),
+                    now_mono + cooldown_seconds,
+                )
+        else:
+            state["successful_checks"] += 1
+            state["consecutive_failures"] = 0
+            state["cooldown_until_mono"] = 0.0
+            state["last_error"] = ""
+
+
+def provider_health_snapshot() -> Dict[str, Dict[str, Any]]:
+    now_mono = _now_mono()
+    with _PROVIDER_HEALTH_LOCK:
+        snapshot = deepcopy(_PROVIDER_HEALTH)
+    for state in snapshot.values():
+        cooldown_until = float(state.pop("cooldown_until_mono", 0.0) or 0.0)
+        cooldown_remaining = max(0, int(math.ceil(cooldown_until - now_mono)))
+        checks = int(state.get("checks") or 0)
+        successful = int(state.get("successful_checks") or 0)
+        state["cooldown_remaining_sec"] = cooldown_remaining
+        state["success_rate_percent"] = int(round(successful * 100 / checks)) if checks else 0
+        if cooldown_remaining:
+            state["state"] = "cooldown"
+        elif int(state.get("consecutive_failures") or 0):
+            state["state"] = "degraded"
+        elif checks:
+            state["state"] = "healthy"
+        else:
+            state["state"] = "idle"
+    return snapshot
+
+
+class _ProviderAwareScheduler:
+    def __init__(
+        self,
+        cfg: AppConfig,
+        codes: List[str],
+        workers: int,
+        base_delay: int,
+        jitter_percent: int,
+    ) -> None:
+        self.cfg = cfg
+        self.workers = max(1, int(workers))
         self.base_delay = max(1, min(60, int(base_delay)))
         self.jitter_percent = max(0, min(100, int(jitter_percent)))
-        self._lock = threading.Lock()
-        self._next_start = 0.0
+        self.global_spacing = max(0.15, self.base_delay / self.workers)
+        self.queues: Dict[str, deque[Tuple[int, str]]] = {}
+        for index, code in enumerate(codes):
+            provider = _provider_for_code(cfg, code)
+            self.queues.setdefault(provider, deque()).append((index, code))
+        self.providers = list(self.queues)
+        self.provider_next_start = {provider: 0.0 for provider in self.providers}
+        self.global_next_start = 0.0
+        self.cursor = 0
 
-    def wait(self) -> bool:
-        while not _stop_event.is_set():
-            with self._lock:
-                now = _now_mono()
-                if now >= self._next_start:
-                    self._next_start = now + _jittered_delay(self.base_delay, self.jitter_percent)
-                    return True
-                remaining = self._next_start - now
-            if _stop_event.wait(timeout=max(0.01, remaining)):
-                return False
-        return False
+    def has_pending(self) -> bool:
+        return any(self.queues[provider] for provider in self.providers)
+
+    def pop_ready(self, now_mono: Optional[float] = None) -> Tuple[Optional[Tuple[int, str, str]], float]:
+        now = _now_mono() if now_mono is None else float(now_mono)
+        if not self.has_pending():
+            return None, 0.0
+        earliest = float("inf")
+        provider_count = len(self.providers)
+        for offset in range(provider_count):
+            position = (self.cursor + offset) % provider_count
+            provider = self.providers[position]
+            if not self.queues[provider]:
+                continue
+            ready_at = max(
+                self.global_next_start,
+                self.provider_next_start.get(provider, 0.0),
+                _provider_cooldown_until(provider),
+            )
+            earliest = min(earliest, ready_at)
+            if ready_at > now:
+                continue
+            index, code = self.queues[provider].popleft()
+            self.cursor = (position + 1) % provider_count
+            self.provider_next_start[provider] = now + _jittered_spacing(self.base_delay, self.jitter_percent)
+            self.global_next_start = now + _jittered_spacing(self.global_spacing, self.jitter_percent // 2)
+            return (index, code, provider), 0.0
+        return None, max(0.01, earliest - now)
 
 
 def _publish_partial_result(result: HotelResult, ordered_codes: List[str]) -> None:
-    global _LAST_RESULTS
+    global _LAST_RESULTS, _RESULTS_REVISION
     with _RESULTS_LOCK:
         by_code = {item.code: item for item in _LAST_RESULTS}
         by_code[result.code] = result
         _LAST_RESULTS = [by_code[code] for code in ordered_codes if code in by_code]
+        _RESULTS_REVISION += 1
 
 
 def _round_wait_seconds(
@@ -1113,45 +1246,93 @@ def _check_hotels_parallel_http(cfg: AppConfig, codes: List[str], start: str, en
     base_delay = max(1, min(60, int(cfg.per_hotel_delay_seconds)))
     jitter = getattr(cfg, "request_jitter_percent", DEFAULT_REQUEST_JITTER_PERCENT)
     results: List[Optional[HotelResult]] = [None] * len(codes)
+    scheduler = _ProviderAwareScheduler(cfg, codes, workers, base_delay, jitter)
 
-    limiter = _HotelStartLimiter(base_delay, jitter)
-    _log(f"[parallel] Dynamic Smart Parallel enabled: workers={workers}, global start delay={base_delay}s")
+    _log(
+        f"[parallel] Provider-aware scheduling enabled: workers={workers}, "
+        f"providers={len(scheduler.providers)}, per-provider delay={base_delay}s, "
+        f"cross-provider spacing={scheduler.global_spacing:.2f}s"
+    )
 
-    def _run_one(idx: int, code: str) -> Tuple[int, Optional[HotelResult]]:
-        if not limiter.wait():
-            return idx, None
-        _set_action(f"[search] Checking hotel {code} for {start} → {end}...")
-        _log(f"[search] Checking hotel {code} for {start} → {end}...")
+    def _run_one(idx: int, code: str, provider: str) -> Tuple[int, str, HotelResult]:
+        _set_action(f"[search:{provider}] Checking hotel {code} for {start} → {end}...")
+        _log(f"[search:{provider}] Checking hotel {code} for {start} → {end}...")
         try:
-            return idx, check_hotel(cfg, None, code, start, end)
+            result = check_hotel(cfg, None, code, start, end)
         except Exception as e:
             _log(f"[error] check {code}: {e}")
-            return idx, HotelResult(code=code, url=build_url(cfg, code, start, end), name=None, available=None)
+            result = HotelResult(
+                code=code,
+                url=build_url(cfg, code, start, end),
+                name=None,
+                available=None,
+                provider=provider,
+                error_summary=" ".join(str(e).split())[:240],
+            )
+        result.provider = provider
+        return idx, provider, result
 
     with ThreadPoolExecutor(max_workers=min(workers, max(1, len(codes))), thread_name_prefix="smart-search") as executor:
-        futures = [executor.submit(_run_one, idx, code) for idx, code in enumerate(codes)]
-        for fut in as_completed(futures):
-            try:
-                idx, result = fut.result()
-            except Exception as e:
-                _log(f"[parallel] worker exception: {e}")
+        in_flight: Dict[Future, Tuple[int, str, str]] = {}
+        while (scheduler.has_pending() or in_flight) and not _stop_event.is_set():
+            next_ready_delay: Optional[float] = None
+            while scheduler.has_pending() and len(in_flight) < workers and not _stop_event.is_set():
+                task, delay = scheduler.pop_ready()
+                if task is None:
+                    next_ready_delay = delay
+                    break
+                idx, code, provider = task
+                future = executor.submit(_run_one, idx, code, provider)
+                in_flight[future] = (idx, code, provider)
+
+            if not in_flight:
+                if scheduler.has_pending() and _stop_event.wait(timeout=max(0.01, next_ready_delay or 0.05)):
+                    break
                 continue
-            if result is None:
+
+            timeout = None
+            if scheduler.has_pending() and len(in_flight) < workers:
+                timeout = max(0.01, next_ready_delay or 0.05)
+            completed, _pending = wait(tuple(in_flight), timeout=timeout, return_when=FIRST_COMPLETED)
+            if not completed:
                 continue
-            results[idx] = result
-            with _PROGRESS_LOCK:
-                _PROGRESS["done"] = min(_PROGRESS["done"] + 1, _PROGRESS["total"])
-            _publish_partial_result(result, codes)
+            for future in completed:
+                expected_idx, expected_code, expected_provider = in_flight.pop(future)
+                try:
+                    idx, provider, result = future.result()
+                except Exception as exc:
+                    _log(f"[parallel] worker exception for {expected_code}: {exc}")
+                    idx, provider = expected_idx, expected_provider
+                    result = HotelResult(
+                        code=expected_code,
+                        url=build_url(cfg, expected_code, start, end),
+                        name=None,
+                        available=None,
+                        provider=expected_provider,
+                        error_summary=" ".join(str(exc).split())[:240],
+                    )
+                results[idx] = result
+                _record_provider_result(provider, result)
+                with _PROGRESS_LOCK:
+                    _PROGRESS["done"] = min(_PROGRESS["done"] + 1, _PROGRESS["total"])
+                _publish_partial_result(result, codes)
 
     return [
-        r if r is not None else HotelResult(code=codes[idx], url=build_url(cfg, codes[idx], start, end), name=None, available=None)
+        r if r is not None else HotelResult(
+            code=codes[idx],
+            url=build_url(cfg, codes[idx], start, end),
+            name=None,
+            available=None,
+            provider=_provider_for_code(cfg, codes[idx]),
+            error_summary="scan interrupted",
+        )
         for idx, r in enumerate(results)
     ]
 
 
 # ========= Worker Loop =========
 def _worker_loop(run_once: bool = False):
-    global _LAST_RESULTS, _PROGRESS, _UPTIME_STARTED, _UPTIME_STARTED_MONO, _RUN_REQUESTED
+    global _LAST_RESULTS, _RESULTS_REVISION, _PROGRESS, _UPTIME_STARTED, _UPTIME_STARTED_MONO, _RUN_REQUESTED
     _log("Worker loop started.")
     _set_action("Worker loop started.")
     _UPTIME_STARTED = _now_wall()
@@ -1159,6 +1340,7 @@ def _worker_loop(run_once: bool = False):
     with _CONFIG_LOCK:
         cfg = deepcopy(_CONFIG)
         start, end = cfg.start_date, cfg.end_date
+    _reset_provider_health([_provider_for_code(cfg, code) for code in cfg.hotel_codes])
 
     renderer = None
     if getattr(cfg, "engine", "playwright") == "playwright" and _HAS_PLAYWRIGHT:
@@ -1208,7 +1390,9 @@ def _worker_loop(run_once: bool = False):
                 except Exception as e:
                     _log(f"[error] check {code}: {e}")
                     result = HotelResult(code=code, url=build_url(cfg, code, start, end), name=None, available=None)
+                result.provider = _provider_for_code(cfg, code)
                 results.append(result)
+                _record_provider_result(_provider_for_code(cfg, code), result)
                 with _PROGRESS_LOCK:
                     _PROGRESS["done"] = min(_PROGRESS["done"] + 1, _PROGRESS["total"])
                 _publish_partial_result(result, list(cfg.hotel_codes))
@@ -1228,6 +1412,7 @@ def _worker_loop(run_once: bool = False):
 
         with _RESULTS_LOCK:
             _LAST_RESULTS = results
+            _RESULTS_REVISION += 1
         with _PROGRESS_LOCK:
             _PROGRESS["done"] = _PROGRESS["total"]
 
@@ -1317,6 +1502,7 @@ def _worker_loop(run_once: bool = False):
                 try:
                     _set_action(f"[enhanced] Rechecking available hotel {code}...")
                     r = check_hotel(cfg, renderer, code, start, end)
+                    _record_provider_result(_provider_for_code(cfg, code), r)
                     enhanced_results.append(r)
                     if r.available is not True:
                         watch_codes.discard(code)
@@ -1324,7 +1510,16 @@ def _worker_loop(run_once: bool = False):
                 except Exception as e:
                     _log(f"[enhanced] recheck {code} failed: {e}")
                     watch_codes.discard(code)
-                    enhanced_results.append(HotelResult(code=code, url=build_url(cfg, code, start, end), name=None, available=None))
+                    failed_provider = _provider_for_code(cfg, code)
+                    failed_result = HotelResult(
+                        code=code,
+                        url=build_url(cfg, code, start, end),
+                        name=None,
+                        available=None,
+                        provider=failed_provider,
+                    )
+                    _record_provider_result(failed_provider, failed_result)
+                    enhanced_results.append(failed_result)
             if enhanced_results:
                 try:
                     process_notifications(cfg, enhanced_results, start, end)
@@ -1335,6 +1530,7 @@ def _worker_loop(run_once: bool = False):
                     for r in enhanced_results:
                         by_code[r.code] = r
                     _LAST_RESULTS = [by_code.get(r.code, r) for r in _LAST_RESULTS]
+                    _RESULTS_REVISION += 1
         if _stop_event.is_set():
             break
 
@@ -1732,6 +1928,7 @@ def home() -> Response:
                 <span id='time-text'>耗时 Loop elapsed: 0s | 总耗时 Uptime: 0s</span>
                 <span id='action-text'>状态 Current: (idle)</span>
               </div>
+              <div id="provider-health" class="provider-health" aria-live="polite" hidden></div>
               <div id='msg' class='notice success' role='status' aria-live='polite'></div>
               <div id='err' class='notice error' role='alert'></div>
 	            </section>
@@ -3056,7 +3253,7 @@ def _apply_payload_to_config(cfg: AppConfig, payload: Dict[str, Any]) -> None:
 
 
 def start() -> Response:
-        global _worker_thread, _RUN_REQUESTED
+        global _worker_thread, _RUN_REQUESTED, _LAST_RESULTS, _RESULTS_REVISION
         payload = request.get_json(force=True, silent=True) or {}
         run_once = bool(payload.get("run_once", False))
         restarted = False
@@ -3101,8 +3298,8 @@ def start() -> Response:
         _stop_event.clear()
 
         with _RESULTS_LOCK:
-            global _LAST_RESULTS
             _LAST_RESULTS = []
+            _RESULTS_REVISION += 1
         with _PROGRESS_LOCK:
             _PROGRESS["backoff_multiplier"] = 1
             _PROGRESS["unknown_ratio_percent"] = 0
@@ -3248,84 +3445,140 @@ def bark_sound_test() -> Response:
         )
         return jsonify({"ok": True, "message": "bark critical sound test sent", "config": _public_config_dict(_CONFIG)})
 
+def _fmt_elapsed_seconds(seconds: int) -> str:
+    days, remaining = divmod(int(seconds), 86400)
+    hours, remaining = divmod(remaining, 3600)
+    minutes, seconds = divmod(remaining, 60)
+    parts = []
+    if days:
+        parts.append(f"{days}d")
+    if hours or days:
+        parts.append(f"{hours}h")
+    if minutes or hours or days:
+        parts.append(f"{minutes}m")
+    parts.append(f"{seconds}s")
+    return " ".join(parts)
+
+
+def _runtime_status_snapshot() -> Dict[str, Any]:
+    with _PROGRESS_LOCK:
+        progress = dict(_PROGRESS)
+    now_ts = _now_wall()
+    now_mono = _now_mono()
+    running = bool(_RUN_REQUESTED and _worker_thread and _worker_thread.is_alive())
+    round_started_mono = float(progress.get("round_started_mono") or 0.0)
+
+    progress["uptime_sec"] = int(now_mono - _UPTIME_STARTED_MONO) if running and _UPTIME_STARTED_MONO else 0
+    progress["round_elapsed_sec"] = int(now_mono - round_started_mono) if running and round_started_mono else 0
+    if running and progress.get("phase") == "waiting":
+        wait_started = float(progress.get("wait_started_mono") or 0.0)
+        wait_total = int(progress.get("wait_total_sec") or 0)
+        progress["wait_elapsed_sec"] = max(0, min(wait_total, int(now_mono - wait_started))) if wait_started else 0
+    elif running:
+        progress["phase"] = progress.get("phase") or "scanning"
+        progress["wait_elapsed_sec"] = 0
+    else:
+        progress["phase"] = "idle"
+        progress["wait_elapsed_sec"] = 0
+        progress["wait_total_sec"] = 0
+    progress["uptime_human"] = _fmt_elapsed_seconds(progress["uptime_sec"])
+    progress["round_elapsed_human"] = _fmt_elapsed_seconds(progress["round_elapsed_sec"])
+
+    with _ACTION_LOCK:
+        action = _CURRENT_ACTION
+        action_ts = _ACTION_TS
+    with _RESULTS_LOCK:
+        results_revision = _RESULTS_REVISION
+    with _CONFIG_LOCK:
+        channel_config = {
+            key: bool(getattr(_CONFIG, key, False))
+            for key in ("enable_telegram", "enable_local", "enable_email", "enable_bark", "enable_serverchan")
+        }
+    push_status = notification_status_snapshot(channel_config)
+
+    return {
+        "ok": True,
+        "instance_id": f"{os.getpid()}:{int(_START_TIME)}",
+        "running": running,
+        "progress": progress,
+        "action": action,
+        "action_ts": action_ts,
+        "action_age_sec": int(now_ts - action_ts) if action_ts else None,
+        "notification_status": push_status,
+        "provider_health": provider_health_snapshot(),
+        "results_revision": results_revision,
+        "availability_logs_revision": availability_log_revision(),
+    }
+
+
+def runtime_status() -> Response:
+    return jsonify(_runtime_status_snapshot())
+
+
+def results_status() -> Response:
+    try:
+        since = int(request.args.get("since", -1))
+    except (TypeError, ValueError):
+        since = -1
+    with _RESULTS_LOCK:
+        revision = _RESULTS_REVISION
+        changed = since != revision
+        results = [asdict(result) for result in _LAST_RESULTS] if changed else None
+    payload: Dict[str, Any] = {"ok": True, "changed": changed, "revision": revision}
+    if results is not None:
+        payload["results"] = results
+    return jsonify(payload)
+
+
+def availability_logs_status() -> Response:
+    try:
+        since = int(request.args.get("since", -1))
+    except (TypeError, ValueError):
+        since = -1
+    revision = availability_log_revision()
+    changed = since != revision
+    payload: Dict[str, Any] = {"ok": True, "changed": changed, "revision": revision}
+    if changed:
+        payload["availability_logs"] = availability_log_snapshot()
+    return jsonify(payload)
+
+
+def logs_status() -> Response:
+    try:
+        after = max(0, int(request.args.get("after", 0)))
+    except (TypeError, ValueError):
+        after = 0
+    with _LOG_LOCK:
+        latest = _LOG_SEQUENCE
+        first_sequence = latest - len(_LOG_LINES) + 1
+        reset = bool(_LOG_LINES and after < first_sequence - 1)
+        if reset:
+            lines = list(_LOG_LINES[-300:])
+        else:
+            offset = max(0, after - (first_sequence - 1))
+            lines = list(_LOG_LINES[offset:][-300:])
+    return jsonify({"ok": True, "cursor": latest, "reset": reset, "logs": lines})
+
+
 def status() -> Response:
-        with _CONFIG_LOCK:
-            cfg = _public_config_dict(_CONFIG)
-        with _RESULTS_LOCK:
-            results = [asdict(r) for r in _LAST_RESULTS]
-        with _LOG_LOCK:
-            logs = list(_LOG_LINES[-300:])
-        with _PROGRESS_LOCK:
-            progress = dict(_PROGRESS)
-
-        now_ts = _now_wall()
-        now_mono = _now_mono()
-
-        rs_mono = float(progress.get("round_started_mono") or 0.0)
-
-        try:
-            running = bool(_RUN_REQUESTED and _worker_thread and _worker_thread.is_alive())
-        except NameError:
-            running = bool(_worker_thread and _worker_thread.is_alive())
-
-        if running and _UPTIME_STARTED_MONO:
-            progress["uptime_sec"] = int(now_mono - _UPTIME_STARTED_MONO)
-        else:
-            progress["uptime_sec"] = 0
-
-        if running and rs_mono > 0.0:
-            progress["round_elapsed_sec"] = int(now_mono - rs_mono)
-        else:
-            progress["round_elapsed_sec"] = 0
-
-        if running and progress.get("phase") == "waiting":
-            wait_started = float(progress.get("wait_started_mono") or 0.0)
-            wait_total = int(progress.get("wait_total_sec") or 0)
-            progress["wait_elapsed_sec"] = max(0, min(wait_total, int(now_mono - wait_started))) if wait_started else 0
-        elif running:
-            progress["phase"] = progress.get("phase") or "scanning"
-            progress["wait_elapsed_sec"] = 0
-        else:
-            progress["phase"] = "idle"
-            progress["wait_elapsed_sec"] = 0
-            progress["wait_total_sec"] = 0
-
-        with _ACTION_LOCK:
-            action = _CURRENT_ACTION
-            action_ts = _ACTION_TS
-        action_age_sec = int(now_ts - action_ts) if action_ts else None
-
-        def _fmt_secs(s: int) -> str:
-            d, rem = divmod(int(s), 86400)
-            h, rem = divmod(rem, 3600)
-            m, sec = divmod(rem, 60)
-            parts = []
-            if d:
-                parts.append(f"{d}d")
-            if h or d:
-                parts.append(f"{h}h")
-            if m or h or d:
-                parts.append(f"{m}m")
-            parts.append(f"{sec}s")
-            return " ".join(parts)
-
-        progress["uptime_human"] = _fmt_secs(progress["uptime_sec"])
-        progress["round_elapsed_human"] = _fmt_secs(progress["round_elapsed_sec"])
-        return jsonify({
-            "ok": True,
-            "running": running,
-            "config": cfg,
-            "results": results,
-            "logs": logs,
-            "progress": progress,
-            "action": action,
-            "action_ts": action_ts,
-            "action_age_sec": action_age_sec,
-            "notification_status": notification_status_snapshot(cfg),
-            "availability_logs": availability_log_snapshot(),
-            "hotel_catalog": _catalog_status_snapshot(),
-            "provider_catalog": {**_db_status_snapshot(), "checking": _PROVIDER_DATABASE_LOCK.locked()},
-        })
+    runtime_payload = _runtime_status_snapshot()
+    with _CONFIG_LOCK:
+        cfg = _public_config_dict(_CONFIG)
+    with _RESULTS_LOCK:
+        results = [asdict(result) for result in _LAST_RESULTS]
+    with _LOG_LOCK:
+        logs = list(_LOG_LINES[-300:])
+        log_cursor = _LOG_SEQUENCE
+    runtime_payload.update({
+        "config": cfg,
+        "results": results,
+        "logs": logs,
+        "log_cursor": log_cursor,
+        "availability_logs": availability_log_snapshot(),
+        "hotel_catalog": _catalog_status_snapshot(),
+        "provider_catalog": {**_db_status_snapshot(), "checking": _PROVIDER_DATABASE_LOCK.locked()},
+    })
+    return jsonify(runtime_payload)
 
 
 def hotel_info() -> Response:

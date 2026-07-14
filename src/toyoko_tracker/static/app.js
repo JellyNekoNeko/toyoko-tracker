@@ -15,6 +15,11 @@
             let RESULT_CHANGE_CLASSES = new Map();
             let RESULT_CHANGE_TOKEN = 0;
             let STATUS_REFRESH_IN_FLIGHT = false;
+            let STATUS_BOOTSTRAPPED = false;
+            let SERVER_INSTANCE_ID = '';
+            let RESULTS_REVISION = -1;
+            let AVAILABILITY_LOGS_REVISION = -1;
+            let CATALOG_REFRESH_IN_FLIGHT = false;
             let CONNECTION_ONLINE = true;
             let LAST_STATUS_UPDATED_AT = null;
             const HOTEL_INFO_CACHE = new Map();
@@ -25,6 +30,7 @@
             let HOTEL_INFO_MAP = null;
             let LAST_CATALOG_STATUS = null;
             let LAST_PROVIDER_CATALOG_STATUS = null;
+            let LAST_PROVIDER_HEALTH = {};
             let LAST_MOBILE_ACCESS_STATUS = null;
             let MOBILE_CONNECTION_MODE = localStorage.getItem('toyoko-chan-mobile-connection-v1') || 'lan';
             const APP_VIEW_KEY = 'toyoko-chan-active-view-v1';
@@ -94,7 +100,7 @@
                 pushSettingsNote: '空房、重复提醒、无房变化和启动通知会发送到所有已启用渠道。',
                 searchEngine: '检索引擎 / Search Engine', engineHelp: 'HTTP/API 请求更少更快；失败时会尝试回退 Playwright。',
                 enableSmartParallel: '启用智能并行 / Enable', workers: '并行线数 / Workers', current: '当前 / Current',
-                smartParallelHelp: '仅 HTTP/API 生效；错峰启动并放大单线间隔',
+                smartParallelHelp: '仅 HTTP/API 生效；不同品牌并行，同品牌独立限速',
                 roundInterval: '每轮检索间隔 / Round Interval', perHotelDelay: '每家酒店基础间隔 / Per-hotel Base Delay',
                 requestJitter: '随机抖动 / Request Jitter', seconds: '秒 / sec', recommended120: '建议 120 秒以上 / 120+ recommended',
                 reminderPolicy: '提醒策略 / Reminder Policy', repeatCount: '重复提醒次数 / Reminder Repeat Count',
@@ -125,7 +131,7 @@
                 telegramName: 'Telegram机器人 / Telegram Bot', localName: '本地通知 / Local Notifications',
                 emailName: '邮件 / Email', barkName: 'Bark / Bark', serverChanName: 'Server酱 / Server Chan',
                 tipEngine: 'HTTP/API 是默认推荐：轻量、速度快、资源占用低；当接口解析失败时会自动尝试回退 Playwright。Playwright 更接近真实浏览器，适合官网结构变化或 HTTP 失败时使用，但更重。',
-                tipSmartParallel: '仅 HTTP/API 生效。会把酒店分成 1-3 条检索线并错峰启动，同时放大每条线的间隔，兼顾效率和请求节奏。默认 1 条；酒店较多时再提高到 2-3 条。',
+                tipSmartParallel: '仅 HTTP/API 生效。不同酒店品牌可错峰并行，同一品牌保持独立访问间隔；连续异常的品牌会短暂冷却，不影响其他品牌。默认 1 条，酒店较多时可提高到 2-3 条。',
                 tipCadence: '每轮检索间隔控制两轮之间等待多久；每家酒店基础间隔控制同一检索线内访问频率；随机抖动会让间隔更自然。更稳妥的配置是每轮 120 秒以上、单店 2-5 秒并保留 30-50% 抖动。',
                 tipReminder: '控制发现空房后的重复提醒。重复提醒次数为首次提醒后的追加提醒次数；最右侧 INF 表示持续提醒。冷却时间用于避免同一酒店短时间反复推送，建议 300 秒以上。',
                 tipBark: '适合 iPhone/iPad。步骤：1. iPhone/iPad 安装 Bark App。2. 复制 App 首页的 Device Key。3. 填入 Bark Key。4. 公共服务保持默认 Bark Server；自建服务则填你的服务器地址。5. 勾选启用后启动搜索。',
@@ -159,7 +165,7 @@
                 pushSettingsNote: '空房、重複提醒、無房變化和啟動通知會傳送到所有已啟用通道。',
                 searchEngine: '搜尋引擎 / Search Engine', engineHelp: 'HTTP/API 請求更少更快；失敗時會嘗試回退 Playwright。',
                 enableSmartParallel: '啟用智慧並行 / Enable', workers: '並行線數 / Workers', current: '目前 / Current',
-                smartParallelHelp: '僅 HTTP/API 生效；錯峰啟動並放大單線間隔',
+                smartParallelHelp: '僅 HTTP/API 生效；不同品牌並行，同品牌獨立限速',
                 roundInterval: '每輪搜尋間隔 / Round Interval', perHotelDelay: '每家飯店基礎間隔 / Per-hotel Base Delay',
                 requestJitter: '隨機抖動 / Request Jitter', seconds: '秒 / sec', recommended120: '建議 120 秒以上 / 120+ recommended',
                 reminderPolicy: '提醒策略 / Reminder Policy', repeatCount: '重複提醒次數 / Reminder Repeat Count',
@@ -190,7 +196,7 @@
                 telegramName: 'Telegram機器人 / Telegram Bot', localName: '本地通知 / Local Notifications',
                 emailName: '郵件 / Email', barkName: 'Bark / Bark', serverChanName: 'ServerChan / Server Chan',
                 tipEngine: 'HTTP/API 是預設推薦：輕量、速度快、資源占用低；介面解析失敗時會嘗試回退 Playwright。Playwright 更接近真實瀏覽器，但更重。',
-                tipSmartParallel: '僅 HTTP/API 生效。會把飯店分成 1-3 條搜尋線並錯峰啟動，同時放大每條線的間隔。預設 1 條；飯店較多時再提高到 2-3 條。',
+                tipSmartParallel: '僅 HTTP/API 生效。不同飯店品牌可錯峰並行，同一品牌維持獨立存取間隔；連續異常的品牌會短暫冷卻，不影響其他品牌。預設 1 條，飯店較多時可提高到 2-3 條。',
                 tipCadence: '每輪搜尋間隔控制兩輪之間等待多久；每家飯店基礎間隔控制同一搜尋線內訪問頻率；隨機抖動會讓間隔更自然。',
                 tipReminder: '控制發現空房後的重複提醒。重複提醒次數為首次提醒後的追加提醒次數；最右側 INF 表示持續提醒。冷卻時間建議 300 秒以上。',
                 tipBark: '適合 iPhone/iPad。步驟：1. 安裝 Bark App。2. 複製 Device Key。3. 填入 Bark Key。4. 公共服務保持預設 Bark Server；自建服務則填你的伺服器地址。',
@@ -224,7 +230,7 @@
                 pushSettingsNote: '空室、繰り返し通知、満室化、開始通知は有効なすべての通知先へ送信されます。',
                 searchEngine: '検索エンジン / Search Engine', engineHelp: 'HTTP/API は軽く高速です。失敗時は Playwright へフォールバックします。',
                 enableSmartParallel: 'スマート並列を有効化 / Enable', workers: '並列数 / Workers', current: '現在 / Current',
-                smartParallelHelp: 'HTTP/API のみ有効；開始をずらして単線間隔を広げます',
+                smartParallelHelp: 'HTTP/API のみ有効；ブランド別に並列化・速度制限します',
                 roundInterval: '各ラウンド間隔 / Round Interval', perHotelDelay: 'ホテルごとの基本間隔 / Per-hotel Base Delay',
                 requestJitter: 'ランダム揺らぎ / Request Jitter', seconds: '秒 / sec', recommended120: '120 秒以上推奨 / 120+ recommended',
                 reminderPolicy: '通知ポリシー / Reminder Policy', repeatCount: '繰り返し通知回数 / Reminder Repeat Count',
@@ -255,7 +261,7 @@
                 telegramName: 'Telegramボット / Telegram Bot', localName: 'ローカル通知 / Local Notifications',
                 emailName: 'メール / Email', barkName: 'Bark / Bark', serverChanName: 'ServerChan / Server Chan',
                 tipEngine: 'HTTP/API を推奨します。軽量で高速、リソース消費も少なめです。解析に失敗した場合は Playwright にフォールバックします。Playwright は実ブラウザに近いですが重くなります。',
-                tipSmartParallel: 'HTTP/API のみ有効です。ホテルを 1-3 本の検索ラインに分け、開始タイミングをずらし、各ラインの間隔を広げます。初期値は 1 本です。',
+                tipSmartParallel: 'HTTP/API のみ有効です。異なるブランドは時間をずらして並列処理し、同一ブランドは独立した間隔を維持します。連続エラーのブランドだけを一時待機させます。',
                 tipCadence: 'ラウンド間隔は次の検索までの待ち時間です。ホテルごとの基本間隔は同じライン内のアクセス頻度です。ランダム揺らぎで間隔を自然にします。',
                 tipReminder: '空室発見後の繰り返し通知を制御します。回数は初回通知後の追加通知回数です。右端の INF は継続通知を意味します。クールダウンは 300 秒以上を推奨します。',
                 tipBark: 'iPhone/iPad 向けです。手順：1. Bark App をインストール。2. Device Key をコピー。3. Bark Key に入力。4. 公開サービスは既定の Bark Server、自前サーバーはその URL を入力。',
@@ -289,7 +295,7 @@
                 pushSettingsNote: '빈 객실, 반복 알림, 매진 변화, 시작 알림은 활성화된 모든 채널로 전송됩니다.',
                 searchEngine: '검색 엔진 / Search Engine', engineHelp: 'HTTP/API는 더 가볍고 빠릅니다. 실패하면 Playwright로 폴백합니다.',
                 enableSmartParallel: '스마트 병렬 활성화 / Enable', workers: '병렬 라인 수 / Workers', current: '현재 / Current',
-                smartParallelHelp: 'HTTP/API에서만 작동；시작을 분산하고 단일 라인 간격을 늘립니다',
+                smartParallelHelp: 'HTTP/API 전용；브랜드별 병렬 처리와 독립 제한',
                 roundInterval: '라운드 간격 / Round Interval', perHotelDelay: '호텔별 기본 간격 / Per-hotel Base Delay',
                 requestJitter: '랜덤 지터 / Request Jitter', seconds: '초 / sec', recommended120: '120초 이상 권장 / 120+ recommended',
                 reminderPolicy: '알림 정책 / Reminder Policy', repeatCount: '반복 알림 횟수 / Reminder Repeat Count',
@@ -320,7 +326,7 @@
                 telegramName: 'Telegram 봇 / Telegram Bot', localName: '로컬 알림 / Local Notifications',
                 emailName: '이메일 / Email', barkName: 'Bark / Bark', serverChanName: 'ServerChan / Server Chan',
                 tipEngine: 'HTTP/API를 권장합니다. 가볍고 빠르며 리소스 사용이 적습니다. 분석에 실패하면 Playwright로 폴백합니다. Playwright는 실제 브라우저에 가깝지만 더 무겁습니다.',
-                tipSmartParallel: 'HTTP/API에서만 작동합니다. 호텔을 1-3개 검색 라인으로 나누고 시작 시점을 분산하며 각 라인의 간격을 늘립니다. 기본값은 1개입니다.',
+                tipSmartParallel: 'HTTP/API에서만 작동합니다. 서로 다른 브랜드는 시차를 두고 병렬 처리하며 같은 브랜드는 독립적인 요청 간격을 유지합니다. 연속 오류 브랜드만 잠시 대기합니다.',
                 tipCadence: '라운드 간격은 다음 검색까지의 대기 시간입니다. 호텔별 기본 간격은 같은 라인 안의 접근 빈도입니다. 랜덤 지터로 간격을 더 자연스럽게 만듭니다.',
                 tipReminder: '빈 객실 발견 후 반복 알림을 제어합니다. 횟수는 첫 알림 이후 추가 알림 횟수입니다. 오른쪽 INF는 계속 알림을 의미합니다. 쿨다운은 300초 이상을 권장합니다.',
                 tipBark: 'iPhone/iPad용입니다. 단계: 1. Bark App 설치. 2. Device Key 복사. 3. Bark Key 입력. 4. 공용 서비스는 기본 Bark Server 유지, 자체 서버는 해당 URL 입력.',
@@ -916,28 +922,36 @@
                 updateAvailableMessage:'当前：v{current} · 最新：v{latest}', secondsAgo:'{seconds} 秒前',
                 radiusPlaceholder:'东京站或 35.6812,139.7671', providerCatalogDb:'其他品牌数据库',
                 catalogUpdating:'更新中', providerCatalogNew:'发现新酒店：{count}',
-                historyNoRegion:'未选择区域', historyAllAreas:'全部区域', historyHotelCount:'{count} 家酒店'
+                historyNoRegion:'未选择区域', historyAllAreas:'全部区域', historyHotelCount:'{count} 家酒店',
+                providerHealth:'来源健康', healthIdle:'等待', healthHealthy:'正常', healthDegraded:'异常', healthCooldown:'冷却',
+                providerChecks:'{count} 次', providerAverage:'平均 {ms}ms'
               },
               zh_tw: {
                 languageHelp:'介面僅顯示目前選擇的語言。', stopped:'已停止', running:'執行中',
                 updateAvailableMessage:'目前：v{current} · 最新：v{latest}', secondsAgo:'{seconds} 秒前',
                 radiusPlaceholder:'東京站或 35.6812,139.7671', providerCatalogDb:'其他品牌資料庫',
                 catalogUpdating:'更新中', providerCatalogNew:'發現新飯店：{count}',
-                historyNoRegion:'未選擇區域', historyAllAreas:'全部區域', historyHotelCount:'{count} 家飯店'
+                historyNoRegion:'未選擇區域', historyAllAreas:'全部區域', historyHotelCount:'{count} 家飯店',
+                providerHealth:'來源健康', healthIdle:'等待', healthHealthy:'正常', healthDegraded:'異常', healthCooldown:'冷卻',
+                providerChecks:'{count} 次', providerAverage:'平均 {ms}ms'
               },
               ja: {
                 languageHelp:'画面には選択した言語のみ表示されます。', stopped:'停止中', running:'実行中',
                 updateAvailableMessage:'現在：v{current} · 最新：v{latest}', secondsAgo:'{seconds} 秒前',
                 radiusPlaceholder:'東京駅または 35.6812,139.7671', providerCatalogDb:'他ブランドデータベース',
                 catalogUpdating:'更新中', providerCatalogNew:'新規ホテル：{count}',
-                historyNoRegion:'地域未選択', historyAllAreas:'すべての地域', historyHotelCount:'ホテル {count} 件'
+                historyNoRegion:'地域未選択', historyAllAreas:'すべての地域', historyHotelCount:'ホテル {count} 件',
+                providerHealth:'接続先の状態', healthIdle:'待機', healthHealthy:'正常', healthDegraded:'異常', healthCooldown:'待機中',
+                providerChecks:'{count} 回', providerAverage:'平均 {ms}ms'
               },
               ko: {
                 languageHelp:'화면에는 선택한 언어만 표시됩니다.', stopped:'중지됨', running:'실행 중',
                 updateAvailableMessage:'현재: v{current} · 최신: v{latest}', secondsAgo:'{seconds}초 전',
                 radiusPlaceholder:'도쿄역 또는 35.6812,139.7671', providerCatalogDb:'기타 브랜드 데이터베이스',
                 catalogUpdating:'업데이트 중', providerCatalogNew:'신규 호텔: {count}',
-                historyNoRegion:'지역 미선택', historyAllAreas:'전체 지역', historyHotelCount:'호텔 {count}개'
+                historyNoRegion:'지역 미선택', historyAllAreas:'전체 지역', historyHotelCount:'호텔 {count}개',
+                providerHealth:'연결 상태', healthIdle:'대기', healthHealthy:'정상', healthDegraded:'오류', healthCooldown:'대기 중',
+                providerChecks:'{count}회', providerAverage:'평균 {ms}ms'
               }
             };
             const EN_UI = {
@@ -945,18 +959,20 @@
               radiusPlaceholder:'Tokyo Station or 35.6812,139.7671', providerCatalogDb:'Other brand database',
               catalogUpdating:'Updating', providerCatalogNew:'New hotels: {count}',
               historyNoRegion:'No region', historyAllAreas:'All areas', historyHotelCount:'{count} hotels',
+              providerHealth:'Provider health', healthIdle:'Idle', healthHealthy:'Healthy', healthDegraded:'Degraded', healthCooldown:'Cooldown',
+              providerChecks:'{count} checks', providerAverage:'Avg {ms}ms',
               areaHint:'Choose a region. Detail area is optional; leaving it blank loads the full region. Check hotels, then start searching.',
               areaSelected:'Region selected. Load the full region or choose a detail area, then check hotels and start searching.',
               historyHint:'Shows the 10 most recent searches. Identical settings are not duplicated.',
               searchSettingsNote:'Engine, scan cadence, and smart parallel settings are managed here. Smart Parallel applies to HTTP/API only and staggers requests.',
               pushSettingsNote:'Availability, repeat, loss, and start notifications are sent through every enabled channel.',
               engineHelp:'HTTP/API uses fewer requests and is faster. It can fall back to Playwright when parsing fails.',
-              smartParallelHelp:'HTTP/API only. Staggers worker starts and increases per-worker spacing.',
+              smartParallelHelp:'HTTP/API only. Runs brands in parallel while rate-limiting each brand independently.',
               localHelp:'On first use, macOS may require notification permission for Terminal, Python, or osascript in System Settings > Notifications.',
               runSubtitle:'Repeatedly scans the current hotel scope. You can stop or adjust settings while running.',
               stopped:'STOPPED', running:'RUNNING', pushSubtitle:'Shows enabled notification channels and their most recent delivery state.',
               tipEngine:'HTTP/API is recommended by default because it is lightweight, fast, and resource efficient. If parsing fails, the app can fall back to Playwright, which behaves more like a real browser but uses more resources.',
-              tipSmartParallel:'HTTP/API only. Splits hotels across 1-3 staggered workers and increases spacing per worker. Start with one worker and raise it only for larger hotel lists.',
+              tipSmartParallel:'HTTP/API only. Different brands can run in parallel while each brand keeps its own request interval. A brand with repeated access errors cools down without blocking the others.',
               tipCadence:'Round Interval controls the wait between scans. Per-hotel Base Delay controls access frequency inside a worker. Request Jitter makes timing less uniform. Prefer 120+ second rounds, 2-5 second hotel delays, and 30-50% jitter.',
               tipReminder:'Controls repeat alerts after availability appears. Repeat Count is the number of additional alerts after the first; INF continues indefinitely. Use a cooldown of at least 300 seconds.',
               tipBark:'For iPhone and iPad. 1. Install Bark. 2. Copy the Device Key from the app home screen. 3. Enter it as Bark Key. 4. Keep the default server or enter a self-hosted server. 5. Enable Bark and start searching.',
@@ -1753,6 +1769,7 @@
                 setNodeText('#time-text', `${tx('loopElapsed')}: 0s | ${tx('uptime')}: 0s`);
                 setNodeText('#action-text', `${tx('currentAction')}: (idle)`);
               }
+              renderProviderHealth(LAST_PROVIDER_HEALTH);
               setNodeText('.result-log-table .empty-results', tx('noLog'));
               updateResultsTimestamp();
               if (Array.isArray(LAST_RESULTS)) renderRows();
@@ -1795,6 +1812,42 @@
                   : '';
               }
               if (waiting && waitTotal > 0) startProgressSmoothing();
+            }
+
+            function renderProviderHealth(health){
+              const container = document.getElementById('provider-health');
+              if (!container) return;
+              LAST_PROVIDER_HEALTH = health && typeof health === 'object' ? health : {};
+              const preferredOrder = ['toyoko', 'routeinn', 'dormy', 'mystays', 'daiwa'];
+              const providers = Object.keys(LAST_PROVIDER_HEALTH).sort((left, right) => {
+                const leftRank = preferredOrder.indexOf(left);
+                const rightRank = preferredOrder.indexOf(right);
+                return (leftRank < 0 ? 99 : leftRank) - (rightRank < 0 ? 99 : rightRank);
+              });
+              if (!providers.length) {
+                container.hidden = true;
+                container.innerHTML = '';
+                return;
+              }
+              const stateLabels = {
+                idle: tx('healthIdle'),
+                healthy: tx('healthHealthy'),
+                degraded: tx('healthDegraded'),
+                cooldown: tx('healthCooldown')
+              };
+              const chips = providers.map(provider => {
+                const item = LAST_PROVIDER_HEALTH[provider] || {};
+                const state = ['idle', 'healthy', 'degraded', 'cooldown'].includes(item.state) ? item.state : 'idle';
+                const cooldown = Math.max(0, Number(item.cooldown_remaining_sec || 0));
+                const stateText = cooldown ? `${stateLabels.cooldown} ${cooldown}s` : stateLabels[state];
+                const checks = Math.max(0, Number(item.checks || 0));
+                const average = Math.max(0, Number(item.average_elapsed_ms || 0));
+                const meta = checks ? `${fmt('providerChecks', {count:checks})} · ${fmt('providerAverage', {ms:average})}` : '';
+                const title = item.last_error || `${providerShort(provider)} · ${stateText}`;
+                return `<span class="provider-health-chip ${escText(state)}" title="${escText(title)}"><strong>${escText(providerShort(provider))}</strong><span>${escText(stateText)}</span>${meta ? `<small>${escText(meta)}</small>` : ''}</span>`;
+              }).join('');
+              container.innerHTML = `<span class="provider-health-title">${escText(tx('providerHealth'))}</span>${chips}`;
+              container.hidden = false;
             }
 
             function startProgressSmoothing(){
@@ -4016,16 +4069,68 @@
               }).join('');
             }
 
+            async function refreshResultsDelta(serverRevision, force=false){
+              const revision = Number(serverRevision);
+              if (!force && Number.isFinite(revision) && revision === RESULTS_REVISION) return;
+              const since = force ? -1 : RESULTS_REVISION;
+              const response = await fetch(`/api/v1/results?since=${encodeURIComponent(since)}`);
+              if (!response.ok) throw new Error(`HTTP ${response.status}`);
+              const payload = await response.json();
+              if (payload.changed) renderRows(payload.results || []);
+              RESULTS_REVISION = Number(payload.revision ?? revision ?? RESULTS_REVISION);
+            }
+
+            async function refreshAvailabilityLogsDelta(serverRevision, force=false){
+              const revision = Number(serverRevision);
+              if (!force && Number.isFinite(revision) && revision === AVAILABILITY_LOGS_REVISION) return;
+              const since = force ? -1 : AVAILABILITY_LOGS_REVISION;
+              const response = await fetch(`/api/v1/availability-logs?since=${encodeURIComponent(since)}`);
+              if (!response.ok) throw new Error(`HTTP ${response.status}`);
+              const payload = await response.json();
+              if (payload.changed) renderAvailabilityLogs(payload.availability_logs || []);
+              AVAILABILITY_LOGS_REVISION = Number(payload.revision ?? revision ?? AVAILABILITY_LOGS_REVISION);
+            }
+
+            async function refreshCatalogSnapshots(){
+              if (CATALOG_REFRESH_IN_FLIGHT || document.hidden) return;
+              CATALOG_REFRESH_IN_FLIGHT = true;
+              try {
+                const [catalogResponse, providerResponse] = await Promise.all([
+                  fetch('/hotel_catalog_status'),
+                  fetch('/provider_catalog_status')
+                ]);
+                if (catalogResponse.ok) {
+                  const payload = await catalogResponse.json();
+                  renderHotelCatalog(payload.catalog || null);
+                }
+                if (providerResponse.ok) {
+                  const payload = await providerResponse.json();
+                  renderProviderCatalog(payload || null);
+                }
+              } catch(e) {
+                // The lightweight runtime heartbeat remains the connection authority.
+              } finally {
+                CATALOG_REFRESH_IN_FLIGHT = false;
+              }
+            }
+
             async function refreshStatus(manual=false){
               if (STATUS_REFRESH_IN_FLIGHT || (document.hidden && !manual)) return;
               STATUS_REFRESH_IN_FLIGHT = true;
               if (manual) setButtonBusy('btn_results_refresh', true);
               try{
-                const r = await fetch('/status');
+                const endpoint = STATUS_BOOTSTRAPPED ? '/api/v1/runtime' : '/status';
+                let r = await fetch(endpoint);
                 if (!r.ok) throw new Error(`HTTP ${r.status}`);
-                const j = await r.json();
-                LAST_STATUS_UPDATED_AT = new Date();
-                updateResultsTimestamp();
+                let j = await r.json();
+                if (endpoint !== '/status' && SERVER_INSTANCE_ID && j.instance_id !== SERVER_INSTANCE_ID) {
+                  r = await fetch('/status');
+                  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                  j = await r.json();
+                  RESULTS_REVISION = -1;
+                  AVAILABILITY_LOGS_REVISION = -1;
+                }
+                SERVER_INSTANCE_ID = String(j.instance_id || SERVER_INSTANCE_ID);
                 setConnectionOnline(true);
                 setRunning(!!j.running);
                 renderProgress(j.progress);
@@ -4099,16 +4204,30 @@
 
                 renderSummary(j.config);
               }
-                renderRows(j.results || []);
-                renderAvailabilityLogs(j.availability_logs || []);
+                if (Array.isArray(j.results)) {
+                  renderRows(j.results);
+                  RESULTS_REVISION = Number(j.results_revision ?? RESULTS_REVISION);
+                } else {
+                  await refreshResultsDelta(j.results_revision, manual);
+                }
+                if (Array.isArray(j.availability_logs)) {
+                  renderAvailabilityLogs(j.availability_logs);
+                  AVAILABILITY_LOGS_REVISION = Number(j.availability_logs_revision ?? AVAILABILITY_LOGS_REVISION);
+                } else {
+                  await refreshAvailabilityLogsDelta(j.availability_logs_revision, manual);
+                }
                 renderPushStatus(j.notification_status || []);
-                renderHotelCatalog(j.hotel_catalog || null);
-                renderProviderCatalog(j.provider_catalog || null);
+                renderProviderHealth(j.provider_health || {});
+                if ('hotel_catalog' in j) renderHotelCatalog(j.hotel_catalog || null);
+                if ('provider_catalog' in j) renderProviderCatalog(j.provider_catalog || null);
                 const act = (j && j.action) ? j.action : '(idle)';
                 const age = (j && (typeof j.action_age_sec === 'number')) ? j.action_age_sec : null;
                 const actLine = `${tx('currentAction')}: ${act}${age!=null ? ` (${age}s ago)` : ''}`;
                 const actEl = document.getElementById('action-text');
                 if (actEl) actEl.textContent = actLine;
+                STATUS_BOOTSTRAPPED = true;
+                LAST_STATUS_UPDATED_AT = new Date();
+                updateResultsTimestamp();
               }catch(e){
                 setConnectionOnline(false);
                 if (manual) {
@@ -4119,17 +4238,6 @@
                 STATUS_REFRESH_IN_FLIGHT = false;
                 if (manual) setButtonBusy('btn_results_refresh', false);
               }
-            }
-
-            function setIfNotFocused(id, value){
-              if (value === undefined) return;
-              if (BLOCK_REMOTE_OVERWRITE) return;
-              const el = document.getElementById(id);
-              if(!el) return;
-              if(document.activeElement === el) return;
-              if(recentlyEdited(id)) return;
-              if (id === 'smtp_pass') return;
-              el.value = value;
             }
 
             document.getElementById('btn_scan_once').addEventListener('click', (e)=>{e.preventDefault(); callStart(true);});
@@ -4344,7 +4452,10 @@
               event.returnValue = '';
             });
             document.addEventListener('visibilitychange', () => {
-              if (!document.hidden) refreshStatus();
+              if (!document.hidden) {
+                refreshStatus();
+                refreshCatalogSnapshots();
+              }
             });
             restoreResultViewPrefs();
             initAnimatedDetails();
@@ -4357,4 +4468,5 @@
             refreshMobileAccess();
             registerServiceWorker();
             setInterval(refreshStatus, 2000);
+            setInterval(refreshCatalogSnapshots, 30000);
             setInterval(refreshUpdateStatus, 10000);

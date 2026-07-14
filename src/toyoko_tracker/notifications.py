@@ -41,6 +41,7 @@ _set_action: Callable[[str], None] = _noop
 
 _ALERT_STATE: Dict[str, Dict[str, Any]] = {}
 _AVAILABILITY_LOGS: List[Dict[str, Any]] = []
+_AVAILABILITY_LOG_REVISION = 0
 _ALERT_STATE_LOCK = threading.RLock()
 _PUSH_STATUS_LOCK = threading.Lock()
 _PUSH_STATUS: Dict[str, Dict[str, Any]] = {}
@@ -56,9 +57,16 @@ def set_notification_hooks(log: Callable[[str], None], set_action: Callable[[str
 
 
 def clear_alert_state() -> None:
+    global _AVAILABILITY_LOG_REVISION
     with _ALERT_STATE_LOCK:
         _ALERT_STATE.clear()
         _AVAILABILITY_LOGS.clear()
+        _AVAILABILITY_LOG_REVISION += 1
+
+
+def availability_log_revision() -> int:
+    with _ALERT_STATE_LOCK:
+        return _AVAILABILITY_LOG_REVISION
 
 
 def availability_log_snapshot() -> List[Dict[str, Any]]:
@@ -950,6 +958,7 @@ def _hotel_name_for_log(cfg: AppConfig, r: HotelResult) -> str:
 
 
 def _upsert_availability_log(cfg: AppConfig, r: HotelResult, start_date: str, end_date: str, key: str, now: float, count: int) -> None:
+    global _AVAILABILITY_LOG_REVISION
     price, room, _room_primary = _log_room_summary(cfg, r)
     with _ALERT_STATE_LOCK:
         for entry in reversed(_AVAILABILITY_LOGS):
@@ -961,6 +970,7 @@ def _upsert_availability_log(cfg: AppConfig, r: HotelResult, start_date: str, en
                     "count": count,
                     "updated_ts": now,
                 })
+                _AVAILABILITY_LOG_REVISION += 1
                 return
         _AVAILABILITY_LOGS.append({
             "key": key,
@@ -979,15 +989,18 @@ def _upsert_availability_log(cfg: AppConfig, r: HotelResult, start_date: str, en
             "url": r.url,
         })
         del _AVAILABILITY_LOGS[:-100]
+        _AVAILABILITY_LOG_REVISION += 1
 
 
 def _close_availability_log(key: str, now: float) -> None:
+    global _AVAILABILITY_LOG_REVISION
     with _ALERT_STATE_LOCK:
         for entry in reversed(_AVAILABILITY_LOGS):
             if entry.get("key") == key and entry.get("disappeared_ts") is None:
                 entry["disappeared_ts"] = now
                 entry["disappeared_at"] = datetime.fromtimestamp(now).strftime("%Y-%m-%d %H:%M:%S")
                 entry["duration_sec"] = int(now - float(entry.get("appeared_ts") or now))
+                _AVAILABILITY_LOG_REVISION += 1
                 return
 
 
