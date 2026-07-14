@@ -20,7 +20,7 @@ a = Analysis(
     hiddenimports=[],
     hookspath=[],
     runtime_hooks=[],
-    excludes=["pytest", "ruff"],
+    excludes=["pytest", "ruff", "PyQt5", "PyQt6", "PySide2", "PySide6"],
     noarchive=False,
 )
 pyz = PYZ(a.pure)

@@ -116,7 +116,9 @@ python build_desktop.py
 
 The output is `dist/ToyokoTracker/`, or `dist/ToyokoTracker.app` on macOS.
 PyInstaller builds must run separately on Windows, Linux, and macOS. The Linux
-bundle includes Qt WebEngine and requires an X11 or Wayland graphical session.
+bundle uses GTK/WebKitGTK to keep its size down and requires an X11 or Wayland
+graphical session. Non-Debian/Ubuntu systems may need GTK 3 and WebKitGTK 4.1
+installed through the system package manager.
 
 The `Desktop bundles` GitHub Actions workflow builds all three platforms for
 version tags (`v*`) and also supports manual runs.

@@ -114,8 +114,9 @@ python build_desktop.py
 
 输出位于 `dist/ToyokoTracker/`；macOS 输出为
 `dist/ToyokoTracker.app`。PyInstaller 需要分别在 Windows、Linux、macOS
-上构建，不能跨平台生成。Linux 桌面版使用随包附带的 Qt WebEngine，仍需要
-可用的 X11 或 Wayland 图形会话。
+上构建，不能跨平台生成。Linux 桌面版使用 GTK/WebKitGTK 以控制安装包体积，
+仍需要可用的 X11 或 Wayland 图形会话；在非 Debian/Ubuntu 系统上运行时可能
+需要通过系统包管理器安装 GTK 3 与 WebKitGTK 4.1。
 
 GitHub Actions 的 `Desktop bundles` 工作流会在版本标签（`v*`）推送时同时
 生成三平台构建产物，也可以在 Actions 页面手动运行。

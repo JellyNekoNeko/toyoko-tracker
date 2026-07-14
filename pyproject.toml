@@ -54,12 +54,12 @@ mobile = [
   "segno>=1.6,<2"
 ]
 desktop = [
-  "pywebview>=5.4,<7; sys_platform != 'linux'",
-  "pywebview[qt]>=5.4,<7; sys_platform == 'linux'"
+  "pywebview>=5.4,<7",
+  "PyGObject>=3.48,<4; sys_platform == 'linux'"
 ]
 desktop-build = [
-  "pywebview>=5.4,<7; sys_platform != 'linux'",
-  "pywebview[qt]>=5.4,<7; sys_platform == 'linux'",
+  "pywebview>=5.4,<7",
+  "PyGObject>=3.48,<4; sys_platform == 'linux'",
   "pyinstaller>=6.11,<7"
 ]
 all = [
