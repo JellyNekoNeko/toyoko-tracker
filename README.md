@@ -133,6 +133,10 @@ All three builds use the Toyoko Chan application icons under
 `packaging/icons/`. The Linux artifact also includes `ToyokoTracker.desktop`
 and `toyoko-tracker.png` for desktop-menu integration.
 
+Each desktop release contains five native builds: macOS Apple Silicon
+(arm64), macOS Intel (x64), Windows x64, Linux x64, and Linux arm64. The
+desktop updater selects the matching download for the current OS and CPU.
+
 ---
 
 ### 1.5 Usage

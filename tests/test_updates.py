@@ -20,6 +20,20 @@ def test_desktop_asset_name_for_macos_arm():
         assert runtime._desktop_asset_name() == "ToyokoTracker-macos-arm64.zip"
 
 
+def test_desktop_asset_name_for_macos_intel():
+    with patch.object(runtime.sys, "platform", "darwin"), patch.object(
+        runtime.platform, "machine", return_value="x86_64"
+    ):
+        assert runtime._desktop_asset_name() == "ToyokoTracker-macos-x64.zip"
+
+
+def test_desktop_asset_name_for_linux_arm():
+    with patch.object(runtime.sys, "platform", "linux"), patch.object(
+        runtime.os, "name", "posix"
+    ), patch.object(runtime.platform, "machine", return_value="aarch64"):
+        assert runtime._desktop_asset_name() == "ToyokoTracker-linux-arm64.tar.gz"
+
+
 def test_github_release_selects_current_platform_asset():
     release = {
         "tag_name": "desktop-v0.7.0",

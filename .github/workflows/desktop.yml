@@ -15,15 +15,21 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: windows-latest
-            artifact: ToyokoTracker-windows
+          - os: windows-2025
+            artifact: ToyokoTracker-windows-x64
             archive: ToyokoTracker-windows-x64.zip
-          - os: ubuntu-latest
-            artifact: ToyokoTracker-linux
+          - os: ubuntu-24.04
+            artifact: ToyokoTracker-linux-x64
             archive: ToyokoTracker-linux-x64.tar.gz
-          - os: macos-latest
-            artifact: ToyokoTracker-macos
+          - os: ubuntu-24.04-arm
+            artifact: ToyokoTracker-linux-arm64
+            archive: ToyokoTracker-linux-arm64.tar.gz
+          - os: macos-15
+            artifact: ToyokoTracker-macos-arm64
             archive: ToyokoTracker-macos-arm64.zip
+          - os: macos-15-intel
+            artifact: ToyokoTracker-macos-x64
+            archive: ToyokoTracker-macos-x64.zip
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
