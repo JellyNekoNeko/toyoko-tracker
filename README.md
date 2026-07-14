@@ -121,7 +121,11 @@ graphical session. Non-Debian/Ubuntu systems may need GTK 3 and WebKitGTK 4.1
 installed through the system package manager.
 
 The `Desktop bundles` GitHub Actions workflow builds all three platforms for
-version tags (`v*`) and also supports manual runs.
+desktop version tags (`desktop-v*`) and also supports manual runs. Tag builds publish a GitHub
+Release containing all platform archives and `SHA256SUMS.txt`. Frozen desktop
+apps check this release channel and use the independent version in
+`desktop_version.py`, while pip-installed WebUI instances use the version in
+`pyproject.toml` and continue to check and upgrade through PyPI.
 
 All three builds use the Toyoko Chan application icons under
 `packaging/icons/`. The Linux artifact also includes `ToyokoTracker.desktop`

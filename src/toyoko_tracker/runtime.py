@@ -18,6 +18,7 @@ import threading
 import os
 import sys
 import math
+import platform
 import webbrowser
 import socket
 import subprocess
@@ -166,6 +167,7 @@ from .settings import (
     SEARCH_HISTORY_PATH,
     TIMEOUT,
 )
+from .desktop_version import DESKTOP_VERSION
 
 # ---- precise timing helpers (monotonic) ----
 def _now_wall() -> float:
@@ -291,7 +293,55 @@ def _html_attr(value: Any) -> str:
 
 def _version_key(value: str) -> Tuple[int, ...]:
     parts = re.findall(r"\d+", str(value or "0"))
-    return tuple(int(p) for p in parts[:4]) or (0,)
+    values = [int(p) for p in parts[:4]]
+    return tuple((values + [0, 0, 0, 0])[:4])
+
+
+def _is_desktop_distribution() -> bool:
+    return bool(getattr(sys, "frozen", False))
+
+
+def _desktop_asset_name() -> str:
+    machine = platform.machine().lower()
+    architecture = "arm64" if machine in {"arm64", "aarch64"} else "x64"
+    if sys.platform == "darwin":
+        return f"ToyokoTracker-macos-{architecture}.zip"
+    if os.name == "nt":
+        return f"ToyokoTracker-windows-{architecture}.zip"
+    return f"ToyokoTracker-linux-{architecture}.tar.gz"
+
+
+def _github_release_details(data: Any) -> Dict[str, Any]:
+    if not isinstance(data, dict):
+        raise ValueError("GitHub release response is invalid")
+    tag = str(data.get("tag_name") or data.get("name") or "").strip()
+    if not tag:
+        raise ValueError("GitHub release did not include a version")
+    expected_asset = _desktop_asset_name()
+    download_url = ""
+    for asset in data.get("assets") or []:
+        if isinstance(asset, dict) and str(asset.get("name") or "") == expected_asset:
+            download_url = str(asset.get("browser_download_url") or "")
+            break
+    normalized_tag = tag[len("desktop-v"):] if tag.lower().startswith("desktop-v") else tag.lstrip("vV")
+    return {
+        "version": normalized_tag,
+        "release_url": str(data.get("html_url") or "https://github.com/JellyNekoNeko/toyoko-tracker/releases/latest"),
+        "download_url": download_url,
+        "asset_name": expected_asset,
+        "release_notes": str(data.get("body") or "")[:4000],
+    }
+
+
+def _latest_desktop_release(data: Any) -> Dict[str, Any]:
+    if not isinstance(data, list):
+        raise ValueError("GitHub releases response is invalid")
+    for release in data:
+        if not isinstance(release, dict) or release.get("draft") or release.get("prerelease"):
+            continue
+        if str(release.get("tag_name") or "").lower().startswith("desktop-v"):
+            return release
+    raise ValueError("no desktop release is available yet")
 
 
 def _set_update_status(**kwargs: Any) -> None:
@@ -332,6 +382,59 @@ def _check_pypi_latest_async() -> None:
     threading.Thread(target=worker, name="pypi-update-check", daemon=True).start()
 
 
+def _check_github_latest_async() -> None:
+    with _UPDATE_LOCK:
+        if _UPDATE_STATUS.get("state") in {"checking", "upgrading"}:
+            return
+        _UPDATE_STATUS.update({
+            "state": "checking",
+            "source": "github",
+            "install_method": "download",
+            "message": "checking GitHub Releases",
+            "checked_at": _now_wall(),
+        })
+
+    def worker() -> None:
+        try:
+            response = requests.get(
+                "https://api.github.com/repos/JellyNekoNeko/toyoko-tracker/releases?per_page=20",
+                headers={"Accept": "application/vnd.github+json", "User-Agent": "ToyokoTracker-Updater"},
+                timeout=8,
+            )
+            response.raise_for_status()
+            release = _github_release_details(_latest_desktop_release(response.json()))
+            latest = release["version"]
+            update_available = _version_key(latest) > _version_key(DESKTOP_VERSION)
+            _set_update_status(
+                state="update_available" if update_available else "up_to_date",
+                source="github",
+                install_method="download",
+                current_version=DESKTOP_VERSION,
+                latest_version=latest,
+                message="desktop update available" if update_available else "already latest",
+                checked_at=_now_wall(),
+                **release,
+            )
+        except Exception as exc:
+            _set_update_status(
+                state="failed",
+                source="github",
+                install_method="download",
+                current_version=DESKTOP_VERSION,
+                message=str(exc),
+                checked_at=_now_wall(),
+            )
+
+    threading.Thread(target=worker, name="github-update-check", daemon=True).start()
+
+
+def _check_latest_async() -> None:
+    if _is_desktop_distribution():
+        _check_github_latest_async()
+    else:
+        _check_pypi_latest_async()
+
+
 def _upgrade_from_pypi_async() -> None:
     with _UPDATE_LOCK:
         if _UPDATE_STATUS.get("state") == "upgrading":
@@ -351,6 +454,21 @@ def _upgrade_from_pypi_async() -> None:
             _set_update_status(state="failed", message=str(e))
 
     threading.Thread(target=worker, name="pypi-upgrade", daemon=True).start()
+
+
+def _open_desktop_update() -> None:
+    with _UPDATE_LOCK:
+        download_url = str(_UPDATE_STATUS.get("download_url") or "")
+        release_url = str(_UPDATE_STATUS.get("release_url") or "")
+    target = download_url or release_url or "https://github.com/JellyNekoNeko/toyoko-tracker/releases/latest"
+    opened = webbrowser.open(target)
+    _set_update_status(
+        state="update_available",
+        source="github",
+        install_method="download",
+        message="download opened in the system browser" if opened else "open the release page to download the update",
+        open_url=target,
+    )
 
 
 set_renderer_hooks(_log, _set_action)
@@ -4588,7 +4706,7 @@ def update_status() -> Response:
 
 
 def update_check() -> Response:
-        _check_pypi_latest_async()
+        _check_latest_async()
         with _UPDATE_LOCK:
             data = dict(_UPDATE_STATUS)
         return jsonify({"ok": True, "update": data}), 202
@@ -4616,7 +4734,10 @@ def provider_catalog_refresh() -> Response:
 
 
 def upgrade() -> Response:
-        _upgrade_from_pypi_async()
+        if _is_desktop_distribution():
+            _open_desktop_update()
+        else:
+            _upgrade_from_pypi_async()
         with _UPDATE_LOCK:
             data = dict(_UPDATE_STATUS)
         return jsonify({"ok": True, "update": data})

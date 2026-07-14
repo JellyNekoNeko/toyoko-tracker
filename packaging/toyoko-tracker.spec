@@ -10,6 +10,10 @@ project_root = os.path.dirname(os.path.abspath(SPECPATH))
 src_root = os.path.join(project_root, "src")
 entrypoint = os.path.join(project_root, "packaging", "desktop_entry.py")
 icons_root = os.path.join(project_root, "packaging", "icons")
+desktop_version_scope = {}
+with open(os.path.join(src_root, "toyoko_tracker", "desktop_version.py"), encoding="utf-8") as stream:
+    exec(stream.read(), desktop_version_scope)
+desktop_version = desktop_version_scope["DESKTOP_VERSION"]
 
 if sys.platform == "darwin":
     app_icon = os.path.join(icons_root, "toyoko-tracker.icns")
@@ -64,6 +68,8 @@ if sys.platform == "darwin":
         icon=os.path.join(icons_root, "toyoko-tracker.icns"),
         info_plist={
             "CFBundleDisplayName": "东横酱 Toyoko Chan",
+            "CFBundleShortVersionString": desktop_version,
+            "CFBundleVersion": desktop_version,
             "NSHighResolutionCapable": True,
         },
     )

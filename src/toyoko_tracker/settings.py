@@ -6,10 +6,14 @@ from datetime import datetime, timedelta
 from importlib.metadata import PackageNotFoundError, version
 from typing import List
 
+from .desktop_version import DESKTOP_VERSION
+
 try:
-    __version__ = version("toyoko-tracker")
+    PYPI_VERSION = version("toyoko-tracker")
 except PackageNotFoundError:
-    __version__ = "0.0.0+local"
+    PYPI_VERSION = "0.0.0+local"
+
+__version__ = DESKTOP_VERSION if getattr(sys, "frozen", False) else PYPI_VERSION
 
 APP_NAME = "东横酱 Toyoko Chan"
 APP_AUTHOR = "bilibili @果冻猫猫丶"

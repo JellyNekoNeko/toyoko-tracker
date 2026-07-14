@@ -3797,6 +3797,7 @@
               const state = data.state || 'idle';
               const current = versionLabel(data.current_version || document.body.dataset.appVersion);
               const latest = versionLabel(data.latest_version);
+              const desktopUpdate = data.install_method === 'download';
               setNodeText('#update-current-version', current);
               setNodeText('#update-latest-version', latest);
 
@@ -3815,7 +3816,7 @@
               let canUpgrade = false;
               if (state === 'checking') {
                 titleText = tx('checkingUpdate');
-                messageText = tx('checkingUpdateMessage');
+                messageText = desktopUpdate ? '正在检查 GitHub Releases / Checking GitHub Releases' : tx('checkingUpdateMessage');
                 upgradeText = tx('updateButton');
               } else if (state === 'up_to_date') {
                 titleText = tx('upToDate');
@@ -3823,8 +3824,10 @@
                 upgradeText = tx('upToDate');
               } else if (state === 'update_available') {
                 titleText = tx('updateAvailableTitle');
-                messageText = tx('updateAvailableDetail');
-                upgradeText = tx('updateButton');
+                messageText = desktopUpdate
+                  ? '将在系统浏览器中打开对应平台的安装包 / The platform download will open in your system browser.'
+                  : tx('updateAvailableDetail');
+                upgradeText = desktopUpdate ? '下载新版 / Download' : tx('updateButton');
                 canUpgrade = true;
               } else if (state === 'upgrading') {
                 titleText = tx('upgradingTitle');

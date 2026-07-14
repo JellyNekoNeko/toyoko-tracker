@@ -1292,7 +1292,7 @@ class AppRouteSecurityTests(unittest.TestCase):
     def test_update_check_runs_in_background(self):
         from toyoko_tracker import runtime
 
-        with patch.object(runtime, "_check_pypi_latest_async") as check:
+        with patch.object(runtime, "_check_latest_async") as check:
             response = self.client.post("/update_check")
 
         self.assertEqual(response.status_code, 202)

@@ -118,8 +118,11 @@ python build_desktop.py
 仍需要可用的 X11 或 Wayland 图形会话；在非 Debian/Ubuntu 系统上运行时可能
 需要通过系统包管理器安装 GTK 3 与 WebKitGTK 4.1。
 
-GitHub Actions 的 `Desktop bundles` 工作流会在版本标签（`v*`）推送时同时
-生成三平台构建产物，也可以在 Actions 页面手动运行。
+GitHub Actions 的 `Desktop bundles` 工作流会在桌面版本标签（`desktop-v*`）推送时同时
+生成三平台构建产物，也可以在 Actions 页面手动运行。版本标签构建完成后会
+创建 GitHub Release，上传三平台压缩包和 `SHA256SUMS.txt`；桌面版通过该
+Release 检查和下载新版本。桌面版本号在 `desktop_version.py` 中独立维护；
+pip/WebUI 版本继续使用 `pyproject.toml` 的版本号，并通过 PyPI 检查和更新。
 
 三平台构建均使用 `packaging/icons/` 中的东横酱应用图标。Linux 产物同时
 包含 `ToyokoTracker.desktop` 和 `toyoko-tracker.png`，安装桌面快捷方式时
