@@ -9,6 +9,14 @@ from PyInstaller.utils.hooks import collect_data_files
 project_root = os.path.dirname(os.path.abspath(SPECPATH))
 src_root = os.path.join(project_root, "src")
 entrypoint = os.path.join(project_root, "packaging", "desktop_entry.py")
+icons_root = os.path.join(project_root, "packaging", "icons")
+
+if sys.platform == "darwin":
+    app_icon = os.path.join(icons_root, "toyoko-tracker.icns")
+elif sys.platform == "win32":
+    app_icon = os.path.join(icons_root, "toyoko-tracker.ico")
+else:
+    app_icon = None
 
 datas = collect_data_files("toyoko_tracker")
 
@@ -36,6 +44,7 @@ exe = EXE(
     strip=False,
     upx=True,
     console=False,
+    icon=app_icon,
 )
 
 bundle = COLLECT(
@@ -52,6 +61,7 @@ if sys.platform == "darwin":
         bundle,
         name="ToyokoTracker.app",
         bundle_identifier="com.jellyneko.toyoko-tracker",
+        icon=os.path.join(icons_root, "toyoko-tracker.icns"),
         info_plist={
             "CFBundleDisplayName": "东横酱 Toyoko Chan",
             "NSHighResolutionCapable": True,

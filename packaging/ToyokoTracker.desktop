@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=东横酱 Toyoko Chan
+Comment=Toyoko Inn vacancy tracker
+Exec=ToyokoTracker
+Icon=toyoko-tracker
+Terminal=false
+Categories=Network;Utility;
+StartupWMClass=ToyokoTracker

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import shutil
 from pathlib import Path
 
 
@@ -23,6 +24,10 @@ def main() -> None:
         cwd=ROOT,
         check=True,
     )
+    if sys.platform.startswith("linux"):
+        output = ROOT / "dist" / "ToyokoTracker"
+        shutil.copy2(ROOT / "packaging" / "icons" / "toyoko-tracker.png", output)
+        shutil.copy2(ROOT / "packaging" / "ToyokoTracker.desktop", output)
 
 
 if __name__ == "__main__":

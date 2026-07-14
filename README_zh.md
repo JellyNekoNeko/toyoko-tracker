@@ -121,6 +121,10 @@ python build_desktop.py
 GitHub Actions 的 `Desktop bundles` 工作流会在版本标签（`v*`）推送时同时
 生成三平台构建产物，也可以在 Actions 页面手动运行。
 
+三平台构建均使用 `packaging/icons/` 中的东横酱应用图标。Linux 产物同时
+包含 `ToyokoTracker.desktop` 和 `toyoko-tracker.png`，安装桌面快捷方式时
+应将图标复制到系统图标目录。
+
 ---
 
 ### 1.5 使用方法

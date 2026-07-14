@@ -123,6 +123,10 @@ installed through the system package manager.
 The `Desktop bundles` GitHub Actions workflow builds all three platforms for
 version tags (`v*`) and also supports manual runs.
 
+All three builds use the Toyoko Chan application icons under
+`packaging/icons/`. The Linux artifact also includes `ToyokoTracker.desktop`
+and `toyoko-tracker.png` for desktop-menu integration.
+
 ---
 
 ### 1.5 Usage
