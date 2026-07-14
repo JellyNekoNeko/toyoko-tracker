@@ -98,6 +98,29 @@ pip install --upgrade "toyoko-tracker[playwright]"
 python -m playwright install chromium
 ```
 
+### 1.5 Desktop app (pywebview)
+
+The desktop shell opens the same Flask WebUI in an embedded native window:
+
+```bash
+pip install -e ".[desktop]"
+toyoko-tracker-desktop
+```
+
+Build a PyInstaller bundle for the current operating system:
+
+```bash
+pip install -e ".[desktop-build]"
+python build_desktop.py
+```
+
+The output is `dist/ToyokoTracker/`, or `dist/ToyokoTracker.app` on macOS.
+PyInstaller builds must run separately on Windows, Linux, and macOS. The Linux
+bundle includes Qt WebEngine and requires an X11 or Wayland graphical session.
+
+The `Desktop bundles` GitHub Actions workflow builds all three platforms for
+version tags (`v*`) and also supports manual runs.
+
 ---
 
 ### 1.5 Usage

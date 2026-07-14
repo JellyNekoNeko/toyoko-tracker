@@ -9,7 +9,7 @@ import subprocess
 import sys
 import threading
 from datetime import datetime
-from typing import Any
+from typing import Any, Optional
 
 from flask import Flask
 
@@ -52,6 +52,45 @@ def _serve(app: Flask, host: str, port: int, lan_enabled: bool) -> None:
             serve(app, host=host, port=port, threads=6, clear_untrusted_proxy_headers=True)
             return
     app.run(host=host, port=port, debug=False)
+
+
+def initialize_runtime(lan_enabled: Optional[bool] = None) -> bool:
+    """Load persistent state and start background services for any frontend."""
+    if lan_enabled is not None:
+        manager.configure(enabled=lan_enabled)
+    try:
+        if runtime._load_config_with_legacy(AUTO_SAVE_PATH, LEGACY_AUTO_SAVE_PATH):
+            runtime._save_config_to_file(AUTO_SAVE_PATH)
+    except Exception as exc:
+        runtime._log(f"[boot] auto-load skipped: {exc}")
+    try:
+        runtime._prune_scan_cache()
+        runtime._restore_runtime_checkpoint()
+    except Exception as exc:
+        runtime._log(f"[boot] checkpoint restore skipped: {exc}")
+    runtime._check_pypi_latest_async()
+    runtime._start_catalog_scheduler()
+    runtime._start_provider_database_scheduler()
+    return manager.snapshot().enabled
+
+
+def stop_runtime_services() -> None:
+    runtime._stop_catalog_scheduler()
+    runtime._stop_provider_database_scheduler()
+
+
+def write_instance_state(browser_url: str, port: int, lan_enabled: bool) -> None:
+    runtime._atomic_write_json(
+        INSTANCE_STATE_PATH,
+        {
+            "app": "toyoko-tracker",
+            "version": __version__,
+            "pid": os.getpid(),
+            "url": browser_url,
+            "lan_enabled": lan_enabled,
+            "started_at": datetime.now().isoformat(timespec="seconds"),
+        },
+    )
 
 
 def _restart_arguments(argv: Any = None) -> list[str]:
@@ -109,47 +148,20 @@ def run(app: Flask, argv: Any = None) -> None:
     except Exception:
         pass
 
-    if args.lan:
-        manager.configure(enabled=True)
-    elif args.local_only:
-        manager.configure(enabled=False)
-
-    try:
-        if runtime._load_config_with_legacy(AUTO_SAVE_PATH, LEGACY_AUTO_SAVE_PATH):
-            runtime._save_config_to_file(AUTO_SAVE_PATH)
-    except Exception as exc:
-        runtime._log(f"[boot] auto-load skipped: {exc}")
-    try:
-        runtime._prune_scan_cache()
-        runtime._restore_runtime_checkpoint()
-    except Exception as exc:
-        runtime._log(f"[boot] checkpoint restore skipped: {exc}")
-    runtime._check_pypi_latest_async()
-    runtime._start_catalog_scheduler()
-    runtime._start_provider_database_scheduler()
-
-    lan_enabled = manager.snapshot().enabled
+    access_override = True if args.lan else False if args.local_only else None
+    lan_enabled = initialize_runtime(access_override)
     host = "0.0.0.0" if lan_enabled else "127.0.0.1"
     port = runtime._find_free_port(max(1, min(65535, int(args.port))), host=host)
     browser_url = f"http://127.0.0.1:{port}"
     app.config["TOYOKO_LAN_BOUND"] = lan_enabled
     app.config["TOYOKO_SERVER_PORT"] = port
 
-    state = {
-        "app": "toyoko-tracker",
-        "version": __version__,
-        "pid": os.getpid(),
-        "url": browser_url,
-        "lan_enabled": lan_enabled,
-        "started_at": datetime.now().isoformat(timespec="seconds"),
-    }
-    runtime._atomic_write_json(INSTANCE_STATE_PATH, state)
+    write_instance_state(browser_url, port, lan_enabled)
     if lan_enabled:
         runtime._log(f"[mobile] LAN access enabled on port {port}; pairing is required.")
 
     atexit.register(_cleanup_instance_state)
-    atexit.register(runtime._stop_catalog_scheduler)
-    atexit.register(runtime._stop_provider_database_scheduler)
+    atexit.register(stop_runtime_services)
 
     if not args.no_browser:
         try:

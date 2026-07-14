@@ -96,9 +96,10 @@ def main() -> None:
         if not _process_exists(parent_pid) and _port_is_free(port):
             break
         time.sleep(0.15)
+    module = "toyoko_tracker.desktop" if os.environ.get("TOYOKO_TRACKER_FRONTEND") == "desktop" else "toyoko_tracker"
     os.execv(
         sys.executable,
-        [sys.executable, "-m", "toyoko_tracker", *arguments],
+        [sys.executable, "-m", module, *arguments],
     )
 
 

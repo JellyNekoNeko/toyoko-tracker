@@ -53,6 +53,15 @@ mobile = [
   "waitress>=3.0,<4",
   "segno>=1.6,<2"
 ]
+desktop = [
+  "pywebview>=5.4,<7; sys_platform != 'linux'",
+  "pywebview[qt]>=5.4,<7; sys_platform == 'linux'"
+]
+desktop-build = [
+  "pywebview>=5.4,<7; sys_platform != 'linux'",
+  "pywebview[qt]>=5.4,<7; sys_platform == 'linux'",
+  "pyinstaller>=6.11,<7"
+]
 all = [
   "playwright>=1.45",
   "waitress>=3.0,<4",
@@ -69,6 +78,7 @@ dev = [
 
 [project.scripts]
 toyoko-tracker = "toyoko_tracker.app:main"
+toyoko-tracker-desktop = "toyoko_tracker.desktop:main"
 toyoko-tracker-stress = "toyoko_tracker.simulation:main"
 
 [project.urls]

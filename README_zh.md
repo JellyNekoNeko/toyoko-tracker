@@ -96,6 +96,30 @@ pip install --upgrade "toyoko-tracker[playwright]"
 python -m playwright install chromium
 ```
 
+### 1.5 桌面应用（pywebview）
+
+桌面版会在应用内打开同一套 Flask WebUI，不再额外启动系统浏览器：
+
+```bash
+pip install -e ".[desktop]"
+toyoko-tracker-desktop
+```
+
+从源码为当前系统构建 PyInstaller 应用包：
+
+```bash
+pip install -e ".[desktop-build]"
+python build_desktop.py
+```
+
+输出位于 `dist/ToyokoTracker/`；macOS 输出为
+`dist/ToyokoTracker.app`。PyInstaller 需要分别在 Windows、Linux、macOS
+上构建，不能跨平台生成。Linux 桌面版使用随包附带的 Qt WebEngine，仍需要
+可用的 X11 或 Wayland 图形会话。
+
+GitHub Actions 的 `Desktop bundles` 工作流会在版本标签（`v*`）推送时同时
+生成三平台构建产物，也可以在 Actions 页面手动运行。
+
 ---
 
 ### 1.5 使用方法
