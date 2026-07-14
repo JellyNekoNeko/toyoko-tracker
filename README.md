@@ -2,7 +2,9 @@
 
 *A cute cross-platform room availability tracker for [Toyoko Inn](https://www.toyoko-inn.com/), available as a Python WebUI and native desktop bundles for macOS, Windows, and Linux.*
 
-🌏 [📖 中文说明书](./README_zh.md)
+- 🌏 [📖 中文说明书](https://github.com/JellyNekoNeko/toyoko-tracker/blob/main/README_zh.md)
+- 🌏 [📖 日本語ガイド](https://github.com/JellyNekoNeko/toyoko-tracker/blob/main/README_ja.md)
+- 🌏 [📖 한국어 안내서](https://github.com/JellyNekoNeko/toyoko-tracker/blob/main/README_ko.md)
 
 ---
 
@@ -58,7 +60,7 @@ notifications remain optional platform integrations.
 
 Open a terminal:
 
-- **Windows**: Press `Win + R`, type `cmd`, then press Enter.  
+- **Windows**: Press `Win + R`, type `cmd`, then press Enter.
   You can also use PowerShell.
 - **macOS**: Open Launchpad → Terminal.
 - **Linux**: Press `Ctrl + Alt + T`.
@@ -351,13 +353,13 @@ python -m playwright install chromium
 
 You can configure:
 
-- **Round Interval**  
+- **Round Interval**
   Time between scan rounds. Minimum: 30 seconds.
 
-- **Per-hotel Base Delay**  
+- **Per-hotel Base Delay**
   Delay between checking hotels in one scan line.
 
-- **Request Jitter**  
+- **Request Jitter**
   Adds random timing variation to avoid perfectly fixed request intervals.
 
 Recommended stable settings:
@@ -678,31 +680,31 @@ The WebUI contains:
 
 ### 11.2 Control Buttons
 
-- **Start**  
+- **Start**
   Start monitoring with current settings. Current settings are automatically saved.
 
-- **Stop**  
+- **Stop**
   Stop monitoring.
 
-- **Default**  
+- **Default**
   Reset basic search settings to default values.
 
-- **Load Hotels**  
+- **Load Hotels**
   Load hotels from selected region/detail area.
 
-- **Select All**  
+- **Select All**
   Select all loaded hotels.
 
-- **Select None**  
+- **Select None**
   Clear selected hotels.
 
-- **Refresh History**  
+- **Refresh History**
   Reload search history.
 
-- **Clear History**  
+- **Clear History**
   Delete saved search history.
 
-- **Test Notification**  
+- **Test Notification**
   Send a local notification test.
 
 ---

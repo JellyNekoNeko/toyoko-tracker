@@ -2,7 +2,9 @@
 
 *一个可爱的跨平台 [东横INN](https://www.toyoko-inn.com/) 酒店空房监控工具，同时提供 Python WebUI 以及 macOS、Windows、Linux 桌面应用。*
 
-🌏 [📖 English Guide](./README.md)
+- 🌏 [📖 English Guide](https://github.com/JellyNekoNeko/toyoko-tracker/blob/main/README.md)
+- 🌏 [📖 日本語ガイド](https://github.com/JellyNekoNeko/toyoko-tracker/blob/main/README_ja.md)
+- 🌏 [📖 한국어 안내서](https://github.com/JellyNekoNeko/toyoko-tracker/blob/main/README_ko.md)
 
 ---
 
@@ -347,13 +349,13 @@ python -m playwright install chromium
 
 可以配置：
 
-- **Round Interval / 轮询间隔**  
+- **Round Interval / 轮询间隔**
   每一轮扫描之间的等待时间。最小 30 秒。
 
-- **Per-hotel Base Delay / 单酒店基础延迟**  
+- **Per-hotel Base Delay / 单酒店基础延迟**
   同一扫描线中，每个酒店之间的等待时间。
 
-- **Request Jitter / 请求随机抖动**  
+- **Request Jitter / 请求随机抖动**
   在固定延迟基础上加入随机变化，避免请求节奏过于机械。
 
 推荐稳定设置：
@@ -673,31 +675,31 @@ WebUI 包含：
 
 ### 11.2 操作按钮
 
-- **Start / 开始**  
+- **Start / 开始**
   使用当前设置开始监控，并自动保存当前设置。
 
-- **Stop / 停止**  
+- **Stop / 停止**
   停止监控。
 
-- **Default / 默认**  
+- **Default / 默认**
   重置基础搜索设置。
 
-- **Load Hotels / 加载酒店**  
+- **Load Hotels / 加载酒店**
   根据选择的地区和详细区域加载酒店。
 
-- **Select All / 全选**  
+- **Select All / 全选**
   选择当前加载的全部酒店。
 
-- **Select None / 全不选**  
+- **Select None / 全不选**
   清空当前选择。
 
-- **Refresh History / 刷新历史**  
+- **Refresh History / 刷新历史**
   重新读取搜索历史。
 
-- **Clear History / 清空历史**  
+- **Clear History / 清空历史**
   删除保存的搜索历史。
 
-- **Test Notification / 测试通知**  
+- **Test Notification / 测试通知**
   发送一条本地通知测试。
 
 ---
