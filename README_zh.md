@@ -130,9 +130,9 @@ Release 检查和下载新版本。桌面版本号在 `desktop_version.py` 中�
 包含 `ToyokoTracker.desktop` 和 `toyoko-tracker.png`，安装桌面快捷方式时
 应将图标复制到系统图标目录。
 
-每个桌面 Release 提供五个原生构建：macOS Apple Silicon（arm64）、macOS
-Intel（x64）、Windows x64、Linux x64 和 Linux arm64。应用会根据当前系统
-及处理器架构选择对应的下载文件。
+每个桌面 Release 提供六个原生构建：macOS Apple Silicon（arm64）、macOS
+Intel（x64）、Windows x64、Windows arm64、Linux x64 和 Linux arm64。
+应用会根据当前系统及处理器架构选择对应的下载文件。
 
 ---
 

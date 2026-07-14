@@ -18,6 +18,9 @@ jobs:
           - os: windows-2025
             artifact: ToyokoTracker-windows-x64
             archive: ToyokoTracker-windows-x64.zip
+          - os: windows-11-arm
+            artifact: ToyokoTracker-windows-arm64
+            archive: ToyokoTracker-windows-arm64.zip
           - os: ubuntu-24.04
             artifact: ToyokoTracker-linux-x64
             archive: ToyokoTracker-linux-x64.tar.gz

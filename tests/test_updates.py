@@ -34,6 +34,13 @@ def test_desktop_asset_name_for_linux_arm():
         assert runtime._desktop_asset_name() == "ToyokoTracker-linux-arm64.tar.gz"
 
 
+def test_desktop_asset_name_for_windows_arm():
+    with patch.object(runtime.sys, "platform", "win32"), patch.object(
+        runtime.os, "name", "nt"
+    ), patch.object(runtime.platform, "machine", return_value="ARM64"):
+        assert runtime._desktop_asset_name() == "ToyokoTracker-windows-arm64.zip"
+
+
 def test_github_release_selects_current_platform_asset():
     release = {
         "tag_name": "desktop-v0.7.0",
