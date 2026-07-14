@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import queue
 import shutil
@@ -18,6 +17,7 @@ from urllib.parse import quote, urlparse
 
 import requests
 
+from .event_center import begin_delivery, finish_delivery, publish_event
 from .i18n import normalize_primary_language as _normalize_primary_language
 from .models import AppConfig, HotelResult
 from .settings import (
@@ -81,6 +81,28 @@ def availability_log_snapshot() -> List[Dict[str, Any]]:
         entry["duration_sec"] = int((float(end_ts) if end_ts else now) - start_ts) if start_ts else None
         out.append(entry)
     return out
+
+
+def notification_checkpoint_snapshot() -> Dict[str, Any]:
+    with _ALERT_STATE_LOCK:
+        return {
+            "alert_state": deepcopy(_ALERT_STATE),
+            "availability_logs": deepcopy(_AVAILABILITY_LOGS[-100:]),
+        }
+
+
+def restore_notification_checkpoint(payload: Dict[str, Any]) -> None:
+    global _AVAILABILITY_LOG_REVISION
+    alert_state = payload.get("alert_state") if isinstance(payload, dict) else {}
+    availability_logs = payload.get("availability_logs") if isinstance(payload, dict) else []
+    with _ALERT_STATE_LOCK:
+        _ALERT_STATE.clear()
+        if isinstance(alert_state, dict):
+            _ALERT_STATE.update(deepcopy(alert_state))
+        _AVAILABILITY_LOGS.clear()
+        if isinstance(availability_logs, list):
+            _AVAILABILITY_LOGS.extend(deepcopy(availability_logs[-100:]))
+        _AVAILABILITY_LOG_REVISION += 1
 
 
 def _alert_state_snapshot(key: str) -> Dict[str, Any]:
@@ -434,12 +456,71 @@ def notify_serverchan(cfg: AppConfig, title: str, body: str) -> None:
         _log(f"[serverchan] exception: {e}")
 
 
-def notify_push_channels(cfg: AppConfig, title: str, body: str, url: Optional[str] = None) -> None:
-    notify_telegram(cfg, body)
-    notify_email(cfg, title, body)
-    notify_local(cfg, title, body)
-    notify_bark(cfg, title, body, url)
-    notify_serverchan(cfg, title, body)
+def notify_push_channels(
+    cfg: AppConfig,
+    title: str,
+    body: str,
+    url: Optional[str] = None,
+    *,
+    event_id: str = "",
+) -> None:
+    channels = (
+        ("telegram", bool(getattr(cfg, "enable_telegram", False)), lambda: notify_telegram(cfg, body)),
+        ("email", bool(getattr(cfg, "enable_email", False)), lambda: notify_email(cfg, title, body, event_id=event_id)),
+        ("local", bool(getattr(cfg, "enable_local", False)), lambda: notify_local(cfg, title, body)),
+        ("bark", bool(getattr(cfg, "enable_bark", False)), lambda: notify_bark(cfg, title, body, url)),
+        ("serverchan", bool(getattr(cfg, "enable_serverchan", False)), lambda: notify_serverchan(cfg, title, body)),
+    )
+    for channel, enabled, sender in channels:
+        if not enabled:
+            continue
+        if event_id and not begin_delivery(event_id, channel):
+            _log(f"[{channel}] duplicate event skipped: {event_id[:8]}")
+            continue
+        try:
+            sender()
+            with _PUSH_STATUS_LOCK:
+                delivery_state = str((_PUSH_STATUS.get(channel) or {}).get("state") or "queued")
+                detail = str((_PUSH_STATUS.get(channel) or {}).get("message") or "")
+            if event_id:
+                finish_delivery(
+                    event_id,
+                    channel,
+                    "failed" if delivery_state == "failed" else (
+                        "success" if delivery_state == "success" else "queued"
+                    ),
+                    detail,
+                )
+        except Exception as exc:
+            if event_id:
+                finish_delivery(event_id, channel, "failed", str(exc))
+            raise
+
+
+def _publish_and_notify(
+    cfg: AppConfig,
+    event_type: str,
+    dedupe_key: str,
+    title: str,
+    body: str,
+    url: Optional[str] = None,
+    *,
+    enabled: bool = True,
+    dedupe_window_seconds: int = 30,
+    payload: Optional[Dict[str, Any]] = None,
+) -> str:
+    event_payload = {"title": title, "body": body, "url": url or ""}
+    if payload:
+        event_payload.update(payload)
+    event = publish_event(
+        event_type,
+        dedupe_key,
+        event_payload,
+        dedupe_window_seconds=dedupe_window_seconds,
+    )
+    if enabled:
+        notify_push_channels(cfg, title, body, url, event_id=event.event_id)
+    return event.event_id
 
 
 def notify_local(cfg: AppConfig, title: str, body: str) -> None:
@@ -508,6 +589,14 @@ def notify_local(cfg: AppConfig, title: str, body: str) -> None:
         elif os.name == "nt":
             # Non-blocking Windows balloon tip via PowerShell + NotifyIcon (no user confirmation required)
             try:
+                powershell = (
+                    shutil.which("powershell.exe")
+                    or shutil.which("powershell")
+                    or shutil.which("pwsh.exe")
+                    or shutil.which("pwsh")
+                )
+                if not powershell:
+                    raise FileNotFoundError("PowerShell was not found")
                 # Prepare a short PowerShell script that shows a system tray balloon tip and exits
                 ps_script = (
                     "Add-Type -AssemblyName System.Windows.Forms; "
@@ -515,28 +604,44 @@ def notify_local(cfg: AppConfig, title: str, body: str) -> None:
                     "$ni = New-Object System.Windows.Forms.NotifyIcon; "
                     "$ni.Icon = [System.Drawing.SystemIcons]::Information; "
                     "$ni.Visible = $true; "
-                    f"$ni.BalloonTipTitle = {json.dumps(title)}; "
-                    f"$ni.BalloonTipText = {json.dumps(body)}; "
+                    "$ni.BalloonTipTitle = $env:TOYOKO_NOTIFICATION_TITLE; "
+                    "$ni.BalloonTipText = $env:TOYOKO_NOTIFICATION_BODY; "
                     "$ni.ShowBalloonTip(4000); "  # show for ~4s
                     "Start-Sleep -Milliseconds 1200; "  # give it a moment to appear, but do not block our process
                     "$ni.Dispose();"
                 )
+                notification_env = os.environ.copy()
+                notification_env["TOYOKO_NOTIFICATION_TITLE"] = title
+                notification_env["TOYOKO_NOTIFICATION_BODY"] = body
                 subprocess.Popen(
-                    ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script],
+                    [powershell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script],
                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
+                    env=notification_env,
                 )
                 _set_push_status("local", "success", "NotifyIcon invoked")
                 _log("[local] powershell NotifyIcon balloon shown (non-blocking)")
             except Exception as _e_win_balloon:
+                _set_push_status("local", "failed", str(_e_win_balloon))
                 _log(f"[local] NotifyIcon balloon failed: {_e_win_balloon}")
         else:
             try:
-                subprocess.Popen(["notify-send", title, body],
-                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                _set_push_status("local", "success", "notify-send invoked")
-                _log("[local] notify-send invoked")
+                notify_send = shutil.which("notify-send")
+                if not notify_send:
+                    raise FileNotFoundError("notify-send was not found; install libnotify")
+                proc = subprocess.run(
+                    [notify_send, title, body],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    timeout=5,
+                )
+                if proc.returncode != 0:
+                    detail = (proc.stderr or proc.stdout or "non-zero exit").strip()
+                    raise RuntimeError(detail)
+                _set_push_status("local", "success", "notify-send sent OK")
+                _log("[local] notify-send sent OK")
             except Exception as _e4:
                 _set_push_status("local", "failed", str(_e4))
                 _log(f"[local] notify-send failed: {_e4}")
@@ -548,7 +653,12 @@ def notify_local(cfg: AppConfig, title: str, body: str) -> None:
 def _email_enabled(cfg: AppConfig) -> bool:
     return bool(cfg.enable_email and cfg.smtp_host and cfg.email_from and cfg.email_to)
 
-def _send_email_now(cfg_snapshot: Dict[str, Any], subject: str, body: str) -> None:
+def _send_email_now(
+    cfg_snapshot: Dict[str, Any],
+    subject: str,
+    body: str,
+    event_id: str = "",
+) -> None:
     """
     低层“立即发送”函数：使用配置快照（dict）防止并发修改。
     逻辑与旧版同步发送一致。
@@ -596,8 +706,12 @@ def _send_email_now(cfg_snapshot: Dict[str, Any], subject: str, body: str) -> No
 
         _log("[mail] sent OK (worker)")
         _set_push_status("email", "success", "sent OK")
+        if event_id:
+            finish_delivery(event_id, "email", "success", "sent OK")
     except Exception as e:
         _set_push_status("email", "failed", str(e))
+        if event_id:
+            finish_delivery(event_id, "email", "failed", str(e))
         _log(f"[mail] exception (worker): {e}")
 
 
@@ -615,7 +729,9 @@ def _ensure_mail_worker_started() -> None:
             except Exception:
                 continue
             try:
-                _send_email_now(item["cfg"], item["subject"], item["body"])
+                _send_email_now(
+                    item["cfg"], item["subject"], item["body"], str(item.get("event_id") or "")
+                )
             finally:
                 try:
                     _MAIL_QUEUE.task_done()
@@ -626,7 +742,7 @@ def _ensure_mail_worker_started() -> None:
     _MAIL_THREAD = threading.Thread(target=_mail_worker, name="mail-worker", daemon=True)
     _MAIL_THREAD.start()
 
-def notify_email(cfg: AppConfig, subject: str, body: str) -> None:
+def notify_email(cfg: AppConfig, subject: str, body: str, event_id: str = "") -> None:
     """
     """
     if not _email_enabled(cfg):
@@ -634,7 +750,10 @@ def notify_email(cfg: AppConfig, subject: str, body: str) -> None:
     try:
         _ensure_mail_worker_started()
         cfg_snapshot = deepcopy(asdict(cfg))
-        _MAIL_QUEUE.put_nowait({"cfg": cfg_snapshot, "subject": subject, "body": body})
+        _MAIL_QUEUE.put_nowait({
+            "cfg": cfg_snapshot, "subject": subject, "body": body,
+            "event_id": event_id,
+        })
         _set_action("[mail] queued")
         _set_push_status("email", "pushing", "queued")
         _log("[mail] queued")
@@ -718,9 +837,7 @@ def _display_hotel_codes(cfg: AppConfig) -> str:
 
 def send_start_notifications(cfg: AppConfig) -> None:
     try:
-        if not getattr(cfg, "notify_start", True):
-            _log("[start] start notification skipped by settings")
-            return
+        notify_enabled = bool(getattr(cfg, "notify_start", True))
         codes = _display_hotel_codes(cfg)
         area = _format_area_for_push(cfg)
         parallel = (
@@ -741,17 +858,20 @@ def send_start_notifications(cfg: AppConfig) -> None:
             f"{_push_label(cfg, 'hotels')} ({len(cfg.hotel_codes)}): {codes}",
         ]
         msg = "\n".join(summary_lines)
-        notify_push_channels(cfg, _push_title(cfg, "🟢", "tracking_started"), msg)
-        _log("[start] start notifications sent (enabled channels)")
+        title = _push_title(cfg, "🟢", "tracking_started")
+        _publish_and_notify(
+            cfg, "search.started", f"start|{cfg.start_date}|{cfg.end_date}|{codes}",
+            title, msg, enabled=notify_enabled, dedupe_window_seconds=2,
+            payload={"hotel_count": len(cfg.hotel_codes)},
+        )
+        _log("[start] event recorded" + (" and sent to enabled channels" if notify_enabled else ""))
     except Exception as e:
         _log(f"[start] start notifications error: {e}")
 
 
 def send_stop_notifications(cfg: AppConfig) -> None:
     try:
-        if not getattr(cfg, "notify_stop", True):
-            _log("[stop] stop notification skipped by settings")
-            return
+        notify_enabled = bool(getattr(cfg, "notify_stop", True))
         title = _push_title(cfg, "⏹️", "tracking_stopped")
         lines = [
             title,
@@ -760,8 +880,13 @@ def send_stop_notifications(cfg: AppConfig) -> None:
             f"{_push_label(cfg, 'area')}: {_format_area_for_push(cfg)}",
             f"{_push_label(cfg, 'hotels')} ({len(cfg.hotel_codes)}): {_display_hotel_codes(cfg)}",
         ]
-        notify_push_channels(cfg, title, "\n".join(lines))
-        _log("[stop] stop notifications sent (enabled channels)")
+        _publish_and_notify(
+            cfg, "search.stopped",
+            f"stop|{cfg.start_date}|{cfg.end_date}|{_display_hotel_codes(cfg)}",
+            title, "\n".join(lines), enabled=notify_enabled, dedupe_window_seconds=2,
+            payload={"hotel_count": len(cfg.hotel_codes)},
+        )
+        _log("[stop] event recorded" + (" and sent to enabled channels" if notify_enabled else ""))
     except Exception as e:
         _log(f"[stop] stop notifications error: {e}")
 
@@ -1046,6 +1171,10 @@ def _build_result_push_message(
 def process_notifications(cfg: AppConfig, results: List[HotelResult], start_date: str, end_date: str) -> List[str]:
     newly_available: List[str] = []
     for r in results:
+        # A TTL cache hit keeps the UI responsive, but only live or conditionally
+        # revalidated data is allowed to advance alert state.
+        if getattr(r, "from_cache", False) and not getattr(r, "cache_validated", False):
+            continue
         if getattr(r, "requirement_unmet", False):
             continue
         key = f"{r.code}|{start_date}|{end_date}"
@@ -1059,10 +1188,6 @@ def process_notifications(cfg: AppConfig, results: List[HotelResult], start_date
         if is_available and not was_available:
             newly_available.append(r.code)
             _upsert_availability_log(cfg, r, start_date, end_date, key, now, current_count)
-            if not getattr(cfg, "notify_available", True):
-                st = {"available": True, "sent": 0, "last": now, "count": current_count}
-                _set_alert_state(key, st)
-                continue
             title = _push_title(cfg, "✅", "room_available")
             msg = _build_result_push_message(
                 cfg,
@@ -1072,16 +1197,20 @@ def process_notifications(cfg: AppConfig, results: List[HotelResult], start_date
                 title,
                 "",
             )
-            notify_push_channels(cfg, title, msg, r.url)
-            st = {"available": True, "sent": 1, "last": now, "count": current_count}
+            notify_enabled = bool(getattr(cfg, "notify_available", True))
+            _publish_and_notify(
+                cfg, "availability.available", f"{key}|available", title, msg, r.url,
+                enabled=notify_enabled,
+                payload={"code": r.code, "count": current_count, "provider": r.provider},
+            )
+            st = {
+                "available": True, "sent": 1 if notify_enabled else 0,
+                "last": now, "count": current_count,
+            }
 
         elif is_available and was_available:
             _upsert_availability_log(cfg, r, start_date, end_date, key, now, current_count)
-            if (
-                current_count != previous_count
-                and previous_count > 0
-                and getattr(cfg, "notify_availability_count_change", True)
-            ):
+            if current_count != previous_count and previous_count > 0:
                 delta = current_count - previous_count
                 title = _push_title(cfg, "🔢", "room_count_changed")
                 msg = _build_result_push_message(
@@ -1097,7 +1226,16 @@ def process_notifications(cfg: AppConfig, results: List[HotelResult], start_date
                         f"{_push_label(cfg, 'change')}: {'+' if delta > 0 else ''}{delta}",
                     ],
                 )
-                notify_push_channels(cfg, title, msg, r.url)
+                _publish_and_notify(
+                    cfg, "availability.count_changed",
+                    f"{key}|count|{previous_count}|{current_count}",
+                    title, msg, r.url,
+                    enabled=bool(getattr(cfg, "notify_availability_count_change", True)),
+                    payload={
+                        "code": r.code, "previous_count": previous_count,
+                        "current_count": current_count, "provider": r.provider,
+                    },
+                )
             if not getattr(cfg, "notify_available", True):
                 st["available"] = True
                 st["count"] = current_count
@@ -1126,16 +1264,16 @@ def process_notifications(cfg: AppConfig, results: List[HotelResult], start_date
                     "",
                     [f"{_push_label(cfg, 'reminder_count')}: {next_reminder}/{limit_text}", f"{_push_label(cfg, 'cooldown')}: {interval}s"],
                 )
-                notify_push_channels(cfg, title, msg, r.url)
+                _publish_and_notify(
+                    cfg, "availability.reminder",
+                    f"{key}|reminder|{next_reminder}", title, msg, r.url,
+                    payload={"code": r.code, "reminder": next_reminder, "provider": r.provider},
+                )
                 st["sent"] = sent + 1
                 st["last"] = now
 
-        elif (not is_available) and was_available:
+        elif r.available is False and was_available:
             _close_availability_log(key, now)
-            if not getattr(cfg, "notify_unavailable", True):
-                st = {"available": False, "sent": 0, "last": now, "count": 0}
-                _set_alert_state(key, st)
-                continue
             title = _push_title(cfg, "❌", "no_longer_available")
             msg = _build_result_push_message(
                 cfg,
@@ -1145,10 +1283,15 @@ def process_notifications(cfg: AppConfig, results: List[HotelResult], start_date
                 title,
                 "",
             )
-            notify_push_channels(cfg, title, msg, r.url)
+            _publish_and_notify(
+                cfg, "availability.unavailable", f"{key}|unavailable",
+                title, msg, r.url,
+                enabled=bool(getattr(cfg, "notify_unavailable", True)),
+                payload={"code": r.code, "provider": r.provider},
+            )
             st = {"available": False, "sent": 0, "last": now, "count": 0}
 
-        elif r.available is None and getattr(cfg, "notify_search_error", False):
+        elif r.available is None:
             title = _push_title(cfg, "❓", "search_check_required")
             msg = _build_result_push_message(
                 cfg,
@@ -1159,9 +1302,20 @@ def process_notifications(cfg: AppConfig, results: List[HotelResult], start_date
                 "",
                 [f"{_push_label(cfg, 'status')}: ❓ {_push_label(cfg, 'check')}"],
             )
-            notify_push_channels(cfg, title, msg, r.url)
+            _publish_and_notify(
+                cfg, "search.hotel_error",
+                f"{key}|error|{r.http_status or ''}|{r.error_summary or ''}",
+                title, msg, r.url,
+                enabled=bool(getattr(cfg, "notify_search_error", False)),
+                dedupe_window_seconds=300,
+                payload={
+                    "code": r.code, "provider": r.provider,
+                    "http_status": r.http_status, "error": r.error_summary,
+                },
+            )
 
-        st["available"] = is_available
-        st["count"] = current_count
-        _set_alert_state(key, st)
+        if r.available is not None:
+            st["available"] = is_available
+            st["count"] = current_count
+            _set_alert_state(key, st)
     return newly_available

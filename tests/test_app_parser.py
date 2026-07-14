@@ -637,6 +637,44 @@ class AppParserTests(unittest.TestCase):
             "room_title": "Single Room",
         }])
 
+    def test_check_hotel_http_reuses_cache_after_not_modified(self):
+        from dataclasses import asdict
+        from types import SimpleNamespace
+        from toyoko_tracker import runtime
+
+        cfg = tracker_app.AppConfig()
+        cfg.engine = "http"
+        cached_result = tracker_app.HotelResult(
+            code="00001",
+            url="https://example.test",
+            name="Cached Hotel",
+            available=False,
+            engine_used="http",
+        )
+        entry = SimpleNamespace(
+            result=asdict(cached_result),
+            age_sec=45,
+            etag='"version-1"',
+            last_modified="Mon, 13 Jul 2026 10:00:00 GMT",
+        )
+
+        class NotModifiedResponse:
+            status_code = 304
+            headers = {}
+
+        with patch.object(runtime, "_scan_cache_get", return_value=entry), \
+             patch.object(runtime, "_http_get", return_value=NotModifiedResponse()) as mock_get, \
+             patch.object(runtime, "_scan_cache_mark_conditional_hit") as mark_hit:
+            result = runtime.check_hotel_http(cfg, "00001", "2026-07-17", "2026-07-18")
+
+        headers = mock_get.call_args.kwargs["headers"]
+        self.assertEqual(headers["If-None-Match"], '"version-1"')
+        self.assertEqual(headers["If-Modified-Since"], "Mon, 13 Jul 2026 10:00:00 GMT")
+        self.assertFalse(result.from_cache)
+        self.assertTrue(result.cache_validated)
+        self.assertEqual(result.name, "Cached Hotel")
+        mark_hit.assert_called_once()
+
     def test_bark_key_validation_rejects_device_token_length(self):
         from toyoko_tracker.notifications import validate_bark_key
 
@@ -658,7 +696,25 @@ class AppParserTests(unittest.TestCase):
         self.assertEqual(cfg.bark_critical_volume, 5)
         self.assertEqual(cfg.bark_critical_sound, "alarm")
         self.assertTrue(cfg.adaptive_backoff_enabled)
-        self.assertEqual(cfg.enabled_providers, ["toyoko", "routeinn", "dormy", "mystays", "daiwa"])
+        self.assertEqual(cfg.available_alert_repeat, 0)
+        self.assertEqual(cfg.enabled_providers, ["toyoko"])
+
+    def test_saved_provider_and_repeat_choices_survive_restart_load(self):
+        from toyoko_tracker import runtime
+
+        saved = {
+            "enabled_providers": ["routeinn", "dormy"],
+            "available_alert_repeat": 4,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "auto_save.json"
+            path.write_text(json.dumps(saved), encoding="utf-8")
+            restored = tracker_app.AppConfig()
+            with patch.object(runtime, "_CONFIG", restored):
+                self.assertTrue(runtime._load_config_from_file(str(path)))
+
+        self.assertEqual(restored.enabled_providers, ["routeinn", "dormy"])
+        self.assertEqual(restored.available_alert_repeat, 4)
 
     def test_adaptive_backoff_escalates_and_recovers(self):
         unknown = tracker_app.HotelResult(code="00001", url="#", name=None, available=None)
@@ -810,6 +866,44 @@ class AppParserTests(unittest.TestCase):
         self.assertEqual(recovered["state"], "healthy")
         self.assertEqual(recovered["consecutive_failures"], 0)
 
+    def test_provider_health_honors_retry_after_and_adapts_delay(self):
+        from toyoko_tracker import runtime
+
+        runtime._reset_provider_health(["toyoko"], base_delay=2)
+        limited = tracker_app.HotelResult(
+            code="00001", url="#", name=None, available=None, elapsed_ms=300,
+            error_summary="HTTP 429", http_status=429, retry_after_sec=12,
+            provider="toyoko",
+        )
+
+        with patch.object(runtime, "_now_mono", return_value=100.0):
+            runtime._record_provider_result("toyoko", limited)
+            state = runtime.provider_health_snapshot()["toyoko"]
+
+        self.assertEqual(state["state"], "cooldown")
+        self.assertEqual(state["cooldown_remaining_sec"], 12)
+        self.assertEqual(state["rate_limited_count"], 1)
+        self.assertEqual(state["adaptive_delay_sec"], 4.0)
+
+    def test_hotel_priority_prefers_manual_then_recent_availability(self):
+        from toyoko_tracker import runtime
+
+        cfg = tracker_app.AppConfig()
+        cfg.selected_hotels = [
+            {"code": "00001", "provider": "toyoko"},
+            {"code": "00002", "provider": "toyoko", "priority": True},
+            {"code": "00003", "provider": "toyoko"},
+        ]
+        with runtime._HOTEL_RUNTIME_LOCK:
+            runtime._HOTEL_RUNTIME_STATE.clear()
+        runtime._record_hotel_runtime_result(tracker_app.HotelResult(
+            code="00003", url="#", name="Available", available=True,
+        ))
+
+        ordered = runtime._prioritized_codes(cfg, ["00001", "00002", "00003"])
+
+        self.assertEqual(ordered, ["00002", "00003", "00001"])
+
     def test_available_notification_switch_still_returns_watch_code(self):
         from toyoko_tracker import notifications
 
@@ -822,6 +916,28 @@ class AppParserTests(unittest.TestCase):
             newly_available = notifications.process_notifications(cfg, [result], "2026-05-16", "2026-05-17")
 
         self.assertEqual(newly_available, ["00001"])
+        mock_notify.assert_not_called()
+
+    def test_unvalidated_cached_result_does_not_advance_notifications(self):
+        from toyoko_tracker import notifications
+
+        cfg = tracker_app.AppConfig()
+        notifications.clear_alert_state()
+        cached = tracker_app.HotelResult(
+            code="00001",
+            url="https://example.test",
+            name="Test",
+            available=True,
+            from_cache=True,
+            cache_age_sec=12,
+        )
+
+        with patch.object(notifications, "notify_push_channels") as mock_notify:
+            newly_available = notifications.process_notifications(
+                cfg, [cached], "2026-05-16", "2026-05-17"
+            )
+
+        self.assertEqual(newly_available, [])
         mock_notify.assert_not_called()
 
     def test_bark_critical_alert_sends_room_message_once(self):
@@ -942,6 +1058,29 @@ class AppParserTests(unittest.TestCase):
         self.assertIsNotNone(logs[0]["disappeared_ts"])
         self.assertIsInstance(logs[0]["duration_sec"], int)
 
+    def test_transient_unknown_result_preserves_available_state(self):
+        from toyoko_tracker import notifications
+
+        cfg = tracker_app.AppConfig()
+        cfg.notify_search_error = False
+        notifications.clear_alert_state()
+        available = tracker_app.HotelResult(
+            code="00001", url="https://example.test", name="Test", available=True,
+            min_remaining="1", min_price_text="¥8,000", min_price_room="Single",
+        )
+        unknown = tracker_app.HotelResult(
+            code="00001", url="https://example.test", name="Test", available=None,
+            error_summary="temporary upstream timeout",
+        )
+
+        with patch.object(notifications, "notify_push_channels") as mock_notify:
+            notifications.process_notifications(cfg, [available], "2026-05-16", "2026-05-17")
+            notifications.process_notifications(cfg, [unknown], "2026-05-16", "2026-05-17")
+            notifications.process_notifications(cfg, [available], "2026-05-16", "2026-05-17")
+
+        self.assertEqual(mock_notify.call_count, 1)
+        self.assertIn("发现空房", mock_notify.call_args.args[1])
+
 
 @unittest.skipIf(tracker_app is None, f"runtime dependencies missing: {IMPORT_ERROR}")
 class AppRouteSecurityTests(unittest.TestCase):
@@ -979,10 +1118,28 @@ class AppRouteSecurityTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertIn("progress", payload)
         self.assertIn("provider_health", payload)
+        self.assertIn("diagnostics", payload)
+        self.assertIn("traffic", payload)
+        self.assertIn("download_bytes", payload["traffic"])
+        self.assertIn("upload_bytes", payload["traffic"])
+        self.assertIn("requests", payload["traffic"])
         self.assertIn("results_revision", payload)
         self.assertIn("availability_logs_revision", payload)
         for heavy_key in ("config", "results", "logs", "availability_logs", "hotel_catalog", "provider_catalog"):
             self.assertNotIn(heavy_key, payload)
+
+    def test_traffic_status_exposes_only_aggregate_metrics(self):
+        payload = self.client.get("/api/v1/traffic").get_json()
+
+        self.assertTrue(payload["ok"])
+        traffic = payload["traffic"]
+        self.assertEqual(traffic["scope"], "webui_http_estimate")
+        self.assertIn("requests", traffic)
+        self.assertIn("page_views", traffic)
+        self.assertIn("upload_bps", traffic)
+        self.assertIn("download_bps", traffic)
+        self.assertNotIn("clients", traffic)
+        self.assertNotIn("addresses", traffic)
 
     def test_results_status_uses_revision_to_skip_unchanged_payload(self):
         from toyoko_tracker import runtime
@@ -1061,6 +1218,7 @@ class AppRouteSecurityTests(unittest.TestCase):
         self.assertIn('id="sidebar-collapse-button"', body)
         self.assertIn('class="sidebar-utilities"', body)
         self.assertIn('/static/toyoko-chan-mascot.png', body)
+        self.assertIn('data-app-view="home"', body)
         self.assertIn('data-app-view="search"', body)
         self.assertIn('data-app-view="monitor"', body)
         self.assertIn('id="view-interface"', body)
@@ -1070,6 +1228,11 @@ class AppRouteSecurityTests(unittest.TestCase):
         self.assertIn('id="theme-toggle-button"', body)
         self.assertIn('id="guide-open-button"', body)
         self.assertIn('id="update-open-button"', body)
+        self.assertIn('class="icon-button update-open-button"', body)
+        self.assertIn('M12 3v11m0 0 4-4m-4 4-4-4M5 18.5h14', body)
+        self.assertIn('id="interface-settings-button"', body)
+        self.assertIn('id="interface-settings-button" data-app-view="interface"', body)
+        self.assertNotIn('class="sidebar-nav-item" data-app-view="interface"', body)
         self.assertIn('id="update-modal"', body)
         self.assertIn('id="update-current-version"', body)
         self.assertIn('id="update-latest-version"', body)
@@ -1083,6 +1246,25 @@ class AppRouteSecurityTests(unittest.TestCase):
         self.assertEqual(body.count('data-guide-jump='), 5)
         self.assertIn('data-app-version="v0.6.0"', body)
         self.assertIn('data-theme-choice="system"', body)
+
+    def test_home_dashboard_is_default_and_has_overview_modules(self):
+        body = self.client.get("/").get_data(as_text=True)
+
+        self.assertIn('class="app-view active" id="view-home"', body)
+        self.assertIn('id="home-primary-action"', body)
+        self.assertIn('id="home-metric-available"', body)
+        self.assertIn('id="home-traffic-card"', body)
+        self.assertIn('id="home-metric-traffic-down"', body)
+        self.assertIn('id="home-metric-traffic-note"', body)
+        self.assertIn('id="home-task-title"', body)
+        self.assertIn('id="home-activity-list"', body)
+        self.assertIn('id="home-trend-list"', body)
+        self.assertIn('id="home-health-badge"', body)
+        self.assertIn('data-home-quick="radius"', body)
+        self.assertIn('data-app-view="push-settings"><span class="nav-icon">✉</span>', body)
+        self.assertIn('data-home-quick="push"><i>✉</i>', body)
+        self.assertIn('/static/app.js?v=v0.6.0-traffic-1', body)
+        self.assertIn('/static/app.css?v=v0.6.0-traffic-1', body)
 
     def test_home_renders_after_search_results_exist(self):
         from toyoko_tracker import runtime
@@ -1219,6 +1401,47 @@ class AppRouteSecurityTests(unittest.TestCase):
         self.assertEqual(body["message"], "scan_once_started")
         self.assertEqual(created_threads[0].args, (True,))
         self.assertTrue(created_threads[0].started)
+
+    def test_preferences_route_persists_zero_repeat_count(self):
+        from toyoko_tracker import runtime
+
+        cfg = tracker_app.AppConfig()
+        cfg.available_alert_repeat = 1
+        with patch.object(runtime, "_CONFIG", cfg), \
+             patch.object(runtime, "_save_config_to_file", return_value=True) as save_config:
+            response = self.client.post(
+                "/api/v1/preferences",
+                json={"available_alert_repeat": 0},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.get_json()["ok"])
+        self.assertEqual(cfg.available_alert_repeat, 0)
+        save_config.assert_called_once_with(runtime.AUTO_SAVE_PATH)
+
+    def test_preference_controls_are_saved_without_starting_search(self):
+        script = self.client.get("/static/app.js").get_data(as_text=True)
+
+        self.assertIn("AUTO_SAVE_PREFERENCE_IDS", script)
+        self.assertIn("schedulePreferenceSave", script)
+        self.assertIn("/api/v1/preferences", script)
+
+    def test_trend_panel_uses_one_hotel_selector_and_readable_observations(self):
+        body = self.client.get("/").get_data(as_text=True)
+        script = self.client.get("/static/app.js").get_data(as_text=True)
+
+        self.assertIn('id="trend_hotel"', body)
+        self.assertIn('id="trend-overview"', body)
+        self.assertIn('id="trend-observations"', body)
+        self.assertIn("trendAvailabilityAxis", script)
+        self.assertIn("trend-observation-row", script)
+
+    def test_hotel_picker_is_always_visible_without_nested_details_box(self):
+        body = self.client.get("/").get_data(as_text=True)
+
+        self.assertIn('<section id="area_picker_panel"', body)
+        self.assertNotIn('<details class="box" id="area_picker_panel"', body)
+        self.assertNotIn('<summary>区域酒店搜索 Area Hotel Picker</summary>', body)
 
 
 if __name__ == "__main__":

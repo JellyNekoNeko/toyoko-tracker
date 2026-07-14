@@ -67,6 +67,25 @@ class MobileAccessManagerTests(unittest.TestCase):
         self.assertEqual(restart_helper._preferred_port(["--port=4190"]), 4190)
         self.assertEqual(restart_helper._preferred_port(["--no-browser"]), 4170)
 
+    def test_restart_process_probe_does_not_use_os_kill_on_windows(self):
+        with (
+            patch.object(restart_helper.os, "name", "nt"),
+            patch.object(restart_helper, "_windows_process_exists", return_value=True) as probe,
+            patch.object(restart_helper.os, "kill") as kill,
+        ):
+            self.assertTrue(restart_helper._process_exists(1234))
+
+        probe.assert_called_once_with(1234)
+        kill.assert_not_called()
+
+    def test_restart_process_probe_rejects_invalid_pid(self):
+        self.assertFalse(restart_helper._process_exists(0))
+        self.assertFalse(restart_helper._process_exists(-1))
+
+    @unittest.skipUnless(os.name == "nt", "Windows API probe")
+    def test_windows_process_probe_finds_current_process(self):
+        self.assertTrue(restart_helper._windows_process_exists(os.getpid()))
+
 
 class MobileAccessRouteTests(unittest.TestCase):
     def setUp(self):

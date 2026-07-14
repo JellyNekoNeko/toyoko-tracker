@@ -78,6 +78,14 @@ class HotelResult:
     elapsed_ms: Optional[int] = None
     engine_used: Optional[str] = None
     error_summary: Optional[str] = None
+    http_status: Optional[int] = None
+    retry_after_sec: Optional[int] = None
+    from_cache: bool = False
+    cache_age_sec: Optional[int] = None
+    cache_validated: bool = False
+    cache_fallback: bool = False
+    etag: Optional[str] = None
+    last_modified: Optional[str] = None
     provider: str = "toyoko"
     display_code: Optional[str] = None
 

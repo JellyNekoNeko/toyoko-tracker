@@ -29,6 +29,7 @@ It supports:
 - 💬 Server Chan push for WeChat
 - 📧 SMTP email alerts
 - 🚀 Smart parallel scanning for large hotel lists
+- ⇅ Real-time WebUI traffic totals, request counts, and 10-second transfer rates
 
 ---
 
@@ -37,8 +38,12 @@ It supports:
 #### Requirements
 
 - Python **3.9+**
-- Recommended: Python **3.10 / 3.11 / 3.12**
+- Recommended: Python **3.10–3.14**
 - Internet connection
+
+The core HTTP/API WebUI is tested in CI on **Windows** and **Linux**. The
+default engine does not require a desktop session. Playwright and native local
+notifications remain optional platform integrations.
 
 #### Optional
 
@@ -125,10 +130,10 @@ Then use one of these workflows:
 
 1. Open **Interface Settings → Mobile Access**, enable LAN access, and restart Toyoko Chan.
 2. Or start it directly with `toyoko-tracker --lan`.
-3. On the Mac, open **Interface Settings** again and scan the QR code with the phone, or open the displayed LAN address.
+3. On the host computer, open **Interface Settings** again and scan the QR code with the phone, or open the displayed LAN address.
 4. Enter the pairing code if it was not filled automatically.
 
-Remote LAN requests are blocked until pairing succeeds. Pairing failures are rate-limited, the session uses an HttpOnly cookie, rotating the code invalidates existing phone sessions, and access settings can only be changed from the host Mac. Use this only on a trusted home or personal network. Do not expose the port directly to the public internet.
+Remote LAN requests are blocked until pairing succeeds. Pairing failures are rate-limited, the session uses an HttpOnly cookie, rotating the code invalidates existing phone sessions, and access settings can only be changed from the host computer. Use this only on a trusted home or personal network. Do not expose the port directly to the public internet. Windows may show a firewall prompt the first time LAN mode binds to the network.
 
 To return to local-only mode, disable the setting and restart, or run:
 
@@ -561,6 +566,7 @@ Push Settings → Local → Test Notification
 ### Windows
 
 Toyoko Tracker uses PowerShell NotifyIcon balloon notifications.
+PowerShell and an interactive Windows desktop session are required.
 
 ### Linux
 
@@ -569,6 +575,20 @@ Toyoko Tracker tries to use:
 ```bash
 notify-send
 ```
+
+Install the command when needed:
+
+```bash
+# Debian / Ubuntu
+sudo apt install libnotify-bin
+
+# Fedora
+sudo dnf install libnotify
+```
+
+`notify-send` also needs an active graphical desktop and notification/DBus
+session. Server-only Linux installations can use Bark, Telegram, Server Chan,
+or email instead.
 
 ---
 

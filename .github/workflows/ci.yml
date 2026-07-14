@@ -6,11 +6,29 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.12", "3.14"]
+        include:
+          - os: ubuntu-latest
+            python-version: "3.9"
+            install-target: ".[dev]"
+          - os: ubuntu-latest
+            python-version: "3.12"
+            install-target: ".[dev,all]"
+          - os: ubuntu-latest
+            python-version: "3.14"
+            install-target: ".[dev]"
+          - os: windows-latest
+            python-version: "3.9"
+            install-target: ".[dev]"
+          - os: windows-latest
+            python-version: "3.12"
+            install-target: ".[dev,all]"
+          - os: windows-latest
+            python-version: "3.14"
+            install-target: ".[dev]"
 
     steps:
       - uses: actions/checkout@v4
@@ -19,8 +37,8 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - run: python -m pip install --upgrade pip
-      - run: python -m pip install -e ".[dev]"
+      - run: python -m pip install -e "${{ matrix.install-target }}"
       - run: ruff check src tests
       - run: python -m pytest
-      - if: matrix.python-version == '3.12'
+      - if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
         run: python -m build --wheel --no-isolation

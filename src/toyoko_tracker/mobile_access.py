@@ -20,7 +20,7 @@ from urllib.parse import urlsplit
 
 from flask import Flask, Response, jsonify, redirect, request, session
 
-from .settings import MOBILE_ACCESS_PATH
+from .settings import APP_VERSION, MOBILE_ACCESS_PATH
 
 
 _PAIRING_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -300,7 +300,7 @@ def protect_request() -> Optional[Response]:
 def require_local_request() -> Optional[Response]:
     if is_loopback_address(request.remote_addr):
         return None
-    return jsonify({"ok": False, "error": "This setting can only be changed on the host Mac"}), 403
+    return jsonify({"ok": False, "error": "This setting can only be changed on the host computer"}), 403
 
 
 def _request_port() -> int:
@@ -496,7 +496,7 @@ main{{width:min(100%,410px);overflow:hidden;border:1px solid #d7e0eb;border-radi
 .body{{padding:20px 22px 22px}}.intro{{margin:0 0 14px;color:#475467;font-size:14px}}label{{display:block;margin:0 0 7px;font-weight:750}}input{{width:100%;height:50px;padding:0 14px;border:1px solid #bfcddd;border-radius:9px;outline:none;font-size:21px;font-weight:750;letter-spacing:2px;text-transform:uppercase}}input:focus{{border-color:#2872d1;box-shadow:0 0 0 3px rgba(40,114,209,.14)}}button{{width:100%;height:48px;margin-top:11px;border:0;border-radius:9px;background:#155ec2;color:#fff;font-size:16px;font-weight:780;box-shadow:0 4px 12px rgba(21,94,194,.2)}}.error{{margin-top:12px;padding:9px 11px;border-radius:7px;background:#fff1f0;color:#b42318;font-weight:650}}.help{{display:grid;gap:8px;margin-top:17px;padding-top:15px;border-top:1px solid #e6ebf1;color:#667085;font-size:12px;line-height:1.5}}.help div{{display:grid;grid-template-columns:22px 1fr;gap:7px}}.help b{{display:grid;place-items:center;width:21px;height:21px;border-radius:50%;background:#edf4fd;color:#15559c;font-size:11px}}
 </style></head><body><main><div class="head"><div class="brand"><img src="/static/toyoko-chan-mascot.png" alt=""><div><h1>连接东横酱</h1><p>Connect to Toyoko Chan</p></div></div><div class="channel">{connection_label}</div></div><div class="body">
 <p class="intro">输入 Mac 上显示的配对码以继续。<br>Enter the pairing code shown on your Mac.</p><form method="post" id="pair-form"><label for="code">配对码 / Pairing code</label><input id="code" name="code" autocomplete="one-time-code" autocapitalize="characters" required maxlength="11"><button type="submit">安全连接 / Connect securely</button></form>
-{f'<div class="error">{safe_error}</div>' if safe_error else ''}<div class="help"><div><b>1</b><span>配对码位于 Mac 的“界面设定 → 手机访问”。<br>Find the code under Interface Settings → Mobile Access.</span></div><div><b>2</b><span>配对成功后，当前设备会保留登录状态。更换配对码可撤销旧设备访问。</span></div><div><b>3</b><span>请仅在自己的设备或可信任的网络中配对。</span></div></div></div>
+{f'<div class="error">{safe_error}</div>' if safe_error else ''}<div class="help"><div><b>1</b><span>配对码位于主机电脑的“界面设定 → 手机访问”。<br>Find the code under Interface Settings → Mobile Access on the host computer.</span></div><div><b>2</b><span>配对成功后，当前设备会保留登录状态。更换配对码可撤销旧设备访问。</span></div><div><b>3</b><span>请仅在自己的设备或可信任的网络中配对。</span></div></div></div>
 <script>const value=new URLSearchParams(location.hash.slice(1)).get('code');if(value){{document.getElementById('code').value=value;location.hash='';document.getElementById('pair-form').requestSubmit();}}</script>
 </main></body></html>"""
     return Response(html, mimetype="text/html")
@@ -522,19 +522,33 @@ def manifest_response() -> Response:
             "src": "/static/toyoko-chan-mascot.png?v=3",
             "sizes": "256x256",
             "type": "image/png",
-            "purpose": "any",
+            "purpose": "any maskable",
         }],
+        "shortcuts": [
+            {"name": "Vacancy Search", "short_name": "Search", "url": "/?view=search"},
+            {"name": "Vacancy Monitor", "short_name": "Monitor", "url": "/?view=monitor"},
+        ],
     }
     return Response(json.dumps(manifest, ensure_ascii=False), mimetype="application/manifest+json")
 
 
 def service_worker_response() -> Response:
-    script = """const CACHE='toyoko-chan-shell-v1';
-const SHELL=['/static/app.css','/static/app.js','/static/toyoko-chan-mascot.png','/manifest.webmanifest'];
+    script = """const CACHE='toyoko-chan-shell-v3';
+const DATA='toyoko-chan-data-v3';
+const SHELL=['/static/app.css?v=__ASSET_REVISION__','/static/app.js?v=__ASSET_REVISION__','/static/toyoko-chan-mascot.png?v=3','/manifest.webmanifest'];
+const DATA_PATHS=['/status','/api/v1/runtime','/api/v1/results','/api/v1/availability-logs','/api/v1/trends','/api/v1/providers'];
 self.addEventListener('install',event=>{event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(SHELL)).catch(()=>{}));self.skipWaiting();});
-self.addEventListener('activate',event=>{event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key!==CACHE).map(key=>caches.delete(key)))));self.clients.claim();});
-self.addEventListener('fetch',event=>{const url=new URL(event.request.url);if(event.request.method!=='GET'||url.origin!==location.origin||!url.pathname.startsWith('/static/'))return;event.respondWith(fetch(event.request).then(response=>{const copy=response.clone();caches.open(CACHE).then(cache=>cache.put(event.request,copy));return response;}).catch(()=>caches.match(event.request)));});
+self.addEventListener('activate',event=>{event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>![CACHE,DATA].includes(key)).map(key=>caches.delete(key)))));self.clients.claim();});
+async function networkFirst(request,cacheName,fallbackKey){try{const response=await fetch(request);if(response&&response.ok){const cache=await caches.open(cacheName);await cache.put(fallbackKey||request,response.clone());}return response;}catch(error){const cached=await caches.match(fallbackKey||request);if(cached)return cached;throw error;}}
+self.addEventListener('fetch',event=>{const url=new URL(event.request.url);if(event.request.method!=='GET'||url.origin!==location.origin)return;
+if(url.pathname.startsWith('/static/')||url.pathname==='/manifest.webmanifest'){event.respondWith(networkFirst(event.request,CACHE));return;}
+if(event.request.mode==='navigate'){event.respondWith(networkFirst(event.request,DATA,'/__app_shell__'));return;}
+if(DATA_PATHS.includes(url.pathname)){event.respondWith(networkFirst(event.request,DATA));}
+});
+self.addEventListener('message',event=>{if(event.data&&event.data.type==='SKIP_WAITING')self.skipWaiting();});
 """
+    script = script.replace("__ASSET_REVISION__", f"{APP_VERSION}-traffic-1")
     response = Response(script, mimetype="application/javascript")
     response.headers["Service-Worker-Allowed"] = "/"
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return response

@@ -29,6 +29,7 @@
 - 💬 Server 酱推送，适合微信通知
 - 📧 SMTP 邮件提醒
 - 🚀 智能并行扫描，适合较大的酒店列表
+- ⇅ 首页实时显示 WebUI 上下行流量、访问次数和 10 秒传输速率
 
 ---
 
@@ -37,8 +38,11 @@
 #### 必需条件
 
 - Python **3.9+**
-- 推荐 Python **3.10 / 3.11 / 3.12**
+- 推荐 Python **3.10–3.14**
 - 网络连接
+
+核心 HTTP/API WebUI 已在 CI 中覆盖 **Windows** 和 **Linux**。默认引擎不依赖
+桌面环境；Playwright 与系统本地通知仍属于按需启用的平台集成功能。
 
 #### 可选条件
 
@@ -124,10 +128,10 @@ pip install --upgrade "toyoko-tracker[mobile]"
 
 1. 打开 **界面设定 → 手机访问**，启用局域网访问，再重启东横酱。
 2. 或直接运行 `toyoko-tracker --lan`。
-3. 在 Mac 的 **界面设定**中扫描二维码，或在手机打开显示的局域网地址。
+3. 在主机电脑的 **界面设定**中扫描二维码，或在手机打开显示的局域网地址。
 4. 如果配对码没有自动填入，手动输入界面中显示的配对码。
 
-局域网设备在配对成功前无法访问任何检索接口。错误配对会触发频率限制；登录会话使用 HttpOnly Cookie；更换配对码会让已经登录的手机会话失效；手机访问开关只能从主机 Mac 修改。请只在可信任的家庭或个人网络使用，不要把端口直接暴露到公网。
+局域网设备在配对成功前无法访问任何检索接口。错误配对会触发频率限制；登录会话使用 HttpOnly Cookie；更换配对码会让已经登录的手机会话失效；手机访问开关只能从主机电脑修改。请只在可信任的家庭或个人网络使用，不要把端口直接暴露到公网。Windows 首次启用局域网模式时可能会显示防火墙授权提示。
 
 若要恢复仅限本机访问，可关闭开关并重启，或运行：
 
@@ -560,6 +564,7 @@ Push Settings → Local → Test Notification
 ### Windows
 
 Toyoko Tracker 会使用 PowerShell NotifyIcon 气泡通知。
+此功能需要 PowerShell 和已登录的 Windows 桌面会话。
 
 ### Linux
 
@@ -568,6 +573,19 @@ Toyoko Tracker 会尝试使用：
 ```bash
 notify-send
 ```
+
+缺少命令时可以安装：
+
+```bash
+# Debian / Ubuntu
+sudo apt install libnotify-bin
+
+# Fedora
+sudo dnf install libnotify
+```
+
+`notify-send` 还需要有效的图形桌面及通知/DBus 会话。纯服务器 Linux 环境
+建议使用 Bark、Telegram、Server 酱或 Email。
 
 ---
 

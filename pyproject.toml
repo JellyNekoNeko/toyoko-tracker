@@ -23,7 +23,12 @@ classifiers = [
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Operating System :: OS Independent",
+  "Operating System :: MacOS",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
   "Environment :: Web Environment",
   "Framework :: Flask",
   "Topic :: Internet :: WWW/HTTP",
@@ -64,6 +69,7 @@ dev = [
 
 [project.scripts]
 toyoko-tracker = "toyoko_tracker.app:main"
+toyoko-tracker-stress = "toyoko_tracker.simulation:main"
 
 [project.urls]
 Homepage = "https://github.com/JellyNekoNeko/toyoko-tracker"

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import html
+import hashlib
 import re
 import time
 import random
@@ -25,7 +26,7 @@ from collections import deque
 from urllib.parse import quote, unquote
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, as_completed, wait
 from copy import deepcopy
-from dataclasses import asdict
+from dataclasses import asdict, fields
 from datetime import datetime
 from typing import List, Optional, Tuple, Dict, Any
 
@@ -49,6 +50,16 @@ from .hotel_catalog import (
     stop_catalog_scheduler as _catalog_stop_scheduler,
 )
 from .models import AppConfig, HotelResult
+from .providers import capability_matrix as _provider_capability_matrix, get_provider as _get_provider_plugin
+from .event_center import event_status_snapshot as _event_status_snapshot, list_events as _list_events
+from .analytics import (
+    analytics_status_snapshot as _analytics_status_snapshot,
+    record_results as _record_analytics_results,
+    scope_key_for_config as _analytics_scope_key,
+    trend_snapshot as _trend_snapshot,
+)
+from .simulation import run_stress_test as _run_simulation_stress_test
+from .traffic_meter import traffic_snapshot as _traffic_snapshot
 from .routeinn import (
     build_booking_url as _build_routeinn_booking_url,
     fetch_coordinate_hotels as _fetch_routeinn_coordinate_hotels,
@@ -75,12 +86,27 @@ from .notifications import (
     availability_log_snapshot,
     clear_alert_state,
     notification_status_snapshot,
+    notification_checkpoint_snapshot,
     notify_local,
     process_notifications,
+    restore_notification_checkpoint,
     send_start_notifications,
     send_stop_notifications,
     set_notification_hooks,
     validate_bark_key,
+)
+from .scan_cache import (
+    clear as _scan_cache_clear,
+    coalesced_call as _scan_cache_coalesced_call,
+    get as _scan_cache_get,
+    load_checkpoint as _load_runtime_checkpoint,
+    mark_conditional_hit as _scan_cache_mark_conditional_hit,
+    mark_fallback_hit as _scan_cache_mark_fallback_hit,
+    mark_live_request as _scan_cache_mark_live_request,
+    prune as _scan_cache_prune_impl,
+    put as _scan_cache_put,
+    save_checkpoint as _save_runtime_checkpoint,
+    status_snapshot as _scan_cache_status_snapshot,
 )
 from .parsing import (
     detect_price_available,
@@ -166,6 +192,9 @@ _PROGRESS = {
     "unknown_ratio_percent": 0,
     "consecutive_unhealthy_rounds": 0,
     "effective_interval_sec": 0,
+    "queue_pending": 0,
+    "in_flight": 0,
+    "priority_pending": 0,
 }
 _UPTIME_STARTED: Optional[float] = None        # wall-clock (for display)
 _UPTIME_STARTED_MONO: Optional[float] = None   # monotonic (for precise deltas)
@@ -186,6 +215,11 @@ _CONFIG = AppConfig()
 _CONFIG_LOCK = threading.Lock()
 _PROVIDER_HEALTH: Dict[str, Dict[str, Any]] = {}
 _PROVIDER_HEALTH_LOCK = threading.Lock()
+_HOTEL_RUNTIME_STATE: Dict[str, Dict[str, Any]] = {}
+_HOTEL_RUNTIME_LOCK = threading.Lock()
+_CHECKPOINT_RESTORED_SCOPE = ""
+
+_HOTEL_RESULT_FIELDS = {field.name for field in fields(HotelResult)}
 
 _SECRET_CONFIG_FIELDS = {"bot_token", "bark_key", "serverchan_sendkey", "smtp_pass"}
 
@@ -360,6 +394,7 @@ def _clean_selected_hotels(value: Any) -> List[Dict[str, str]]:
             "prefecture": str(h.get("prefecture") or ""),
             "region_id": h.get("region_id"),
             "prefecture_id": h.get("prefecture_id"),
+            "priority": bool(h.get("priority", False)),
         })
     return clean
 
@@ -860,10 +895,126 @@ def _hotel_result_from_offers(
     )
 
 
+def _retry_after_seconds(value: Any) -> Optional[int]:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return max(1, min(3600, int(float(text))))
+    except (TypeError, ValueError):
+        return None
+
+
+def _scan_cache_key(cfg: AppConfig, code: str, start: str, end: str) -> str:
+    payload = {
+        "provider": _provider_for_code(cfg, code),
+        "code": str(code),
+        "start": str(start),
+        "end": str(end),
+        "people": int(getattr(cfg, "people", 1) or 1),
+        "rooms": int(getattr(cfg, "rooms", 1) or 1),
+        "smoking": str(getattr(cfg, "smoking", "all") or "all"),
+        "room_requirement": str(
+            getattr(cfg, "room_requirement", None)
+            or getattr(cfg, "om_requirement", "any")
+            or "any"
+        ),
+        "membership": str(getattr(cfg, "membership_status", "member") or "member"),
+        "engine": str(getattr(cfg, "engine", DEFAULT_ENGINE) or DEFAULT_ENGINE),
+        "language": str(getattr(cfg, "primary_language", DEFAULT_PRIMARY_LANGUAGE)),
+    }
+    canonical = json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _scan_scope_key(cfg: AppConfig) -> str:
+    payload = {
+        "codes": sorted(str(code) for code in cfg.hotel_codes),
+        "start": str(cfg.start_date),
+        "end": str(cfg.end_date),
+        "people": int(cfg.people),
+        "rooms": int(cfg.rooms),
+        "smoking": str(cfg.smoking),
+        "room_requirement": str(
+            getattr(cfg, "room_requirement", None)
+            or getattr(cfg, "om_requirement", "any")
+            or "any"
+        ),
+        "membership": str(cfg.membership_status),
+        "engine": str(cfg.engine),
+        "language": str(cfg.primary_language),
+    }
+    canonical = json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _hotel_result_from_dict(data: Dict[str, Any]) -> HotelResult:
+    values = {key: value for key, value in data.items() if key in _HOTEL_RESULT_FIELDS}
+    return HotelResult(**values)
+
+
+def _cached_result(entry: Any, *, validated: bool = False, fallback: bool = False) -> HotelResult:
+    result = _hotel_result_from_dict(entry.result)
+    result.from_cache = not validated
+    result.cache_age_sec = max(0, int(getattr(entry, "age_sec", 0) or 0))
+    result.cache_validated = bool(validated)
+    result.cache_fallback = bool(fallback)
+    result.etag = str(getattr(entry, "etag", "") or result.etag or "") or None
+    result.last_modified = str(
+        getattr(entry, "last_modified", "") or result.last_modified or ""
+    ) or None
+    return result
+
+
+def _scan_cache_ttl(cfg: AppConfig, result: HotelResult) -> int:
+    if result.available is True:
+        return 5
+    if _hotel_is_manual_priority(cfg, result.code) or _hotel_is_adaptive_priority(result.code):
+        return 15
+    if result.available is False:
+        return max(30, min(120, int(getattr(cfg, "loop_interval_seconds", 30) * 1.25)))
+    return 12
+
+
+def _http_error_metadata(exc: Exception) -> Tuple[Optional[int], Optional[int]]:
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    retry_after = None
+    if response is not None:
+        retry_after = _retry_after_seconds(getattr(response, "headers", {}).get("Retry-After"))
+    if status is None:
+        match = re.search(r"\b(429|503)\b", str(exc))
+        status = int(match.group(1)) if match else None
+    return status, retry_after
+
+
 def check_hotel_http(cfg: AppConfig, code: str, start: str, end: str) -> HotelResult:
     url = build_url(cfg, code, start, end)
+    cache_key = _scan_cache_key(cfg, code, start, end)
+    cached_entry = _scan_cache_get(cache_key, allow_expired=True, count_metrics=False)
+    request_headers = dict(HEADERS)
+    if cached_entry and cached_entry.etag:
+        request_headers["If-None-Match"] = cached_entry.etag
+    if cached_entry and cached_entry.last_modified:
+        request_headers["If-Modified-Since"] = cached_entry.last_modified
     try:
-        resp = _http_get(url, headers=HEADERS, timeout=TIMEOUT)
+        resp = _http_get(url, headers=request_headers, timeout=TIMEOUT)
+        status_code = int(getattr(resp, "status_code", 200))
+        if status_code == 304 and cached_entry:
+            _scan_cache_mark_conditional_hit()
+            return _cached_result(cached_entry, validated=True)
+        if status_code >= 400:
+            retry_after = _retry_after_seconds(getattr(resp, "headers", {}).get("Retry-After"))
+            return HotelResult(
+                code=code,
+                url=url,
+                name=None,
+                available=None,
+                engine_used="http",
+                http_status=status_code,
+                retry_after_sec=retry_after,
+                error_summary=f"HTTP {status_code}" + (f"; Retry-After {retry_after}s" if retry_after else ""),
+            )
         resp.raise_for_status()
         next_data = _extract_next_data(resp.text)
         if not next_data:
@@ -881,15 +1032,21 @@ def check_hotel_http(cfg: AppConfig, code: str, start: str, end: str) -> HotelRe
         offers, offer_stats = _extract_http_offers(plan_response)
         result = _hotel_result_from_offers(cfg, code, url, name, offers, offer_stats, None)
         result.engine_used = "http"
+        response_headers = getattr(resp, "headers", {}) or {}
+        result.etag = str(response_headers.get("ETag") or "") or None
+        result.last_modified = str(response_headers.get("Last-Modified") or "") or None
         return result
     except Exception as e:
         _log(f"[http] failed for {code}: {e}")
+        status, retry_after = _http_error_metadata(e)
         return HotelResult(
             code=code,
             url=url,
             name=None,
             available=None,
             engine_used="http",
+            http_status=status,
+            retry_after_sec=retry_after,
             error_summary=" ".join(str(e).split())[:240],
         )
 
@@ -928,6 +1085,7 @@ def check_routeinn_hotel(cfg: AppConfig, code: str, start: str, end: str) -> Hot
         return result
     except Exception as exc:
         _log(f"[routeinn] failed for {code}: {exc}")
+        status, retry_after = _http_error_metadata(exc)
         return HotelResult(
             code=code,
             display_code=str(hotel.get("display_code") or code),
@@ -938,6 +1096,8 @@ def check_routeinn_hotel(cfg: AppConfig, code: str, start: str, end: str) -> Hot
             name_en=str(hotel.get("name_en") or hotel.get("name") or "") or None,
             available=None,
             engine_used="routeinn_api",
+            http_status=status,
+            retry_after_sec=retry_after,
             error_summary=" ".join(str(exc).split())[:240],
         )
 
@@ -977,6 +1137,7 @@ def check_chain_hotel(cfg: AppConfig, code: str, start: str, end: str, provider:
         return result
     except Exception as exc:
         _log(f"[{provider}] failed for {code}: {exc}")
+        status, retry_after = _http_error_metadata(exc)
         return HotelResult(
             code=code,
             display_code=str(hotel.get("display_code") or code),
@@ -987,6 +1148,8 @@ def check_chain_hotel(cfg: AppConfig, code: str, start: str, end: str, provider:
             name_en=str(hotel.get("name_en") or hotel.get("name") or "") or None,
             available=None,
             engine_used=f"{provider}_api",
+            http_status=status,
+            retry_after_sec=retry_after,
             error_summary=" ".join(str(exc).split())[:240],
         )
 
@@ -1017,13 +1180,15 @@ def check_hotel(cfg: AppConfig, renderer: Optional[Any], code: str, start: str, 
     started = _now_mono()
     hotel = _selected_hotel_for_code(cfg, code)
     provider = str(hotel.get("provider") or (str(code).split(":", 1)[0] if ":" in str(code) else "toyoko"))
-    if provider == "routeinn":
+    plugin = _get_provider_plugin(provider)
+    strategy = plugin.scan_strategy if plugin else provider
+    if strategy == "routeinn":
         result = check_routeinn_hotel(cfg, code, start, end)
-    elif provider in {"dormy", "mystays", "daiwa"}:
+    elif strategy in {"dormy", "tripla"}:
         result = check_chain_hotel(cfg, code, start, end, provider)
-    elif getattr(cfg, "engine", "playwright") == "http":
+    elif strategy == "toyoko" and getattr(cfg, "engine", "playwright") == "http":
         result = check_hotel_http(cfg, code, start, end)
-        if result.available is None and _HAS_PLAYWRIGHT:
+        if result.available is None and _HAS_PLAYWRIGHT and result.http_status not in {429, 503}:
             _log(f"[http] fallback to Playwright for {code}")
             fallback = check_hotel_playwright(cfg, renderer, code, start, end)
             if fallback.error_summary and result.error_summary:
@@ -1034,6 +1199,66 @@ def check_hotel(cfg: AppConfig, renderer: Optional[Any], code: str, start: str, 
     result.checked_at = datetime.now().astimezone().isoformat(timespec="seconds")
     result.elapsed_ms = max(0, int(round((_now_mono() - started) * 1000)))
     result.engine_used = result.engine_used or getattr(cfg, "engine", DEFAULT_ENGINE)
+    return result
+
+
+def _check_hotel_cached(
+    cfg: AppConfig,
+    renderer: Optional[Any],
+    code: str,
+    start: str,
+    end: str,
+    *,
+    allow_cache: bool = True,
+    force_refresh: bool = False,
+) -> HotelResult:
+    cache_key = _scan_cache_key(cfg, code, start, end)
+    if allow_cache and not force_refresh:
+        entry = _scan_cache_get(cache_key)
+        if entry is not None:
+            return _cached_result(entry)
+
+    def producer() -> HotelResult:
+        _scan_cache_mark_live_request()
+        result = check_hotel(cfg, renderer, code, start, end)
+        if result.available is None:
+            stale_entry = _scan_cache_get(cache_key, allow_expired=True, count_metrics=False)
+            if stale_entry is not None and stale_entry.result.get("available") is not None:
+                cached = _cached_result(stale_entry, fallback=True)
+                cached.error_summary = result.error_summary or cached.error_summary
+                cached.http_status = result.http_status
+                cached.retry_after_sec = result.retry_after_sec
+                cached.checked_at = result.checked_at
+                cached.elapsed_ms = result.elapsed_ms
+                _scan_cache_mark_fallback_hit()
+                return cached
+        payload = asdict(result)
+        payload.update({
+            "from_cache": False,
+            "cache_age_sec": None,
+            "cache_validated": False,
+            "cache_fallback": False,
+        })
+        _scan_cache_put(
+            cache_key,
+            _provider_for_code(cfg, code),
+            code,
+            payload,
+            _scan_cache_ttl(cfg, result),
+            etag=result.etag or "",
+            last_modified=result.last_modified or "",
+        )
+        return result
+
+    result, coalesced = _scan_cache_coalesced_call(
+        cache_key,
+        producer,
+        timeout=max(10.0, float(TIMEOUT) + 20.0),
+    )
+    if coalesced:
+        result.from_cache = True
+        result.cache_age_sec = 0
+        result.cache_validated = False
     return result
 
 
@@ -1076,20 +1301,30 @@ def _provider_for_code(cfg: AppConfig, code: str) -> str:
     return str(hotel.get("provider") or (str(code).split(":", 1)[0] if ":" in str(code) else "toyoko"))
 
 
-def _reset_provider_health(providers: List[str]) -> None:
+def _new_provider_health_state(base_delay: float = 1.0) -> Dict[str, Any]:
+    return {
+        "checks": 0,
+        "successful_checks": 0,
+        "access_failures": 0,
+        "consecutive_failures": 0,
+        "average_elapsed_ms": 0,
+        "latency_samples_ms": [],
+        "base_delay_sec": max(0.5, float(base_delay)),
+        "adaptive_multiplier": 1.0,
+        "cooldown_until_mono": 0.0,
+        "cooldown_count": 0,
+        "rate_limited_count": 0,
+        "last_http_status": None,
+        "last_error": "",
+        "last_checked_at": None,
+    }
+
+
+def _reset_provider_health(providers: List[str], base_delay: float = 1.0) -> None:
     with _PROVIDER_HEALTH_LOCK:
         _PROVIDER_HEALTH.clear()
         for provider in dict.fromkeys(providers):
-            _PROVIDER_HEALTH[provider] = {
-                "checks": 0,
-                "successful_checks": 0,
-                "access_failures": 0,
-                "consecutive_failures": 0,
-                "average_elapsed_ms": 0,
-                "cooldown_until_mono": 0.0,
-                "last_error": "",
-                "last_checked_at": None,
-            }
+            _PROVIDER_HEALTH[provider] = _new_provider_health_state(base_delay)
 
 
 def _provider_cooldown_until(provider: str) -> float:
@@ -1098,38 +1333,64 @@ def _provider_cooldown_until(provider: str) -> float:
 
 
 def _record_provider_result(provider: str, result: HotelResult) -> None:
+    if result.from_cache and not result.cache_validated:
+        return
     now_mono = _now_mono()
     with _PROVIDER_HEALTH_LOCK:
-        state = _PROVIDER_HEALTH.setdefault(provider, {
-            "checks": 0,
-            "successful_checks": 0,
-            "access_failures": 0,
-            "consecutive_failures": 0,
-            "average_elapsed_ms": 0,
-            "cooldown_until_mono": 0.0,
-            "last_error": "",
-            "last_checked_at": None,
-        })
+        state = _PROVIDER_HEALTH.setdefault(provider, _new_provider_health_state())
         state["checks"] += 1
         elapsed_ms = max(0, int(result.elapsed_ms or 0))
         previous_average = int(state.get("average_elapsed_ms") or 0)
         state["average_elapsed_ms"] = elapsed_ms if state["checks"] == 1 else int(round(previous_average * 0.75 + elapsed_ms * 0.25))
+        samples = list(state.get("latency_samples_ms") or [])
+        if elapsed_ms:
+            samples.append(elapsed_ms)
+            state["latency_samples_ms"] = samples[-40:]
         state["last_checked_at"] = result.checked_at or datetime.now().astimezone().isoformat(timespec="seconds")
+        status = result.http_status
+        if status is None:
+            match = re.search(r"\b(429|503)\b", str(result.error_summary or ""))
+            status = int(match.group(1)) if match else None
+        state["last_http_status"] = status
         if result.available is None:
             state["access_failures"] += 1
             state["consecutive_failures"] += 1
             state["last_error"] = str(result.error_summary or "access check failed")[:180]
-            if state["consecutive_failures"] >= 3:
+            cooldown_seconds = 0
+            if status == 429:
+                state["rate_limited_count"] += 1
+                state["adaptive_multiplier"] = min(8.0, max(2.0, float(state.get("adaptive_multiplier") or 1.0) * 2.0))
+                cooldown_seconds = int(result.retry_after_sec or 30)
+            elif status == 503:
+                state["adaptive_multiplier"] = min(8.0, max(1.5, float(state.get("adaptive_multiplier") or 1.0) * 1.5))
+                cooldown_seconds = int(result.retry_after_sec or 15)
+            elif state["consecutive_failures"] >= 3:
+                state["adaptive_multiplier"] = min(8.0, float(state.get("adaptive_multiplier") or 1.0) + 0.5)
                 cooldown_seconds = min(30, 2 ** min(5, state["consecutive_failures"] - 1))
+            if cooldown_seconds:
+                state["cooldown_count"] += 1
                 state["cooldown_until_mono"] = max(
                     float(state.get("cooldown_until_mono") or 0.0),
-                    now_mono + cooldown_seconds,
+                    now_mono + max(1, min(3600, cooldown_seconds)),
                 )
         else:
             state["successful_checks"] += 1
             state["consecutive_failures"] = 0
             state["cooldown_until_mono"] = 0.0
             state["last_error"] = ""
+            multiplier = float(state.get("adaptive_multiplier") or 1.0)
+            if multiplier > 1.0:
+                state["adaptive_multiplier"] = max(1.0, multiplier * 0.85)
+            elif state["checks"] >= 5 and state["average_elapsed_ms"] <= 1500:
+                state["adaptive_multiplier"] = max(0.75, multiplier - 0.05)
+
+
+def _percentile(values: List[int], percentile: float) -> int:
+    if not values:
+        return 0
+    ordered = sorted(max(0, int(value)) for value in values)
+    position = max(0, min(len(ordered) - 1, int(math.ceil((len(ordered) - 1) * percentile))))
+    return ordered[position]
 
 
 def provider_health_snapshot() -> Dict[str, Dict[str, Any]]:
@@ -1138,11 +1399,18 @@ def provider_health_snapshot() -> Dict[str, Dict[str, Any]]:
         snapshot = deepcopy(_PROVIDER_HEALTH)
     for state in snapshot.values():
         cooldown_until = float(state.pop("cooldown_until_mono", 0.0) or 0.0)
+        samples = list(state.pop("latency_samples_ms", []) or [])
         cooldown_remaining = max(0, int(math.ceil(cooldown_until - now_mono)))
         checks = int(state.get("checks") or 0)
         successful = int(state.get("successful_checks") or 0)
         state["cooldown_remaining_sec"] = cooldown_remaining
         state["success_rate_percent"] = int(round(successful * 100 / checks)) if checks else 0
+        state["p50_elapsed_ms"] = _percentile(samples, 0.50)
+        state["p95_elapsed_ms"] = _percentile(samples, 0.95)
+        state["adaptive_delay_sec"] = round(
+            float(state.get("base_delay_sec") or 1.0) * float(state.get("adaptive_multiplier") or 1.0),
+            2,
+        )
         if cooldown_remaining:
             state["state"] = "cooldown"
         elif int(state.get("consecutive_failures") or 0):
@@ -1152,6 +1420,226 @@ def provider_health_snapshot() -> Dict[str, Dict[str, Any]]:
         else:
             state["state"] = "idle"
     return snapshot
+
+
+def _provider_dynamic_spacing(provider: str, base_delay: float) -> float:
+    with _PROVIDER_HEALTH_LOCK:
+        state = _PROVIDER_HEALTH.get(provider) or {}
+        recorded_base = float(state.get("base_delay_sec") or base_delay)
+        multiplier = float(state.get("adaptive_multiplier") or 1.0) if abs(recorded_base - float(base_delay)) < 0.01 else 1.0
+    return max(0.5, min(60.0, float(base_delay) * multiplier))
+
+
+def _result_available_count(result: HotelResult) -> int:
+    if result.available is not True:
+        return 0
+    total = 0
+    for offer in result.offers_display or []:
+        text = str(offer.get("remaining_norm") or offer.get("remaining") or "")
+        match = re.search(r"\d+", text.replace(",", ""))
+        if match:
+            total += int(match.group(0))
+    if total:
+        return total
+    match = re.search(r"\d+", str(result.min_remaining or "").replace(",", ""))
+    return int(match.group(0)) if match else 1
+
+
+def _record_hotel_runtime_result(result: HotelResult) -> None:
+    if result.from_cache and not result.cache_validated:
+        return
+    now = _now_mono()
+    count = _result_available_count(result)
+    with _HOTEL_RUNTIME_LOCK:
+        state = _HOTEL_RUNTIME_STATE.setdefault(result.code, {
+            "checks": 0,
+            "last_available": None,
+            "last_count": None,
+            "last_change_mono": 0.0,
+            "consecutive_errors": 0,
+        })
+        previous_available = state.get("last_available")
+        previous_count = state.get("last_count")
+        state["checks"] += 1
+        if result.available is None:
+            state["consecutive_errors"] = int(state.get("consecutive_errors") or 0) + 1
+            return
+        state["consecutive_errors"] = 0
+        if previous_available is not None and (
+            bool(previous_available) != bool(result.available) or previous_count != count
+        ):
+            state["last_change_mono"] = now
+        state["last_available"] = bool(result.available)
+        state["last_count"] = count
+
+
+def _hotel_is_manual_priority(cfg: AppConfig, code: str) -> bool:
+    hotel = _selected_hotel_for_code(cfg, code)
+    return bool(hotel.get("priority", False))
+
+
+def _hotel_priority_score(cfg: AppConfig, code: str, now_mono: Optional[float] = None) -> int:
+    if _hotel_is_manual_priority(cfg, code):
+        return 1000
+    now = _now_mono() if now_mono is None else float(now_mono)
+    with _HOTEL_RUNTIME_LOCK:
+        state = dict(_HOTEL_RUNTIME_STATE.get(code) or {})
+    if not state:
+        return 300
+    if int(state.get("consecutive_errors") or 0):
+        return max(10, 80 - int(state.get("consecutive_errors") or 0) * 15)
+    if state.get("last_available") is True:
+        return 500
+    changed_at = float(state.get("last_change_mono") or 0.0)
+    if changed_at and now - changed_at <= 900:
+        return max(160, 280 - int((now - changed_at) / 10))
+    return max(20, 120 - int(state.get("checks") or 0) * 5)
+
+
+def _hotel_is_adaptive_priority(code: str, now_mono: Optional[float] = None) -> bool:
+    now = _now_mono() if now_mono is None else float(now_mono)
+    with _HOTEL_RUNTIME_LOCK:
+        state = dict(_HOTEL_RUNTIME_STATE.get(code) or {})
+    if not state or int(state.get("consecutive_errors") or 0):
+        return False
+    if state.get("last_available") is True:
+        return True
+    changed_at = float(state.get("last_change_mono") or 0.0)
+    return bool(changed_at and now - changed_at <= 900)
+
+
+def _prioritized_codes(cfg: AppConfig, codes: List[str]) -> List[str]:
+    indexed = list(enumerate(codes))
+    indexed.sort(key=lambda item: (-_hotel_priority_score(cfg, item[1]), item[0]))
+    return [code for _index, code in indexed]
+
+
+def _runtime_checkpoint_payload(cfg: AppConfig, results: List[HotelResult]) -> Dict[str, Any]:
+    now_mono = _now_mono()
+    with _HOTEL_RUNTIME_LOCK:
+        hotel_runtime = deepcopy(_HOTEL_RUNTIME_STATE)
+    for state in hotel_runtime.values():
+        changed_at = float(state.pop("last_change_mono", 0.0) or 0.0)
+        state["last_change_age_sec"] = max(0, int(now_mono - changed_at)) if changed_at else None
+    with _PROGRESS_LOCK:
+        progress = {
+            key: deepcopy(_PROGRESS.get(key))
+            for key in (
+                "round", "backoff_multiplier", "unknown_ratio_percent",
+                "consecutive_unhealthy_rounds", "effective_interval_sec",
+            )
+        }
+    return {
+        "version": 1,
+        "results": [asdict(result) for result in results],
+        "provider_health": provider_health_snapshot(),
+        "hotel_runtime": hotel_runtime,
+        "notification": notification_checkpoint_snapshot(),
+        "progress": progress,
+        "saved_at": _now_wall(),
+    }
+
+
+def _persist_runtime_checkpoint(
+    cfg: Optional[AppConfig] = None,
+    results: Optional[List[HotelResult]] = None,
+) -> None:
+    try:
+        if cfg is None:
+            with _CONFIG_LOCK:
+                cfg = deepcopy(_CONFIG)
+        if results is None:
+            with _RESULTS_LOCK:
+                results = deepcopy(_LAST_RESULTS)
+        _save_runtime_checkpoint(
+            _scan_scope_key(cfg),
+            _runtime_checkpoint_payload(cfg, results),
+        )
+    except Exception as exc:
+        _log(f"[checkpoint] save skipped: {exc}")
+
+
+def _restore_runtime_checkpoint(cfg: Optional[AppConfig] = None) -> bool:
+    global _LAST_RESULTS, _RESULTS_REVISION, _CHECKPOINT_RESTORED_SCOPE
+    if cfg is None:
+        with _CONFIG_LOCK:
+            cfg = deepcopy(_CONFIG)
+    scope_key = _scan_scope_key(cfg)
+    try:
+        payload = _load_runtime_checkpoint(scope_key)
+    except Exception as exc:
+        _log(f"[checkpoint] read skipped: {exc}")
+        return False
+    if not payload:
+        return False
+
+    restored_results: List[HotelResult] = []
+    valid_codes = set(cfg.hotel_codes)
+    for item in payload.get("results") or []:
+        if not isinstance(item, dict) or str(item.get("code") or "") not in valid_codes:
+            continue
+        try:
+            restored_results.append(_hotel_result_from_dict(item))
+        except (TypeError, ValueError):
+            continue
+    if not restored_results:
+        return False
+
+    now_mono = _now_mono()
+    with _PROVIDER_HEALTH_LOCK:
+        _PROVIDER_HEALTH.clear()
+        for provider, snapshot in (payload.get("provider_health") or {}).items():
+            if not isinstance(snapshot, dict):
+                continue
+            state = _new_provider_health_state(cfg.per_hotel_delay_seconds)
+            for key in (
+                "checks", "successful_checks", "access_failures", "consecutive_failures",
+                "average_elapsed_ms", "adaptive_multiplier", "cooldown_count",
+                "rate_limited_count", "last_http_status", "last_error", "last_checked_at",
+            ):
+                if key in snapshot:
+                    state[key] = deepcopy(snapshot[key])
+            state["base_delay_sec"] = max(0.5, float(cfg.per_hotel_delay_seconds))
+            state["cooldown_until_mono"] = now_mono + max(
+                0, int(snapshot.get("cooldown_remaining_sec") or 0)
+            )
+            state["latency_samples_ms"] = [
+                value for value in (
+                    int(snapshot.get("p50_elapsed_ms") or 0),
+                    int(snapshot.get("p95_elapsed_ms") or 0),
+                ) if value > 0
+            ]
+            _PROVIDER_HEALTH[str(provider)] = state
+
+    with _HOTEL_RUNTIME_LOCK:
+        _HOTEL_RUNTIME_STATE.clear()
+        for code, snapshot in (payload.get("hotel_runtime") or {}).items():
+            if code not in valid_codes or not isinstance(snapshot, dict):
+                continue
+            state = deepcopy(snapshot)
+            age = state.pop("last_change_age_sec", None)
+            state["last_change_mono"] = now_mono - max(0, int(age)) if age is not None else 0.0
+            _HOTEL_RUNTIME_STATE[code] = state
+
+    restore_notification_checkpoint(payload.get("notification") or {})
+    with _RESULTS_LOCK:
+        by_code = {result.code: result for result in restored_results}
+        _LAST_RESULTS = [by_code[code] for code in cfg.hotel_codes if code in by_code]
+        _RESULTS_REVISION += 1
+    with _PROGRESS_LOCK:
+        saved_progress = payload.get("progress") or {}
+        for key in (
+            "round", "backoff_multiplier", "unknown_ratio_percent",
+            "consecutive_unhealthy_rounds", "effective_interval_sec",
+        ):
+            if key in saved_progress:
+                _PROGRESS[key] = saved_progress[key]
+    _CHECKPOINT_RESTORED_SCOPE = scope_key
+    _log(
+        f"[checkpoint] restored {len(restored_results)} hotel result(s), "
+        f"age={int(payload.get('checkpoint_age_sec') or 0)}s"
+    )
+    return True
 
 
 class _ProviderAwareScheduler:
@@ -1169,16 +1657,47 @@ class _ProviderAwareScheduler:
         self.jitter_percent = max(0, min(100, int(jitter_percent)))
         self.global_spacing = max(0.15, self.base_delay / self.workers)
         self.queues: Dict[str, deque[Tuple[int, str]]] = {}
-        for index, code in enumerate(codes):
+        ordered_codes = sorted(
+            enumerate(codes),
+            key=lambda item: (-_hotel_priority_score(cfg, item[1]), item[0]),
+        )
+        self.priority_codes = {
+            code
+            for _index, code in ordered_codes
+            if _hotel_is_manual_priority(cfg, code) or _hotel_is_adaptive_priority(code)
+        }
+        for index, code in ordered_codes:
             provider = _provider_for_code(cfg, code)
             self.queues.setdefault(provider, deque()).append((index, code))
-        self.providers = list(self.queues)
+        self.providers = list(dict.fromkeys(_provider_for_code(cfg, code) for code in codes))
         self.provider_next_start = {provider: 0.0 for provider in self.providers}
+        self.provider_in_flight = {provider: 0 for provider in self.providers}
         self.global_next_start = 0.0
         self.cursor = 0
 
     def has_pending(self) -> bool:
         return any(self.queues[provider] for provider in self.providers)
+
+    def pending_count(self) -> int:
+        return sum(len(queue) for queue in self.queues.values())
+
+    def priority_pending_count(self) -> int:
+        return sum(1 for queue in self.queues.values() for _index, code in queue if code in self.priority_codes)
+
+    def mark_submitted(self, provider: str) -> None:
+        self.provider_in_flight[provider] = int(self.provider_in_flight.get(provider, 0)) + 1
+
+    def mark_completed(self, provider: str) -> None:
+        self.provider_in_flight[provider] = max(0, int(self.provider_in_flight.get(provider, 0)) - 1)
+
+    def _provider_concurrency_limit(self, provider: str) -> int:
+        provider_count = max(1, len(self.providers))
+        base_limit = max(1, int(math.ceil(self.workers / provider_count)))
+        with _PROVIDER_HEALTH_LOCK:
+            state = _PROVIDER_HEALTH.get(provider) or {}
+            if int(state.get("consecutive_failures") or 0) or float(state.get("adaptive_multiplier") or 1.0) >= 1.5:
+                return 1
+        return min(self.workers, base_limit)
 
     def pop_ready(self, now_mono: Optional[float] = None) -> Tuple[Optional[Tuple[int, str, str]], float]:
         now = _now_mono() if now_mono is None else float(now_mono)
@@ -1191,6 +1710,8 @@ class _ProviderAwareScheduler:
             provider = self.providers[position]
             if not self.queues[provider]:
                 continue
+            if int(self.provider_in_flight.get(provider, 0)) >= self._provider_concurrency_limit(provider):
+                continue
             ready_at = max(
                 self.global_next_start,
                 self.provider_next_start.get(provider, 0.0),
@@ -1201,9 +1722,12 @@ class _ProviderAwareScheduler:
                 continue
             index, code = self.queues[provider].popleft()
             self.cursor = (position + 1) % provider_count
-            self.provider_next_start[provider] = now + _jittered_spacing(self.base_delay, self.jitter_percent)
+            dynamic_spacing = _provider_dynamic_spacing(provider, self.base_delay)
+            self.provider_next_start[provider] = now + _jittered_spacing(dynamic_spacing, self.jitter_percent)
             self.global_next_start = now + _jittered_spacing(self.global_spacing, self.jitter_percent // 2)
             return (index, code, provider), 0.0
+        if not math.isfinite(earliest):
+            return None, 0.05
         return None, max(0.01, earliest - now)
 
 
@@ -1241,12 +1765,23 @@ def _parallel_allowed(cfg: AppConfig) -> bool:
     )
 
 
-def _check_hotels_parallel_http(cfg: AppConfig, codes: List[str], start: str, end: str) -> List[HotelResult]:
+def _check_hotels_parallel_http(
+    cfg: AppConfig,
+    codes: List[str],
+    start: str,
+    end: str,
+    *,
+    allow_cache: bool = False,
+) -> List[HotelResult]:
     workers = max(1, min(3, int(getattr(cfg, "smart_parallel_workers", DEFAULT_SMART_PARALLEL_WORKERS) or 1)))
     base_delay = max(1, min(60, int(cfg.per_hotel_delay_seconds)))
     jitter = getattr(cfg, "request_jitter_percent", DEFAULT_REQUEST_JITTER_PERCENT)
     results: List[Optional[HotelResult]] = [None] * len(codes)
     scheduler = _ProviderAwareScheduler(cfg, codes, workers, base_delay, jitter)
+    with _PROGRESS_LOCK:
+        _PROGRESS["queue_pending"] = scheduler.pending_count()
+        _PROGRESS["in_flight"] = 0
+        _PROGRESS["priority_pending"] = scheduler.priority_pending_count()
 
     _log(
         f"[parallel] Provider-aware scheduling enabled: workers={workers}, "
@@ -1258,7 +1793,11 @@ def _check_hotels_parallel_http(cfg: AppConfig, codes: List[str], start: str, en
         _set_action(f"[search:{provider}] Checking hotel {code} for {start} → {end}...")
         _log(f"[search:{provider}] Checking hotel {code} for {start} → {end}...")
         try:
-            result = check_hotel(cfg, None, code, start, end)
+            result = (
+                _check_hotel_cached(cfg, None, code, start, end)
+                if allow_cache
+                else check_hotel(cfg, None, code, start, end)
+            )
         except Exception as e:
             _log(f"[error] check {code}: {e}")
             result = HotelResult(
@@ -1284,6 +1823,11 @@ def _check_hotels_parallel_http(cfg: AppConfig, codes: List[str], start: str, en
                 idx, code, provider = task
                 future = executor.submit(_run_one, idx, code, provider)
                 in_flight[future] = (idx, code, provider)
+                scheduler.mark_submitted(provider)
+                with _PROGRESS_LOCK:
+                    _PROGRESS["queue_pending"] = scheduler.pending_count()
+                    _PROGRESS["in_flight"] = len(in_flight)
+                    _PROGRESS["priority_pending"] = scheduler.priority_pending_count()
 
             if not in_flight:
                 if scheduler.has_pending() and _stop_event.wait(timeout=max(0.01, next_ready_delay or 0.05)):
@@ -1298,6 +1842,7 @@ def _check_hotels_parallel_http(cfg: AppConfig, codes: List[str], start: str, en
                 continue
             for future in completed:
                 expected_idx, expected_code, expected_provider = in_flight.pop(future)
+                scheduler.mark_completed(expected_provider)
                 try:
                     idx, provider, result = future.result()
                 except Exception as exc:
@@ -1313,8 +1858,12 @@ def _check_hotels_parallel_http(cfg: AppConfig, codes: List[str], start: str, en
                     )
                 results[idx] = result
                 _record_provider_result(provider, result)
+                _record_hotel_runtime_result(result)
                 with _PROGRESS_LOCK:
                     _PROGRESS["done"] = min(_PROGRESS["done"] + 1, _PROGRESS["total"])
+                    _PROGRESS["queue_pending"] = scheduler.pending_count()
+                    _PROGRESS["in_flight"] = len(in_flight)
+                    _PROGRESS["priority_pending"] = scheduler.priority_pending_count()
                 _publish_partial_result(result, codes)
 
     return [
@@ -1332,7 +1881,7 @@ def _check_hotels_parallel_http(cfg: AppConfig, codes: List[str], start: str, en
 
 # ========= Worker Loop =========
 def _worker_loop(run_once: bool = False):
-    global _LAST_RESULTS, _RESULTS_REVISION, _PROGRESS, _UPTIME_STARTED, _UPTIME_STARTED_MONO, _RUN_REQUESTED
+    global _LAST_RESULTS, _RESULTS_REVISION, _PROGRESS, _UPTIME_STARTED, _UPTIME_STARTED_MONO, _RUN_REQUESTED, _CHECKPOINT_RESTORED_SCOPE
     _log("Worker loop started.")
     _set_action("Worker loop started.")
     _UPTIME_STARTED = _now_wall()
@@ -1340,7 +1889,17 @@ def _worker_loop(run_once: bool = False):
     with _CONFIG_LOCK:
         cfg = deepcopy(_CONFIG)
         start, end = cfg.start_date, cfg.end_date
-    _reset_provider_health([_provider_for_code(cfg, code) for code in cfg.hotel_codes])
+    current_scope = _scan_scope_key(cfg)
+    if _CHECKPOINT_RESTORED_SCOPE == current_scope:
+        _CHECKPOINT_RESTORED_SCOPE = ""
+        with _PROVIDER_HEALTH_LOCK:
+            for state in _PROVIDER_HEALTH.values():
+                state["base_delay_sec"] = max(0.5, float(cfg.per_hotel_delay_seconds))
+    else:
+        _reset_provider_health(
+            [_provider_for_code(cfg, code) for code in cfg.hotel_codes],
+            getattr(cfg, "per_hotel_delay_seconds", DEFAULT_PER_HOTEL_DELAY_SECONDS),
+        )
 
     renderer = None
     if getattr(cfg, "engine", "playwright") == "playwright" and _HAS_PLAYWRIGHT:
@@ -1349,8 +1908,13 @@ def _worker_loop(run_once: bool = False):
         _log("[engine] Playwright is unavailable; using HTTP/API engine for this run.")
         cfg.engine = "http"
 
-    consecutive_unhealthy_rounds = 0
-    previous_backoff_multiplier = 1
+    with _PROGRESS_LOCK:
+        consecutive_unhealthy_rounds = max(
+            0, int(_PROGRESS.get("consecutive_unhealthy_rounds") or 0)
+        )
+        previous_backoff_multiplier = max(
+            1, int(_PROGRESS.get("backoff_multiplier") or 1)
+        )
 
     # Guard loop: (no code yet)
     while not _stop_event.is_set():
@@ -1370,51 +1934,84 @@ def _worker_loop(run_once: bool = False):
             _PROGRESS["wait_started_mono"] = 0.0
             _PROGRESS["wait_total_sec"] = 0
             _PROGRESS["wait_elapsed_sec"] = 0
+            _PROGRESS["queue_pending"] = len(cfg.hotel_codes)
+            _PROGRESS["in_flight"] = 0
+            _PROGRESS["priority_pending"] = sum(
+                1
+                for code in cfg.hotel_codes
+                if _hotel_is_manual_priority(cfg, code) or _hotel_is_adaptive_priority(code)
+            )
             _PROGRESS["round_started"] = _now_wall()
             _PROGRESS["round_started_mono"] = _now_mono()
         current_round = _PROGRESS["round"]
         round_started_mono = _PROGRESS["round_started_mono"]
         results: List[HotelResult] = []
         if _parallel_allowed(cfg):
-            results = _check_hotels_parallel_http(cfg, list(cfg.hotel_codes), start, end)
+            results = _check_hotels_parallel_http(
+                cfg,
+                list(cfg.hotel_codes),
+                start,
+                end,
+                allow_cache=not run_once,
+            )
         else:
             if getattr(cfg, "smart_parallel_enabled", False) and getattr(cfg, "engine", "http") != "http":
                 _log("[parallel] Smart Parallel is only used with HTTP/API engine; running single-line search.")
-            for index, code in enumerate(cfg.hotel_codes):
+            scan_codes = _prioritized_codes(cfg, list(cfg.hotel_codes))
+            results_by_code: Dict[str, HotelResult] = {}
+            for index, code in enumerate(scan_codes):
                 if _stop_event.is_set():
                     break
                 _set_action(f"[search] Checking hotel {code} for {start} → {end}...")
                 _log(f"[search] Checking hotel {code} for {start} → {end}...")
                 try:
-                    result = check_hotel(cfg, renderer, code, start, end)
+                    result = (
+                        _check_hotel_cached(cfg, renderer, code, start, end)
+                        if not run_once
+                        else check_hotel(cfg, renderer, code, start, end)
+                    )
                 except Exception as e:
                     _log(f"[error] check {code}: {e}")
                     result = HotelResult(code=code, url=build_url(cfg, code, start, end), name=None, available=None)
                 result.provider = _provider_for_code(cfg, code)
-                results.append(result)
+                results_by_code[code] = result
                 _record_provider_result(_provider_for_code(cfg, code), result)
+                _record_hotel_runtime_result(result)
                 with _PROGRESS_LOCK:
                     _PROGRESS["done"] = min(_PROGRESS["done"] + 1, _PROGRESS["total"])
+                    _PROGRESS["queue_pending"] = max(0, len(scan_codes) - index - 1)
+                    _PROGRESS["priority_pending"] = sum(
+                        1 for pending_code in scan_codes[index + 1:]
+                        if _hotel_is_manual_priority(cfg, pending_code) or _hotel_is_adaptive_priority(pending_code)
+                    )
                 _publish_partial_result(result, list(cfg.hotel_codes))
-                if index < len(cfg.hotel_codes) - 1:
+                if index < len(scan_codes) - 1:
                     per_hotel_delay = _jittered_delay(
                         max(1, min(60, int(cfg.per_hotel_delay_seconds))),
                         getattr(cfg, "request_jitter_percent", DEFAULT_REQUEST_JITTER_PERCENT),
                     )
                     if _stop_event.wait(timeout=per_hotel_delay):
                         break
+            results = [results_by_code[code] for code in cfg.hotel_codes if code in results_by_code]
 
         newly_available_codes: List[str] = []
         try:
             newly_available_codes = process_notifications(cfg, results, start, end)
         except Exception as e:
             _log(f"[error] notify: {e}")
+        try:
+            _record_analytics_results(cfg, results)
+        except Exception as e:
+            _log(f"[analytics] record skipped: {e}")
 
         with _RESULTS_LOCK:
             _LAST_RESULTS = results
             _RESULTS_REVISION += 1
         with _PROGRESS_LOCK:
             _PROGRESS["done"] = _PROGRESS["total"]
+            _PROGRESS["queue_pending"] = 0
+            _PROGRESS["in_flight"] = 0
+            _PROGRESS["priority_pending"] = 0
 
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         widths = {
@@ -1455,6 +2052,9 @@ def _worker_loop(run_once: bool = False):
         elif previous_backoff_multiplier > 1:
             _log("[safety] Healthy round detected; adaptive backoff returned to 1x.")
         previous_backoff_multiplier = backoff_multiplier
+
+        if not run_once:
+            _persist_runtime_checkpoint(cfg, results)
 
         if run_once:
             _RUN_REQUESTED = False
@@ -1501,8 +2101,17 @@ def _worker_loop(run_once: bool = False):
                     break
                 try:
                     _set_action(f"[enhanced] Rechecking available hotel {code}...")
-                    r = check_hotel(cfg, renderer, code, start, end)
+                    r = _check_hotel_cached(
+                        cfg,
+                        renderer,
+                        code,
+                        start,
+                        end,
+                        allow_cache=False,
+                        force_refresh=True,
+                    )
                     _record_provider_result(_provider_for_code(cfg, code), r)
+                    _record_hotel_runtime_result(r)
                     enhanced_results.append(r)
                     if r.available is not True:
                         watch_codes.discard(code)
@@ -1519,23 +2128,31 @@ def _worker_loop(run_once: bool = False):
                         provider=failed_provider,
                     )
                     _record_provider_result(failed_provider, failed_result)
+                    _record_hotel_runtime_result(failed_result)
                     enhanced_results.append(failed_result)
             if enhanced_results:
                 try:
                     process_notifications(cfg, enhanced_results, start, end)
                 except Exception as e:
                     _log(f"[enhanced] notify failed: {e}")
+                try:
+                    _record_analytics_results(cfg, enhanced_results, source="enhanced")
+                except Exception as e:
+                    _log(f"[analytics] enhanced record skipped: {e}")
                 with _RESULTS_LOCK:
                     by_code = {r.code: r for r in _LAST_RESULTS}
                     for r in enhanced_results:
                         by_code[r.code] = r
                     _LAST_RESULTS = [by_code.get(r.code, r) for r in _LAST_RESULTS]
                     _RESULTS_REVISION += 1
+                _persist_runtime_checkpoint(cfg)
         if _stop_event.is_set():
             break
 
     if isinstance(renderer, PlaywrightRenderer):
         renderer.close()
+    if not run_once:
+        _persist_runtime_checkpoint(cfg)
     _log("Worker loop stopped.")
 
 # ========= Web Handlers =========
@@ -1624,7 +2241,7 @@ def home() -> Response:
     <link rel="icon" type="image/png" href="/static/toyoko-chan-mascot.png?v=3">
     <link rel="apple-touch-icon" href="/static/toyoko-chan-mascot.png?v=3">
     <link rel="manifest" href="/manifest.webmanifest">
-    <link rel="stylesheet" href="/static/app.css">
+    <link rel="stylesheet" href="/static/app.css?v={APP_VERSION}-traffic-1">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"></head>
 	        <body data-theme="light" data-app-version="{APP_VERSION}">
 	          <div class="app-shell">
@@ -1635,11 +2252,11 @@ def home() -> Response:
 	                <div><strong>{APP_NAME}</strong><span>Vacancy workspace</span></div>
 	              </div>
 	              <nav class="sidebar-nav">
-	                <button class="sidebar-nav-item active" data-app-view="search" aria-current="page"><span class="nav-icon">⌕</span><span class="nav-label">空房检索 / Vacancy Search</span></button>
+	                <button class="sidebar-nav-item active" data-app-view="home" aria-current="page"><span class="nav-icon">⌂</span><span class="nav-label">首页 / Home</span></button>
+	                <button class="sidebar-nav-item" data-app-view="search"><span class="nav-icon">⌕</span><span class="nav-label">空房检索 / Vacancy Search</span></button>
 	                <button class="sidebar-nav-item" data-app-view="monitor"><span class="nav-icon">◉</span><span class="nav-label">空房监控 / Vacancy Monitor</span><span class="nav-live-dot" aria-hidden="true"></span></button>
 	                <button class="sidebar-nav-item" data-app-view="search-settings"><span class="nav-icon">≡</span><span class="nav-label">搜索设定 / Search Settings</span></button>
-	                <button class="sidebar-nav-item" data-app-view="push-settings"><span class="nav-icon">◇</span><span class="nav-label">推送设定 / Push Settings</span></button>
-	                <button class="sidebar-nav-item" data-app-view="interface"><span class="nav-icon">◐</span><span class="nav-label">界面设定 / Interface</span></button>
+	                <button class="sidebar-nav-item" data-app-view="push-settings"><span class="nav-icon">✉</span><span class="nav-label">推送设定 / Push Settings</span></button>
 	              </nav>
 	              <div class="sidebar-utilities" aria-label="Interface tools">
 	                <div class="language-menu-wrap">
@@ -1654,7 +2271,8 @@ def home() -> Response:
 	                </div>
 	                <button class="icon-button" id="theme-toggle-button" type="button" aria-label="Theme" title="Theme">◐</button>
 	                <button class="icon-button" id="guide-open-button" type="button" aria-label="Guide" title="Guide">?</button>
-	                <button class="icon-button update-open-button" id="update-open-button" type="button" aria-label="Software update" title="Software update">↻</button>
+	                <button class="icon-button update-open-button" id="update-open-button" type="button" aria-label="Software update" title="Software update"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11m0 0 4-4m-4 4-4-4M5 18.5h14"/></svg></button>
+	                <button class="icon-button interface-settings-button" id="interface-settings-button" data-app-view="interface" type="button" aria-label="Interface Settings" title="Interface Settings">⚙</button>
 	              </div>
 	              <div class="sidebar-footer-status">
 	                <span class="sidebar-status-dot" id="sidebar-status-dot"></span>
@@ -1684,7 +2302,107 @@ def home() -> Response:
 	            </div>
 	          </nav>
 
-	          <section class="app-view active" id="view-search" data-view="search" aria-label="Vacancy Search">
+	          <section class="app-view active" id="view-home" data-view="home" aria-label="Home">
+	            <div class="home-dashboard">
+	              <header class="home-welcome-card">
+	                <div class="home-welcome-copy">
+	                  <span class="home-eyebrow" id="home-eyebrow">今日监控台</span>
+	                  <h1 id="home-greeting">欢迎回来</h1>
+	                  <p id="home-hero-summary">正在读取上次的检索与监控状态…</p>
+	                  <div class="home-welcome-actions">
+	                    <button class="primary" id="home-primary-action" type="button">建立检索</button>
+	                    <button id="home-secondary-action" type="button">查看监控</button>
+	                  </div>
+	                </div>
+	                <div class="home-mascot-stage" aria-hidden="true">
+	                  <span class="home-orbit home-orbit-one"></span>
+	                  <span class="home-orbit home-orbit-two"></span>
+	                  <img src="/static/toyoko-chan-mascot.png?v=3" alt="">
+	                </div>
+	                <div class="home-live-state">
+	                  <span class="home-live-dot" id="home-live-dot"></span>
+	                  <div><small id="home-live-label">监控状态</small><strong id="home-live-value">已停止</strong></div>
+	                  <div class="home-next-scan"><small id="home-next-label">下次检索</small><strong id="home-next-value">—</strong></div>
+	                </div>
+	              </header>
+
+	              <div class="home-metric-grid" aria-label="Monitoring overview">
+	                <button class="home-metric-card status" type="button" data-home-nav="monitor">
+	                  <span class="home-metric-icon">◉</span><span class="home-metric-label" id="home-metric-status-label">监控状态</span>
+	                  <strong id="home-metric-status">已停止</strong><small id="home-metric-status-note">准备开始</small>
+	                </button>
+	                <button class="home-metric-card available" type="button" data-home-nav="monitor">
+	                  <span class="home-metric-icon">✓</span><span class="home-metric-label" id="home-metric-available-label">当前空房</span>
+	                  <strong id="home-metric-available">0</strong><small id="home-metric-available-note">0 家酒店</small>
+	                </button>
+	                <button class="home-metric-card hotels" type="button" data-home-nav="search">
+	                  <span class="home-metric-icon">⌂</span><span class="home-metric-label" id="home-metric-hotels-label">监控酒店</span>
+	                  <strong id="home-metric-hotels">0</strong><small id="home-metric-hotels-note">尚未选择</small>
+	                </button>
+	                <button class="home-metric-card next" type="button" data-home-nav="monitor">
+	                  <span class="home-metric-icon">↻</span><span class="home-metric-label" id="home-metric-next-label">下次检索</span>
+	                  <strong id="home-metric-next">—</strong><small id="home-metric-next-note">等待启动</small>
+	                </button>
+	                <div class="home-metric-card traffic" id="home-traffic-card" title="WebUI 应用层流量估算">
+	                  <span class="home-metric-icon">⇅</span><span class="home-metric-label" id="home-metric-traffic-label">WebUI 流量</span>
+	                  <strong id="home-metric-traffic-down">↓ 0 B</strong><small id="home-metric-traffic-note">↑ 0 B · 0 次访问</small>
+	                </div>
+	              </div>
+
+	              <div class="home-content-grid">
+	                <article class="home-card home-task-card">
+	                  <header><div><span class="home-card-kicker" id="home-task-kicker">当前任务</span><h2 id="home-task-title">尚未建立监控任务</h2></div><span class="home-task-state" id="home-task-state">待配置</span></header>
+	                  <div class="home-task-route">
+	                    <div><small id="home-checkin-label">入住</small><strong id="home-task-checkin">—</strong></div>
+	                    <span>→</span>
+	                    <div><small id="home-checkout-label">退房</small><strong id="home-task-checkout">—</strong></div>
+	                  </div>
+	                  <div class="home-task-details">
+	                    <span id="home-task-guests">1 人 · 1 房</span>
+	                    <span id="home-task-preference">无烟房 · 不限房型</span>
+	                    <span id="home-task-scope">尚未选择区域</span>
+	                  </div>
+	                  <div class="home-provider-chips" id="home-provider-chips"></div>
+	                  <footer><button id="home-edit-search" type="button">修改条件</button><button class="primary" id="home-view-results" type="button">查看实时结果</button></footer>
+	                </article>
+
+	                <article class="home-card home-activity-card">
+	                  <header><div><span class="home-card-kicker" id="home-activity-kicker">实时动态</span><h2 id="home-activity-title">最新空房变化</h2></div><button class="home-text-button" id="home-events-more" type="button">全部事件</button></header>
+	                  <div class="home-activity-list" id="home-activity-list"><div class="home-empty-state">正在读取动态…</div></div>
+	                </article>
+	              </div>
+
+	              <div class="home-bottom-grid">
+	                <article class="home-card home-insight-card">
+	                  <header><div><span class="home-card-kicker" id="home-trend-kicker">数据洞察</span><h2 id="home-trend-title">空房与价格趋势</h2></div><button class="home-text-button" id="home-trend-more" type="button">查看趋势</button></header>
+	                  <div class="home-insight-summary"><strong id="home-trend-observations">0</strong><span id="home-trend-observations-label">条历史记录</span></div>
+	                  <div class="home-trend-list" id="home-trend-list"><div class="home-empty-state">数据会在检索后自动积累</div></div>
+	                </article>
+
+	                <article class="home-card home-quick-card">
+	                  <header><div><span class="home-card-kicker" id="home-quick-kicker">快捷入口</span><h2 id="home-quick-title">开始新的操作</h2></div></header>
+	                  <div class="home-quick-grid">
+	                    <button type="button" data-home-quick="area"><i>⌖</i><span id="home-quick-area">区域检索</span></button>
+	                    <button type="button" data-home-quick="radius"><i>◎</i><span id="home-quick-radius">方圆检索</span></button>
+	                    <button type="button" data-home-quick="history"><i>↶</i><span id="home-quick-history">搜索记录</span></button>
+	                    <button type="button" data-home-quick="push"><i>✉</i><span id="home-quick-push">推送设定</span></button>
+	                  </div>
+	                </article>
+
+	                <article class="home-card home-health-card">
+	                  <header><div><span class="home-card-kicker" id="home-health-kicker">系统状态</span><h2 id="home-health-title">服务运行状态</h2></div><span class="home-health-badge" id="home-health-badge">检查中</span></header>
+	                  <div class="home-health-list">
+	                    <div><span id="home-health-connection-label">WebUI 连接</span><strong id="home-health-connection">正常</strong></div>
+	                    <div><span id="home-health-providers-label">酒店来源</span><strong id="home-health-providers">等待</strong></div>
+	                    <div><span id="home-health-notifications-label">推送渠道</span><strong id="home-health-notifications">0 个启用</strong></div>
+	                    <div><span id="home-health-data-label">历史数据</span><strong id="home-health-data">0 条</strong></div>
+	                  </div>
+	                </article>
+	              </div>
+	            </div>
+	          </section>
+
+	          <section class="app-view" id="view-search" data-view="search" aria-label="Vacancy Search" hidden>
 	           <details class="box search-panel" id="search_panel" open>
              <summary>搜索 Search</summary>
 	             <div class="search-head">
@@ -1772,8 +2490,7 @@ def home() -> Response:
 	               </div>
 	             </div>
 
-             <details class="box" id="area_picker_panel" open>
-               <summary>区域酒店搜索 Area Hotel Picker</summary>
+	             <section id="area_picker_panel" aria-label="Hotel picker">
 	               <div class="area-picker-config">
 	                 <div class="mode-tabs" id="hotel_picker_mode_tabs">
 	                   <label><input type="radio" name="hotel_picker_mode" value="area" {'checked' if getattr(cfg, "search_mode", DEFAULT_SEARCH_MODE) != "radius" else ''}> 区域模式 Area</label>
@@ -1868,9 +2585,9 @@ def home() -> Response:
 	                   <button id="btn_catalog_ack" type="button" hidden>知道了 Dismiss</button>
 	                 </div>
 	               </div>
-	             </details>
+	             </section>
 
-             <details class="box">
+	             <details class="box" id="search_history_panel">
                <summary>搜索记录 Search History</summary>
                <div class="area-toolbar">
                  <button id="btn_history_refresh">刷新 Refresh</button>
@@ -1929,6 +2646,20 @@ def home() -> Response:
                 <span id='action-text'>状态 Current: (idle)</span>
               </div>
               <div id="provider-health" class="provider-health" aria-live="polite" hidden></div>
+              <details id="runtime-diagnostics" class="runtime-diagnostics">
+                <summary><span id="diagnostics-title">运行诊断 Run Diagnostics</span><small id="diagnostics-summary">自适应调度 Adaptive scheduling</small></summary>
+                <div class="diagnostics-grid">
+                  <div><span id="diagnostics-throughput-label">吞吐量 Throughput</span><b id="diagnostics-throughput">0/min</b></div>
+                  <div><span id="diagnostics-eta-label">预计剩余 ETA</span><b id="diagnostics-eta">-</b></div>
+                  <div><span id="diagnostics-queue-label">队列 Queue</span><b id="diagnostics-queue">0 + 0</b></div>
+                  <div><span id="diagnostics-latency-label">最慢 P95 Slowest P95</span><b id="diagnostics-latency">-</b></div>
+                  <div><span id="diagnostics-priority-label">优先酒店 Priority</span><b id="diagnostics-priority">0</b></div>
+                  <div><span id="diagnostics-protection-label">保护事件 Protection</span><b id="diagnostics-protection">0</b></div>
+                  <div><span id="diagnostics-cache-label">缓存命中 Cache Hit</span><b id="diagnostics-cache">0% · 0</b></div>
+                  <div><span id="diagnostics-saved-label">节省请求 Saved</span><b id="diagnostics-saved">0</b></div>
+                </div>
+                <div class="diagnostics-actions"><button id="btn_cache_clear" class="btn small secondary" type="button">清除检索缓存 Clear Cache</button></div>
+              </details>
               <div id='msg' class='notice success' role='status' aria-live='polite'></div>
               <div id='err' class='notice error' role='alert'></div>
 	            </section>
@@ -2008,6 +2739,29 @@ def home() -> Response:
                   <tbody id="availability-log-body"><tr><td colspan=6 class="empty-results">暂无日志 No log yet</td></tr></tbody>
                 </table>
               </div>
+            </details>
+
+            <details class="result-log-panel trend-panel" id="trend-panel">
+              <summary id="trend-panel-title">价格与空房趋势 Price &amp; Availability Trends</summary>
+              <div class="trend-toolbar">
+                <div class="trend-toolbar-summary">
+                  <strong id="trend-summary">等待历史数据 Waiting for history</strong>
+                  <small id="trend-scope-note">仅显示当前住宿条件的历史记录 Current stay conditions only</small>
+                </div>
+                <label class="trend-filter"><span id="trend-hotel-label">酒店 Hotel</span><select id="trend_hotel" aria-label="Hotel"></select></label>
+                <label class="trend-filter trend-range-filter"><span id="trend-range-label">时间范围 Range</span><select id="trend_days" aria-label="Trend range">
+                  <option value="7">7 days</option><option value="30" selected>30 days</option><option value="90">90 days</option>
+                </select></label>
+                <button type="button" id="btn_trend_refresh">刷新 Refresh</button>
+              </div>
+              <div class="trend-overview" id="trend-overview"></div>
+              <div class="trend-chart" id="trend-chart" aria-live="polite"></div>
+              <div class="trend-observations" id="trend-observations"></div>
+            </details>
+
+            <details class="result-log-panel event-center-panel" id="event-center-panel">
+              <summary id="event-center-title">统一事件中心 Event Center</summary>
+              <div class="event-center-list" id="event-center-list"><div class="trend-empty">No events</div></div>
             </details>
 
             <div class="push-status-panel">
@@ -2155,12 +2909,12 @@ def home() -> Response:
                 </div>
 
                 <div class="settings-card">
-                  <h3 class="info-title" tabindex="0" data-tip="在本机弹出系统通知。步骤：1. 勾选启用本地通知。2. 点击“发送测试通知”。3. 如果 macOS 没弹窗，到 System Settings > Notifications 允许 Terminal / Python / osascript。4. 测试成功后启动搜索即可。正式空房提醒支持多行内容。">本地通知 Local</h3>
+                  <h3 class="info-title" tabindex="0" data-tip="在本机弹出系统通知。步骤：1. 勾选启用本地通知。2. 点击“发送测试通知”。3. macOS 检查通知权限；Windows 需要 PowerShell；Linux 需要 notify-send 和图形桌面会话。4. 测试成功后启动搜索。">本地通知 Local</h3>
                   <label class="inline"><input id='enable_local' type='checkbox' {'checked' if cfg.enable_local else ''}> 启用本地通知 Enable Local</label>
                   <div class="area-toolbar">
                     <button id="btn_local_test">发送测试通知 Test Notification</button>
                   </div>
-                  <div class='help'>macOS 首次使用可能需要在 System Settings &gt; Notifications 中允许 Terminal / Python / osascript 通知。</div>
+                  <div class='help'>macOS 使用 terminal-notifier/osascript；Windows 使用 PowerShell；Linux 需要 notify-send。</div>
                 </div>
 
                 <div class="settings-card">
@@ -2206,6 +2960,29 @@ def home() -> Response:
 	                  <button type="button" data-theme-choice="light" aria-pressed="false">浅色 / Light</button>
 	                  <button type="button" data-theme-choice="dark" aria-pressed="false">深色 / Dark</button>
 	                </div>
+	              </section>
+	              <section class="interface-card pwa-install-card">
+	                <span class="interface-card-icon">▣</span>
+	                <div><h2 id="pwa-title">手机桌面版</h2><p id="pwa-help">安装到主屏幕，保留最近结果并自动重连。</p></div>
+	                <div class="interface-card-actions">
+	                  <button type="button" class="primary" id="btn_pwa_install">安装到桌面</button>
+	                  <span id="pwa-state">正在检查安装状态</span>
+	                </div>
+	              </section>
+	              <section class="interface-card provider-capability-card">
+	                <span class="interface-card-icon">▦</span>
+	                <div><h2 id="provider-matrix-title">品牌能力矩阵</h2><p id="provider-matrix-help">不同官网提供的数据能力可能不同。</p></div>
+	                <div class="provider-capability-table" id="provider-capability-table">Loading...</div>
+	              </section>
+	              <section class="interface-card simulation-card">
+	                <span class="interface-card-icon">◫</span>
+	                <div><h2 id="simulation-title">响应模拟与压力测试</h2><p id="simulation-help">使用本地模拟官网响应，不访问真实酒店网站。</p></div>
+	                <div class="simulation-controls">
+	                  <label>Iterations <input id="simulation_iterations" type="number" min="1" max="5000" value="500"></label>
+	                  <label>Concurrency <input id="simulation_concurrency" type="number" min="1" max="32" value="4"></label>
+	                  <button type="button" id="btn_simulation_run">运行测试 Run</button>
+	                </div>
+	                <pre id="simulation-output">-</pre>
 	              </section>
 	              <section class="interface-card mobile-access-card" id="mobile-access-card">
 	                <span class="interface-card-icon mobile-access-icon" aria-hidden="true">▯</span>
@@ -2347,12 +3124,14 @@ def home() -> Response:
 	          </div>
         """
 
-    page_html += """
+    page_html += f"""
           <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-          <script src="/static/app.js"></script>
+          <script src="/static/app.js?v={APP_VERSION}-traffic-1"></script>
         </body></html>
         """
-    return Response(page_html, mimetype="text/html")
+    response = Response(page_html, mimetype="text/html")
+    response.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return response
 
  # ---- Hotel name → code mapping (toyoko_hotel_names.json) ----
 HOTEL_NAME_JSON = os.path.join(BASE_DIR, "toyoko_hotel_names.json")
@@ -3252,6 +4031,43 @@ def _apply_payload_to_config(cfg: AppConfig, payload: Dict[str, Any]) -> None:
             cfg.engine = eng
 
 
+_PREFERENCE_KEYS = {
+    "primary_language",
+    "enable_telegram", "bot_token", "chat_id",
+    "enable_bark", "bark_key", "bark_server",
+    "bark_critical_enabled", "bark_critical_volume", "bark_critical_sound",
+    "enable_serverchan", "serverchan_sendkey",
+    "enable_local", "enable_email", "smtp_host", "smtp_port", "smtp_tls",
+    "smtp_user", "smtp_pass", "email_from", "email_to",
+    "notify_available", "notify_unavailable", "notify_availability_count_change",
+    "notify_start", "notify_stop", "notify_search_error",
+    "available_alert_repeat", "available_alert_repeat_interval_sec",
+    "loop_interval_seconds", "per_hotel_delay_seconds", "request_jitter_percent",
+    "smart_parallel_enabled", "smart_parallel_workers", "adaptive_backoff_enabled",
+    "engine",
+}
+
+
+def save_preferences() -> Response:
+    payload = request.get_json(force=True, silent=True) or {}
+    patch = {key: value for key, value in payload.items() if key in _PREFERENCE_KEYS}
+    if not patch:
+        return jsonify({"ok": False, "message": "no supported preference fields"}), 400
+    with _CONFIG_LOCK:
+        candidate = deepcopy(_CONFIG)
+    try:
+        _apply_payload_to_config(candidate, patch)
+    except (TypeError, ValueError) as exc:
+        return jsonify({"ok": False, "message": str(exc)}), 400
+    with _CONFIG_LOCK:
+        for key in patch:
+            if hasattr(candidate, key):
+                setattr(_CONFIG, key, getattr(candidate, key))
+    if not _save_config_to_file(AUTO_SAVE_PATH):
+        return jsonify({"ok": False, "message": "preference save failed"}), 500
+    return jsonify({"ok": True, "saved": sorted(patch)})
+
+
 def start() -> Response:
         global _worker_thread, _RUN_REQUESTED, _LAST_RESULTS, _RESULTS_REVISION
         payload = request.get_json(force=True, silent=True) or {}
@@ -3297,15 +4113,20 @@ def start() -> Response:
             _worker_thread.join(timeout=2)
         _stop_event.clear()
 
-        with _RESULTS_LOCK:
-            _LAST_RESULTS = []
-            _RESULTS_REVISION += 1
-        with _PROGRESS_LOCK:
-            _PROGRESS["backoff_multiplier"] = 1
-            _PROGRESS["unknown_ratio_percent"] = 0
-            _PROGRESS["consecutive_unhealthy_rounds"] = 0
-            _PROGRESS["effective_interval_sec"] = int(_CONFIG.loop_interval_seconds)
-        clear_alert_state()
+        with _CONFIG_LOCK:
+            cfg_snapshot = deepcopy(_CONFIG)
+        restored_checkpoint = bool(not run_once and _restore_runtime_checkpoint(cfg_snapshot))
+        if not restored_checkpoint:
+            with _RESULTS_LOCK:
+                _LAST_RESULTS = []
+                _RESULTS_REVISION += 1
+            clear_alert_state()
+        if not restored_checkpoint:
+            with _PROGRESS_LOCK:
+                _PROGRESS["backoff_multiplier"] = 1
+                _PROGRESS["unknown_ratio_percent"] = 0
+                _PROGRESS["consecutive_unhealthy_rounds"] = 0
+                _PROGRESS["effective_interval_sec"] = int(_CONFIG.loop_interval_seconds)
 
         _worker_thread = threading.Thread(
             target=_worker_loop,
@@ -3340,6 +4161,7 @@ def stop() -> Response:
         if _worker_thread and _worker_thread.is_alive():
             _worker_thread.join(timeout=2)
         _worker_thread = None
+        _persist_runtime_checkpoint()
         with _PROGRESS_LOCK:
             _PROGRESS["round"] = 0
             _PROGRESS["done"] = 0
@@ -3460,6 +4282,70 @@ def _fmt_elapsed_seconds(seconds: int) -> str:
     return " ".join(parts)
 
 
+def _runtime_diagnostics_snapshot(
+    progress: Dict[str, Any],
+    provider_health: Dict[str, Dict[str, Any]],
+) -> Dict[str, Any]:
+    elapsed = max(0, int(progress.get("round_elapsed_sec") or 0))
+    done = max(0, int(progress.get("done") or 0))
+    total = max(done, int(progress.get("total") or 0))
+    throughput = round(done * 60 / elapsed, 1) if elapsed and done else 0.0
+    remaining = max(0, total - done)
+    eta = int(math.ceil(remaining * 60 / throughput)) if throughput > 0 and remaining else 0
+    slowest_provider = ""
+    slowest_p95 = 0
+    for provider, state in provider_health.items():
+        p95 = int(state.get("p95_elapsed_ms") or 0)
+        if p95 > slowest_p95:
+            slowest_provider = provider
+            slowest_p95 = p95
+    with _CONFIG_LOCK:
+        current_cfg = deepcopy(_CONFIG)
+    manual_priority = sum(
+        1 for code in current_cfg.hotel_codes if _hotel_is_manual_priority(current_cfg, code)
+    )
+    adaptive_priority = sum(
+        1
+        for code in current_cfg.hotel_codes
+        if not _hotel_is_manual_priority(current_cfg, code) and _hotel_is_adaptive_priority(code)
+    )
+    try:
+        cache_status = _scan_cache_status_snapshot()
+    except Exception:
+        cache_status = {}
+    try:
+        event_status = _event_status_snapshot()
+        analytics_status = _analytics_status_snapshot()
+    except Exception:
+        event_status = {}
+        analytics_status = {}
+    return {
+        "throughput_per_min": throughput,
+        "estimated_remaining_sec": eta,
+        "queue_pending": max(0, int(progress.get("queue_pending", remaining))),
+        "in_flight": max(0, int(progress.get("in_flight") or 0)),
+        "priority_pending": max(0, int(progress.get("priority_pending") or 0)),
+        "manual_priority_hotels": manual_priority,
+        "adaptive_priority_hotels": adaptive_priority,
+        "access_failures": sum(int(state.get("access_failures") or 0) for state in provider_health.values()),
+        "rate_limited_count": sum(int(state.get("rate_limited_count") or 0) for state in provider_health.values()),
+        "cooldown_providers": sum(1 for state in provider_health.values() if state.get("state") == "cooldown"),
+        "slowest_provider": slowest_provider,
+        "slowest_p95_ms": slowest_p95,
+        "cache_entries": int(cache_status.get("entries") or 0),
+        "cache_fresh_entries": int(cache_status.get("fresh_entries") or 0),
+        "cache_hit_rate_percent": int(cache_status.get("hit_rate_percent") or 0),
+        "cache_saved_requests": int(cache_status.get("saved_requests") or 0),
+        "cache_live_requests": int(cache_status.get("live_requests") or 0),
+        "cache_coalesced_requests": int(cache_status.get("coalesced_requests") or 0),
+        "cache_conditional_hits": int(cache_status.get("conditional_hits") or 0),
+        "cache_fallback_hits": int(cache_status.get("fallback_hits") or 0),
+        "events_last_24h": int(event_status.get("last_24h") or 0),
+        "pending_deliveries": int(event_status.get("pending_deliveries") or 0),
+        "trend_observations": int(analytics_status.get("observations") or 0),
+    }
+
+
 def _runtime_status_snapshot() -> Dict[str, Any]:
     with _PROGRESS_LOCK:
         progress = dict(_PROGRESS)
@@ -3495,6 +4381,7 @@ def _runtime_status_snapshot() -> Dict[str, Any]:
             for key in ("enable_telegram", "enable_local", "enable_email", "enable_bark", "enable_serverchan")
         }
     push_status = notification_status_snapshot(channel_config)
+    provider_health = provider_health_snapshot()
 
     return {
         "ok": True,
@@ -3505,7 +4392,9 @@ def _runtime_status_snapshot() -> Dict[str, Any]:
         "action_ts": action_ts,
         "action_age_sec": int(now_ts - action_ts) if action_ts else None,
         "notification_status": push_status,
-        "provider_health": provider_health_snapshot(),
+        "provider_health": provider_health,
+        "diagnostics": _runtime_diagnostics_snapshot(progress, provider_health),
+        "traffic": _traffic_snapshot(),
         "results_revision": results_revision,
         "availability_logs_revision": availability_log_revision(),
     }
@@ -3513,6 +4402,87 @@ def _runtime_status_snapshot() -> Dict[str, Any]:
 
 def runtime_status() -> Response:
     return jsonify(_runtime_status_snapshot())
+
+
+def cache_status() -> Response:
+    return jsonify({"ok": True, "cache": _scan_cache_status_snapshot()})
+
+
+def cache_clear() -> Response:
+    removed = _scan_cache_clear()
+    return jsonify({"ok": True, "removed": removed, "cache": _scan_cache_status_snapshot()})
+
+
+def provider_capabilities_status() -> Response:
+    with _CONFIG_LOCK:
+        enabled = list(_CONFIG.enabled_providers)
+    return jsonify({"ok": True, "matrix": _provider_capability_matrix(enabled)})
+
+
+def events_status() -> Response:
+    try:
+        limit = max(1, min(500, int(request.args.get("limit", 100))))
+    except (TypeError, ValueError):
+        limit = 100
+    event_type = str(request.args.get("type", "") or "")
+    return jsonify({
+        "ok": True,
+        "events": _list_events(limit=limit, event_type=event_type),
+        "status": _event_status_snapshot(),
+    })
+
+
+def trends_status() -> Response:
+    requested = [code.strip() for code in str(request.args.get("codes", "")).split(",") if code.strip()]
+    with _CONFIG_LOCK:
+        config_snapshot = deepcopy(_CONFIG)
+    if not requested:
+        requested = list(config_snapshot.hotel_codes)
+    try:
+        days = max(1, min(180, int(request.args.get("days", 30))))
+    except (TypeError, ValueError):
+        days = 30
+    trends = _trend_snapshot(
+        requested,
+        days=days,
+        scope_key=_analytics_scope_key(config_snapshot),
+    )
+    hotel_meta = {
+        str(item.get("code") or ""): item
+        for item in config_snapshot.selected_hotels
+        if isinstance(item, dict) and item.get("code")
+    }
+    for hotel in trends.get("hotels", []):
+        meta = hotel_meta.get(str(hotel.get("code") or ""), {})
+        hotel["display_code"] = str(meta.get("display_code") or hotel.get("code") or "")
+        hotel["name"] = str(
+            meta.get("name_primary")
+            or meta.get("name")
+            or meta.get("name_en")
+            or ""
+        )
+    return jsonify({"ok": True, "trends": trends})
+
+
+def simulation_stress() -> Response:
+    payload = request.get_json(force=True, silent=True) or {}
+    try:
+        iterations = max(1, min(5000, int(payload.get("iterations", 500))))
+        concurrency = max(1, min(32, int(payload.get("concurrency", 4))))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "message": "invalid stress test parameters"}), 400
+    scenario = str(payload.get("scenario", "mixed") or "mixed")
+    if scenario not in {"mixed", "available", "unavailable"}:
+        scenario = "mixed"
+    return jsonify(_run_simulation_stress_test(
+        iterations=iterations,
+        concurrency=concurrency,
+        scenario=scenario,
+    ))
+
+
+def _prune_scan_cache() -> int:
+    return _scan_cache_prune_impl()
 
 
 def results_status() -> Response:

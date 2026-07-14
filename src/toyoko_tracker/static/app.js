@@ -15,6 +15,8 @@
             let RESULT_CHANGE_CLASSES = new Map();
             let RESULT_CHANGE_TOKEN = 0;
             let STATUS_REFRESH_IN_FLIGHT = false;
+            let STATUS_FAILURES = 0;
+            let STATUS_RECONNECT_TIMER = null;
             let STATUS_BOOTSTRAPPED = false;
             let SERVER_INSTANCE_ID = '';
             let RESULTS_REVISION = -1;
@@ -31,15 +33,26 @@
             let LAST_CATALOG_STATUS = null;
             let LAST_PROVIDER_CATALOG_STATUS = null;
             let LAST_PROVIDER_HEALTH = {};
+            let LAST_DIAGNOSTICS = {};
             let LAST_MOBILE_ACCESS_STATUS = null;
+            let PWA_INSTALL_PROMPT = null;
+            let LAST_TREND_REFRESH = 0;
+            let LAST_TREND_DATA = null;
+            let LAST_HOME_REFRESH = 0;
+            let LAST_HOME_PAYLOAD = null;
+            let LAST_CONFIG = {};
+            let PREFERENCE_SAVE_TIMER = null;
+            let PREFERENCE_SAVE_IN_FLIGHT = false;
+            let PREFERENCE_SAVE_QUEUED = false;
+            const OFFLINE_RESULTS_KEY = 'toyoko-chan-offline-results-v1';
             let MOBILE_CONNECTION_MODE = localStorage.getItem('toyoko-chan-mobile-connection-v1') || 'lan';
             const APP_VIEW_KEY = 'toyoko-chan-active-view-v1';
             const SIDEBAR_COLLAPSED_KEY = 'toyoko-chan-sidebar-collapsed-v1';
             const THEME_KEY = 'toyoko-chan-theme-v1';
             const LANGUAGE_KEY = 'toyoko-chan-language-v1';
             const GUIDE_SEEN_KEY = 'toyoko-chan-guide-seen-version';
-            const APP_VIEWS = ['search', 'monitor', 'search-settings', 'push-settings', 'interface'];
-            let ACTIVE_APP_VIEW = 'search';
+            const APP_VIEWS = ['home', 'search', 'monitor', 'search-settings', 'push-settings', 'interface'];
+            let ACTIVE_APP_VIEW = 'home';
             let THEME_PREFERENCE = 'system';
             let GUIDE_STEP = 0;
             let GUIDE_AUTO_OPEN = false;
@@ -61,6 +74,8 @@
                 state.textContent = tx(online ? 'connectionOnline' : 'connectionOffline');
                 state.className = `connection-state ${online ? 'online' : 'offline'}`;
               }
+              const homeConnection = document.getElementById('home-health-connection');
+              if (homeConnection) homeConnection.textContent = tx(online ? 'homeNormal' : 'connectionOffline');
               document.querySelector('.command-dock')?.classList.toggle('offline', !online);
             }
             function updateResultsTimestamp(){
@@ -100,7 +115,7 @@
                 pushSettingsNote: '空房、重复提醒、无房变化和启动通知会发送到所有已启用渠道。',
                 searchEngine: '检索引擎 / Search Engine', engineHelp: 'HTTP/API 请求更少更快；失败时会尝试回退 Playwright。',
                 enableSmartParallel: '启用智能并行 / Enable', workers: '并行线数 / Workers', current: '当前 / Current',
-                smartParallelHelp: '仅 HTTP/API 生效；不同品牌并行，同品牌独立限速',
+                smartParallelHelp: '仅 HTTP/API 生效；不同品牌并行，同品牌动态限速，重点与近期变化酒店优先',
                 roundInterval: '每轮检索间隔 / Round Interval', perHotelDelay: '每家酒店基础间隔 / Per-hotel Base Delay',
                 requestJitter: '随机抖动 / Request Jitter', seconds: '秒 / sec', recommended120: '建议 120 秒以上 / 120+ recommended',
                 reminderPolicy: '提醒策略 / Reminder Policy', repeatCount: '重复提醒次数 / Reminder Repeat Count',
@@ -114,7 +129,7 @@
                 duration: '有效持续时间 / Duration', noLog: '暂无日志 / No log yet',
                 enableBark: '启用 Bark 推送 / Enable Bark', enableServerChan: '启用 Server 酱 / Enable ServerChan',
                 enableTelegram: '启用 Telegram / Enable', enableLocal: '启用本地通知 / Enable Local',
-                enableEmail: '启用邮件推送 / Enable Email', localHelp: 'macOS 首次使用可能需要在 System Settings > Notifications 中允许 Terminal / Python / osascript 通知。',
+                enableEmail: '启用邮件推送 / Enable Email', localHelp: '本地通知会调用系统工具：macOS 使用 terminal-notifier/osascript，Windows 使用 PowerShell，Linux 需要 notify-send。',
                 runTitle: '启动与监控 / Run Control', runSubtitle: '启动后按当前搜索范围循环检索；运行中可以停止或调整设定。',
                 status: '状态 / Status', loop: '追踪轮次 / Loop', progress: '本轮进度 / Progress', uptime: '总耗时 / Uptime',
                 stopped: 'STOPPED 已停止', running: 'RUNNING 运行中', progressText: '进度 / Progress',
@@ -137,7 +152,7 @@
                 tipBark: '适合 iPhone/iPad。步骤：1. iPhone/iPad 安装 Bark App。2. 复制 App 首页的 Device Key。3. 填入 Bark Key。4. 公共服务保持默认 Bark Server；自建服务则填你的服务器地址。5. 勾选启用后启动搜索。',
                 tipServerChan: '适合微信推送。步骤：1. 打开 Server 酱官网并用微信登录。2. 绑定微信推送通道。3. 在 SendKey 页面复制 SCT 开头的 SendKey。4. 粘贴到这里。5. 勾选启用后启动搜索。',
                 tipTelegram: '步骤：1. 在 Telegram 搜索 BotFather。2. 使用 /newbot 创建机器人并复制 Bot Token。3. 给机器人发一条消息，或把机器人加入群组。4. 获取 Chat ID 后填入。5. 勾选启用后启动搜索。',
-                tipLocal: '在本机弹出系统通知。步骤：1. 勾选启用本地通知。2. 点击发送测试通知。3. 如果 macOS 没弹窗，到 System Settings > Notifications 允许 Terminal / Python / osascript。4. 测试成功后启动搜索即可。',
+                tipLocal: '在本机弹出系统通知。步骤：1. 勾选启用本地通知。2. 点击发送测试通知。3. macOS 检查通知权限；Windows 需要 PowerShell；Linux 需要 notify-send 和图形桌面会话。4. 测试成功后启动搜索。',
                 tipEmail: '使用 SMTP 发送邮件。步骤：1. 在邮箱后台开启 SMTP。2. 生成应用专用密码。3. 填 SMTP Host、Port、Username、Password。4. 填 From 和 To。5. 465 通常启用 SSL/TLS；587 通常也可启用 TLS。'
               },
               zh_tw: {
@@ -165,7 +180,7 @@
                 pushSettingsNote: '空房、重複提醒、無房變化和啟動通知會傳送到所有已啟用通道。',
                 searchEngine: '搜尋引擎 / Search Engine', engineHelp: 'HTTP/API 請求更少更快；失敗時會嘗試回退 Playwright。',
                 enableSmartParallel: '啟用智慧並行 / Enable', workers: '並行線數 / Workers', current: '目前 / Current',
-                smartParallelHelp: '僅 HTTP/API 生效；不同品牌並行，同品牌獨立限速',
+                smartParallelHelp: '僅 HTTP/API 生效；不同品牌並行，同品牌動態限速，重點與近期變化飯店優先',
                 roundInterval: '每輪搜尋間隔 / Round Interval', perHotelDelay: '每家飯店基礎間隔 / Per-hotel Base Delay',
                 requestJitter: '隨機抖動 / Request Jitter', seconds: '秒 / sec', recommended120: '建議 120 秒以上 / 120+ recommended',
                 reminderPolicy: '提醒策略 / Reminder Policy', repeatCount: '重複提醒次數 / Reminder Repeat Count',
@@ -179,7 +194,7 @@
                 duration: '有效持續時間 / Duration', noLog: '暫無日誌 / No log yet',
                 enableBark: '啟用 Bark 推送 / Enable Bark', enableServerChan: '啟用 ServerChan / Enable ServerChan',
                 enableTelegram: '啟用 Telegram / Enable', enableLocal: '啟用本地通知 / Enable Local',
-                enableEmail: '啟用郵件推送 / Enable Email', localHelp: 'macOS 首次使用可能需要在 System Settings > Notifications 中允許 Terminal / Python / osascript 通知。',
+                enableEmail: '啟用郵件推送 / Enable Email', localHelp: '本地通知會使用系統工具：macOS 使用 terminal-notifier/osascript，Windows 使用 PowerShell，Linux 需要 notify-send。',
                 runTitle: '啟動與監控 / Run Control', runSubtitle: '啟動後依目前搜尋範圍循環搜尋；執行中可以停止或調整設定。',
                 status: '狀態 / Status', loop: '追蹤輪次 / Loop', progress: '本輪進度 / Progress', uptime: '總耗時 / Uptime',
                 stopped: 'STOPPED 已停止', running: 'RUNNING 執行中', progressText: '進度 / Progress',
@@ -202,7 +217,7 @@
                 tipBark: '適合 iPhone/iPad。步驟：1. 安裝 Bark App。2. 複製 Device Key。3. 填入 Bark Key。4. 公共服務保持預設 Bark Server；自建服務則填你的伺服器地址。',
                 tipServerChan: '適合微信推送。步驟：1. 打開 ServerChan 官網並登入。2. 綁定微信推送通道。3. 複製 SendKey。4. 貼到這裡。5. 勾選啟用後啟動搜尋。',
                 tipTelegram: '步驟：1. 在 Telegram 搜尋 BotFather。2. 使用 /newbot 建立機器人並複製 Bot Token。3. 給機器人發訊息或加入群組。4. 取得 Chat ID 後填入。',
-                tipLocal: '在本機彈出系統通知。步驟：1. 勾選啟用本地通知。2. 點擊傳送測試通知。3. macOS 沒彈窗時，到 System Settings > Notifications 允許 Terminal / Python / osascript。',
+                tipLocal: '在本機彈出系統通知。步驟：1. 啟用本地通知。2. 傳送測試通知。3. macOS 檢查通知權限；Windows 需要 PowerShell；Linux 需要 notify-send 與圖形桌面工作階段。',
                 tipEmail: '使用 SMTP 傳送郵件。步驟：1. 在信箱後台開啟 SMTP。2. 產生應用程式密碼。3. 填 SMTP Host、Port、Username、Password。4. 填 From 和 To。'
               },
               ja: {
@@ -230,7 +245,7 @@
                 pushSettingsNote: '空室、繰り返し通知、満室化、開始通知は有効なすべての通知先へ送信されます。',
                 searchEngine: '検索エンジン / Search Engine', engineHelp: 'HTTP/API は軽く高速です。失敗時は Playwright へフォールバックします。',
                 enableSmartParallel: 'スマート並列を有効化 / Enable', workers: '並列数 / Workers', current: '現在 / Current',
-                smartParallelHelp: 'HTTP/API のみ有効；ブランド別に並列化・速度制限します',
+                smartParallelHelp: 'HTTP/API のみ有効。ブランド別に動的制限し、重点・変化ホテルを優先します',
                 roundInterval: '各ラウンド間隔 / Round Interval', perHotelDelay: 'ホテルごとの基本間隔 / Per-hotel Base Delay',
                 requestJitter: 'ランダム揺らぎ / Request Jitter', seconds: '秒 / sec', recommended120: '120 秒以上推奨 / 120+ recommended',
                 reminderPolicy: '通知ポリシー / Reminder Policy', repeatCount: '繰り返し通知回数 / Reminder Repeat Count',
@@ -244,7 +259,7 @@
                 duration: '有効継続時間 / Duration', noLog: 'ログなし / No log yet',
                 enableBark: 'Bark 通知を有効化 / Enable Bark', enableServerChan: 'ServerChan を有効化 / Enable ServerChan',
                 enableTelegram: 'Telegram を有効化 / Enable', enableLocal: 'ローカル通知を有効化 / Enable Local',
-                enableEmail: 'メール通知を有効化 / Enable Email', localHelp: 'macOS では System Settings > Notifications で Terminal / Python / osascript の通知許可が必要な場合があります。',
+                enableEmail: 'メール通知を有効化 / Enable Email', localHelp: 'ローカル通知は macOS の terminal-notifier/osascript、Windows の PowerShell、Linux の notify-send を使用します。',
                 runTitle: '開始と監視 / Run Control', runSubtitle: '現在の検索範囲で繰り返し検索します。実行中も停止や設定変更ができます。',
                 status: '状態 / Status', loop: '巡回回数 / Loop', progress: '今回の進捗 / Progress', uptime: '総稼働時間 / Uptime',
                 stopped: 'STOPPED 停止中', running: 'RUNNING 実行中', progressText: '進捗 / Progress',
@@ -267,7 +282,7 @@
                 tipBark: 'iPhone/iPad 向けです。手順：1. Bark App をインストール。2. Device Key をコピー。3. Bark Key に入力。4. 公開サービスは既定の Bark Server、自前サーバーはその URL を入力。',
                 tipServerChan: 'WeChat 通知向けです。手順：1. ServerChan にログイン。2. 通知チャンネルを連携。3. SendKey をコピー。4. ここに貼り付け。5. 有効化して検索開始。',
                 tipTelegram: '手順：1. Telegram で BotFather を検索。2. /newbot でボットを作成し Bot Token をコピー。3. ボットへメッセージを送るかグループに追加。4. Chat ID を入力。',
-                tipLocal: 'この Mac にシステム通知を表示します。手順：1. ローカル通知を有効化。2. テスト通知を送信。3. 表示されない場合は System Settings > Notifications で Terminal / Python / osascript を許可。',
+                tipLocal: 'この端末に通知を表示します。手順：1. ローカル通知を有効化。2. テスト通知を送信。3. macOS は通知権限、Windows は PowerShell、Linux は notify-send とデスクトップセッションを確認。',
                 tipEmail: 'SMTP でメールを送信します。手順：1. メール側で SMTP を有効化。2. アプリパスワードを作成。3. SMTP Host、Port、Username、Password を入力。4. From と To を入力。'
               },
               ko: {
@@ -295,7 +310,7 @@
                 pushSettingsNote: '빈 객실, 반복 알림, 매진 변화, 시작 알림은 활성화된 모든 채널로 전송됩니다.',
                 searchEngine: '검색 엔진 / Search Engine', engineHelp: 'HTTP/API는 더 가볍고 빠릅니다. 실패하면 Playwright로 폴백합니다.',
                 enableSmartParallel: '스마트 병렬 활성화 / Enable', workers: '병렬 라인 수 / Workers', current: '현재 / Current',
-                smartParallelHelp: 'HTTP/API 전용；브랜드별 병렬 처리와 독립 제한',
+                smartParallelHelp: 'HTTP/API 전용. 브랜드별 동적 제한과 중점·최근 변경 호텔 우선 처리',
                 roundInterval: '라운드 간격 / Round Interval', perHotelDelay: '호텔별 기본 간격 / Per-hotel Base Delay',
                 requestJitter: '랜덤 지터 / Request Jitter', seconds: '초 / sec', recommended120: '120초 이상 권장 / 120+ recommended',
                 reminderPolicy: '알림 정책 / Reminder Policy', repeatCount: '반복 알림 횟수 / Reminder Repeat Count',
@@ -309,7 +324,7 @@
                 duration: '유효 지속 시간 / Duration', noLog: '로그 없음 / No log yet',
                 enableBark: 'Bark 푸시 활성화 / Enable Bark', enableServerChan: 'ServerChan 활성화 / Enable ServerChan',
                 enableTelegram: 'Telegram 활성화 / Enable', enableLocal: '로컬 알림 활성화 / Enable Local',
-                enableEmail: '이메일 푸시 활성화 / Enable Email', localHelp: 'macOS에서는 System Settings > Notifications에서 Terminal / Python / osascript 알림 허용이 필요할 수 있습니다.',
+                enableEmail: '이메일 푸시 활성화 / Enable Email', localHelp: '로컬 알림은 macOS의 terminal-notifier/osascript, Windows의 PowerShell, Linux의 notify-send를 사용합니다.',
                 runTitle: '시작 및 모니터링 / Run Control', runSubtitle: '현재 검색 범위로 반복 검색합니다. 실행 중에도 중지하거나 설정을 조정할 수 있습니다.',
                 status: '상태 / Status', loop: '추적 회차 / Loop', progress: '이번 진행률 / Progress', uptime: '총 실행 시간 / Uptime',
                 stopped: 'STOPPED 중지됨', running: 'RUNNING 실행 중', progressText: '진행률 / Progress',
@@ -332,7 +347,7 @@
                 tipBark: 'iPhone/iPad용입니다. 단계: 1. Bark App 설치. 2. Device Key 복사. 3. Bark Key 입력. 4. 공용 서비스는 기본 Bark Server 유지, 자체 서버는 해당 URL 입력.',
                 tipServerChan: 'WeChat 푸시용입니다. 단계: 1. ServerChan 로그인. 2. 푸시 채널 연결. 3. SendKey 복사. 4. 여기에 붙여넣기. 5. 활성화 후 검색 시작.',
                 tipTelegram: '단계: 1. Telegram에서 BotFather 검색. 2. /newbot으로 봇 생성 후 Bot Token 복사. 3. 봇에 메시지를 보내거나 그룹에 추가. 4. Chat ID 입력.',
-                tipLocal: '이 Mac에 시스템 알림을 표시합니다. 단계: 1. 로컬 알림 활성화. 2. 테스트 알림 전송. 3. 표시되지 않으면 System Settings > Notifications에서 Terminal / Python / osascript 허용.',
+                tipLocal: '이 기기에 알림을 표시합니다. 단계: 1. 로컬 알림 활성화. 2. 테스트 전송. 3. macOS는 알림 권한, Windows는 PowerShell, Linux는 notify-send와 데스크톱 세션을 확인하세요.',
                 tipEmail: 'SMTP로 이메일을 보냅니다. 단계: 1. 메일 서비스에서 SMTP 활성화. 2. 앱 비밀번호 생성. 3. SMTP Host, Port, Username, Password 입력. 4. From과 To 입력.'
               }
             };
@@ -924,7 +939,8 @@
                 catalogUpdating:'更新中', providerCatalogNew:'发现新酒店：{count}',
                 historyNoRegion:'未选择区域', historyAllAreas:'全部区域', historyHotelCount:'{count} 家酒店',
                 providerHealth:'来源健康', healthIdle:'等待', healthHealthy:'正常', healthDegraded:'异常', healthCooldown:'冷却',
-                providerChecks:'{count} 次', providerAverage:'平均 {ms}ms'
+                providerChecks:'{count} 次', providerAverage:'平均 {ms}ms', priorityHotel:'设为重点酒店', removePriority:'取消重点酒店',
+                diagnosticsTitle:'运行诊断', diagnosticsSummary:'自适应调度', diagnosticsThroughput:'吞吐量', diagnosticsEta:'预计剩余', diagnosticsQueue:'队列 / 进行中', diagnosticsLatency:'最慢 P95', diagnosticsPriority:'优先酒店', diagnosticsProtection:'保护事件', diagnosticsCache:'缓存命中', diagnosticsSaved:'节省请求', clearCache:'清除检索缓存', cacheFresh:'缓存 {age}s', cacheValidated:'已验证', cacheFallback:'缓存保底', cacheCleared:'已清除 {count} 条检索缓存', trendTitle:'价格与空房趋势', trendWaiting:'等待历史数据', trendSamples:'{count} 条历史记录', trendPrediction:'空房概率 {probability}% · 可信度 {confidence}%', pwaTitle:'手机桌面版', pwaHelp:'安装到主屏幕，保留最近结果并自动重连。', pwaInstall:'安装到桌面', pwaInstalled:'已作为桌面应用运行', pwaReady:'可安装', pwaIos:'iPhone：使用分享菜单中的“添加到主屏幕”', providerMatrixTitle:'品牌能力矩阵', providerMatrixHelp:'不同官网提供的数据能力可能不同。', simulationTitle:'响应模拟与压力测试', simulationHelp:'使用本地模拟官网响应，不访问真实酒店网站。', simulationRun:'运行测试', eventCenterTitle:'统一事件中心', eventNone:'暂无事件', eventDelivery:'推送'
               },
               zh_tw: {
                 languageHelp:'介面僅顯示目前選擇的語言。', stopped:'已停止', running:'執行中',
@@ -933,7 +949,8 @@
                 catalogUpdating:'更新中', providerCatalogNew:'發現新飯店：{count}',
                 historyNoRegion:'未選擇區域', historyAllAreas:'全部區域', historyHotelCount:'{count} 家飯店',
                 providerHealth:'來源健康', healthIdle:'等待', healthHealthy:'正常', healthDegraded:'異常', healthCooldown:'冷卻',
-                providerChecks:'{count} 次', providerAverage:'平均 {ms}ms'
+                providerChecks:'{count} 次', providerAverage:'平均 {ms}ms', priorityHotel:'設為重點飯店', removePriority:'取消重點飯店',
+                diagnosticsTitle:'執行診斷', diagnosticsSummary:'自適應調度', diagnosticsThroughput:'吞吐量', diagnosticsEta:'預計剩餘', diagnosticsQueue:'佇列 / 進行中', diagnosticsLatency:'最慢 P95', diagnosticsPriority:'優先飯店', diagnosticsProtection:'保護事件', diagnosticsCache:'快取命中', diagnosticsSaved:'節省請求', clearCache:'清除檢索快取', cacheFresh:'快取 {age}s', cacheValidated:'已驗證', cacheFallback:'快取備援', cacheCleared:'已清除 {count} 筆檢索快取', trendTitle:'價格與空房趨勢', trendWaiting:'等待歷史資料', trendSamples:'{count} 筆歷史記錄', trendPrediction:'空房機率 {probability}% · 可信度 {confidence}%', pwaTitle:'手機桌面版', pwaHelp:'安裝到主畫面，保留最近結果並自動重新連線。', pwaInstall:'安裝到桌面', pwaInstalled:'已作為桌面應用執行', pwaReady:'可安裝', pwaIos:'iPhone：使用分享選單的「加入主畫面」', providerMatrixTitle:'品牌能力矩陣', providerMatrixHelp:'不同官網提供的資料能力可能不同。', simulationTitle:'回應模擬與壓力測試', simulationHelp:'使用本機模擬官網回應，不存取真實飯店網站。', simulationRun:'執行測試', eventCenterTitle:'統一事件中心', eventNone:'暫無事件', eventDelivery:'推送'
               },
               ja: {
                 languageHelp:'画面には選択した言語のみ表示されます。', stopped:'停止中', running:'実行中',
@@ -942,7 +959,8 @@
                 catalogUpdating:'更新中', providerCatalogNew:'新規ホテル：{count}',
                 historyNoRegion:'地域未選択', historyAllAreas:'すべての地域', historyHotelCount:'ホテル {count} 件',
                 providerHealth:'接続先の状態', healthIdle:'待機', healthHealthy:'正常', healthDegraded:'異常', healthCooldown:'待機中',
-                providerChecks:'{count} 回', providerAverage:'平均 {ms}ms'
+                providerChecks:'{count} 回', providerAverage:'平均 {ms}ms', priorityHotel:'重点ホテルに設定', removePriority:'重点を解除',
+                diagnosticsTitle:'実行診断', diagnosticsSummary:'適応型スケジューリング', diagnosticsThroughput:'処理速度', diagnosticsEta:'残り時間', diagnosticsQueue:'待機 / 実行中', diagnosticsLatency:'最遅 P95', diagnosticsPriority:'優先ホテル', diagnosticsProtection:'保護イベント', diagnosticsCache:'キャッシュ命中', diagnosticsSaved:'削減リクエスト', clearCache:'検索キャッシュを消去', cacheFresh:'キャッシュ {age}秒', cacheValidated:'再検証済み', cacheFallback:'キャッシュ代替', cacheCleared:'検索キャッシュを {count} 件消去しました', trendTitle:'料金・空室トレンド', trendWaiting:'履歴データを待っています', trendSamples:'履歴 {count} 件', trendPrediction:'空室確率 {probability}% · 信頼度 {confidence}%', pwaTitle:'モバイルアプリ', pwaHelp:'ホーム画面に追加し、直近の結果を保持して自動再接続します。', pwaInstall:'ホーム画面に追加', pwaInstalled:'アプリとして実行中', pwaReady:'インストール可能', pwaIos:'iPhone：共有メニューから「ホーム画面に追加」', providerMatrixTitle:'ブランド機能マトリクス', providerMatrixHelp:'公式サイトごとに利用できるデータが異なります。', simulationTitle:'レスポンス模擬・負荷テスト', simulationHelp:'実サイトへアクセスせずローカル応答でテストします。', simulationRun:'テスト実行', eventCenterTitle:'統合イベントセンター', eventNone:'イベントはありません', eventDelivery:'通知'
               },
               ko: {
                 languageHelp:'화면에는 선택한 언어만 표시됩니다.', stopped:'중지됨', running:'실행 중',
@@ -951,7 +969,8 @@
                 catalogUpdating:'업데이트 중', providerCatalogNew:'신규 호텔: {count}',
                 historyNoRegion:'지역 미선택', historyAllAreas:'전체 지역', historyHotelCount:'호텔 {count}개',
                 providerHealth:'연결 상태', healthIdle:'대기', healthHealthy:'정상', healthDegraded:'오류', healthCooldown:'대기 중',
-                providerChecks:'{count}회', providerAverage:'평균 {ms}ms'
+                providerChecks:'{count}회', providerAverage:'평균 {ms}ms', priorityHotel:'중점 호텔로 설정', removePriority:'중점 해제',
+                diagnosticsTitle:'실행 진단', diagnosticsSummary:'적응형 스케줄링', diagnosticsThroughput:'처리량', diagnosticsEta:'예상 남은 시간', diagnosticsQueue:'대기 / 실행 중', diagnosticsLatency:'최저속 P95', diagnosticsPriority:'우선 호텔', diagnosticsProtection:'보호 이벤트', diagnosticsCache:'캐시 적중', diagnosticsSaved:'절감 요청', clearCache:'검색 캐시 지우기', cacheFresh:'캐시 {age}초', cacheValidated:'재검증됨', cacheFallback:'캐시 대체', cacheCleared:'검색 캐시 {count}개를 지웠습니다', trendTitle:'가격 및 객실 추세', trendWaiting:'기록 데이터를 기다리는 중', trendSamples:'기록 {count}개', trendPrediction:'객실 확률 {probability}% · 신뢰도 {confidence}%', pwaTitle:'모바일 홈 앱', pwaHelp:'홈 화면에 설치하고 최근 결과와 자동 재연결을 사용합니다.', pwaInstall:'홈 화면에 설치', pwaInstalled:'앱으로 실행 중', pwaReady:'설치 가능', pwaIos:'iPhone: 공유 메뉴에서 “홈 화면에 추가”', providerMatrixTitle:'브랜드 기능 매트릭스', providerMatrixHelp:'공식 사이트마다 제공 데이터가 다를 수 있습니다.', simulationTitle:'응답 시뮬레이션 및 부하 테스트', simulationHelp:'실제 호텔 사이트에 접속하지 않고 로컬 응답으로 테스트합니다.', simulationRun:'테스트 실행', eventCenterTitle:'통합 이벤트 센터', eventNone:'이벤트 없음', eventDelivery:'알림'
               }
             };
             const EN_UI = {
@@ -961,14 +980,15 @@
               historyNoRegion:'No region', historyAllAreas:'All areas', historyHotelCount:'{count} hotels',
               providerHealth:'Provider health', healthIdle:'Idle', healthHealthy:'Healthy', healthDegraded:'Degraded', healthCooldown:'Cooldown',
               providerChecks:'{count} checks', providerAverage:'Avg {ms}ms',
+              priorityHotel:'Mark as priority hotel', removePriority:'Remove priority', diagnosticsTitle:'Run Diagnostics', diagnosticsSummary:'Adaptive scheduling', diagnosticsThroughput:'Throughput', diagnosticsEta:'Estimated remaining', diagnosticsQueue:'Queued / active', diagnosticsLatency:'Slowest P95', diagnosticsPriority:'Priority hotels', diagnosticsProtection:'Protection events', diagnosticsCache:'Cache hit', diagnosticsSaved:'Requests saved', clearCache:'Clear scan cache', cacheFresh:'Cached {age}s', cacheValidated:'Revalidated', cacheFallback:'Cached backup', cacheCleared:'Cleared {count} cached scan entries', trendTitle:'Price & Availability Trends', trendWaiting:'Waiting for history', trendSamples:'{count} historical observations', trendPrediction:'Availability {probability}% · confidence {confidence}%', pwaTitle:'Mobile Home App', pwaHelp:'Install to the home screen, retain recent results, and reconnect automatically.', pwaInstall:'Install app', pwaInstalled:'Running as an installed app', pwaReady:'Ready to install', pwaIos:'iPhone: use Add to Home Screen in the Share menu', providerMatrixTitle:'Provider Capability Matrix', providerMatrixHelp:'Data capabilities vary by official website.', simulationTitle:'Response Simulation & Stress Test', simulationHelp:'Uses local simulated responses without contacting hotel websites.', simulationRun:'Run test', eventCenterTitle:'Unified Event Center', eventNone:'No events yet', eventDelivery:'Delivery',
               areaHint:'Choose a region. Detail area is optional; leaving it blank loads the full region. Check hotels, then start searching.',
               areaSelected:'Region selected. Load the full region or choose a detail area, then check hotels and start searching.',
               historyHint:'Shows the 10 most recent searches. Identical settings are not duplicated.',
               searchSettingsNote:'Engine, scan cadence, and smart parallel settings are managed here. Smart Parallel applies to HTTP/API only and staggers requests.',
               pushSettingsNote:'Availability, repeat, loss, and start notifications are sent through every enabled channel.',
               engineHelp:'HTTP/API uses fewer requests and is faster. It can fall back to Playwright when parsing fails.',
-              smartParallelHelp:'HTTP/API only. Runs brands in parallel while rate-limiting each brand independently.',
-              localHelp:'On first use, macOS may require notification permission for Terminal, Python, or osascript in System Settings > Notifications.',
+              smartParallelHelp:'HTTP/API only. Runs brands in parallel, adapts each rate, and prioritizes starred or recently changed hotels.',
+              localHelp:'Local notifications use terminal-notifier/osascript on macOS, PowerShell on Windows, and notify-send on Linux.',
               runSubtitle:'Repeatedly scans the current hotel scope. You can stop or adjust settings while running.',
               stopped:'STOPPED', running:'RUNNING', pushSubtitle:'Shows enabled notification channels and their most recent delivery state.',
               tipEngine:'HTTP/API is recommended by default because it is lightweight, fast, and resource efficient. If parsing fails, the app can fall back to Playwright, which behaves more like a real browser but uses more resources.',
@@ -978,13 +998,111 @@
               tipBark:'For iPhone and iPad. 1. Install Bark. 2. Copy the Device Key from the app home screen. 3. Enter it as Bark Key. 4. Keep the default server or enter a self-hosted server. 5. Enable Bark and start searching.',
               tipServerChan:'For WeChat notifications. 1. Sign in to Server Chan. 2. Connect a WeChat channel. 3. Copy the SendKey. 4. Paste it here. 5. Enable the channel and start searching.',
               tipTelegram:'1. Find BotFather in Telegram. 2. Create a bot with /newbot and copy the token. 3. Message the bot or add it to a group. 4. Enter the Chat ID. 5. Enable Telegram and start searching.',
-              tipLocal:'Shows system notifications on this Mac. 1. Enable Local Notifications. 2. Send a test. 3. If nothing appears, allow Terminal, Python, or osascript in System Settings > Notifications.',
+              tipLocal:'Shows notifications on this computer. 1. Enable Local Notifications. 2. Send a test. 3. On macOS check notification permissions; Windows needs PowerShell; Linux needs notify-send and a graphical desktop session.',
               tipEmail:'Sends mail through SMTP. 1. Enable SMTP with your provider. 2. Create an app password. 3. Enter host, port, username, and password. 4. Enter From and To. Port 465 commonly uses SSL/TLS; 587 commonly uses TLS.',
               catalogMeta:'{open} open hotels in Japan · {coords} coordinates · {cache} · {checked}',
               mystaysProvider:'MYSTAYS Hotel', toyokoShort:'Toyoko Inn', routeinnShort:'Route Inn', dormyShort:'Dormy Inn', mystaysShort:'MYSTAYS', daiwaShort:'Daiwa Roynet',
               updateAvailableMessage:'Current: v{current} · Latest: v{latest}', selectedSummary:'Selected {selected} / {total}', showingResults:'Showing {shown} / {total}',
               languageHelp:'The interface shows only the selected language.', secondsAgo:'{seconds}s ago'
             };
+            Object.assign(SINGLE_UI_OVERRIDES.zh_cn, {
+              navHome:'首页', homeEyebrow:'今日监控台', homeGreeting:'欢迎回来', homeLoading:'正在读取上次的检索与监控状态…',
+              homeSetupSearch:'建立检索', homeContinueSearch:'继续上次检索', homeViewMonitor:'查看监控', homeLiveLabel:'监控状态', homeNextScan:'下次检索',
+              homeMetricStatus:'监控状态', homeMetricAvailable:'当前空房', homeMetricHotels:'监控酒店', homeMetricNext:'下次检索', homeMetricTraffic:'WebUI 流量', homeTrafficAccesses:'{count} 次访问', homeTrafficTooltip:'WebUI 应用层估算：下行 {down}（{downRate}/s） · 上行 {up}（{upRate}/s） · 页面打开 {visits} 次；不含酒店官网检索流量',
+              homeReady:'准备开始', homeSelectedHotels:'{count} 家酒店', homeNoHotels:'尚未选择', homeWaitingStart:'等待启动', homeScanning:'正在检索', homeWaitingRound:'等待下一轮',
+              homeTaskKicker:'当前任务', homeTaskEmpty:'尚未建立监控任务', homeTaskReady:'任务已就绪', homeTaskRunning:'正在监控', homeTaskStopped:'待启动',
+              homeCheckin:'入住', homeCheckout:'退房', homeNoRegion:'尚未选择区域', homeEditSearch:'修改条件', homeViewResults:'查看实时结果',
+              homeActivityKicker:'实时动态', homeActivityTitle:'最新空房变化', homeAllEvents:'全部事件', homeActivityEmpty:'还没有空房变化',
+              homeTrendKicker:'数据洞察', homeTrendTitle:'空房与价格趋势', homeViewTrend:'查看趋势', homeTrendRecords:'条历史记录', homeTrendEmpty:'数据会在检索后自动积累',
+              homeQuickKicker:'快捷入口', homeQuickTitle:'开始新的操作', homeQuickArea:'区域检索', homeQuickRadius:'方圆检索', homeQuickHistory:'搜索记录', homeQuickPush:'推送设定',
+              homeHealthKicker:'系统状态', homeHealthTitle:'服务运行状态', homeChecking:'检查中', homeHealthy:'全部正常', homeAttention:'需要留意',
+              homeConnection:'WebUI 连接', homeProviders:'酒店来源', homeNotifications:'推送渠道', homeHistoryData:'历史数据', homeNormal:'正常', homeWaiting:'等待',
+              homeEnabledChannels:'{count} 个启用', homeHistoryRecords:'{count} 条', homeProviderReady:'{healthy}/{total} 正常', homeNoProviderChecks:'等待首次检索',
+              homeRunningSummary:'正在监控 {count} 家酒店，东横酱会持续留意新的空房变化。', homeStoppedSummary:'已载入 {count} 家酒店，确认条件后即可开始监控。', homeEmptySummary:'先选择日期和酒店，东横酱会持续留意空房变化。',
+              homeGuestRoom:'{people} 人 · {rooms} 房', homeProviderCount:'{count} 个品牌',
+              eventAvailable:'发现空房', eventUnavailable:'房源已消失', eventCountChanged:'可用数量变化', eventReminder:'空房重复提醒', eventSearchError:'检索需要确认', eventStarted:'搜索已启动', eventStopped:'搜索已停止', eventGeneric:'监控事件',
+              homeJustNow:'刚刚', homeMinutesAgo:'{count} 分钟前', homeHoursAgo:'{count} 小时前', homeAvailabilityPrediction:'空房概率 {probability}% · 可信度 {confidence}%', homeNoPrediction:'正在积累样本'
+            });
+            Object.assign(SINGLE_UI_OVERRIDES.zh_tw, {
+              navHome:'首頁', homeEyebrow:'今日監控台', homeGreeting:'歡迎回來', homeLoading:'正在讀取上次的搜尋與監控狀態…',
+              homeSetupSearch:'建立搜尋', homeContinueSearch:'繼續上次搜尋', homeViewMonitor:'查看監控', homeLiveLabel:'監控狀態', homeNextScan:'下次搜尋',
+              homeMetricStatus:'監控狀態', homeMetricAvailable:'目前空房', homeMetricHotels:'監控飯店', homeMetricNext:'下次搜尋', homeMetricTraffic:'WebUI 流量', homeTrafficAccesses:'{count} 次存取', homeTrafficTooltip:'WebUI 應用層估算：下載 {down}（{downRate}/s） · 上傳 {up}（{upRate}/s） · 頁面開啟 {visits} 次；不含飯店官網搜尋流量', homeReady:'準備開始', homeSelectedHotels:'{count} 家飯店', homeNoHotels:'尚未選擇', homeWaitingStart:'等待啟動', homeScanning:'正在搜尋', homeWaitingRound:'等待下一輪',
+              homeTaskKicker:'目前任務', homeTaskEmpty:'尚未建立監控任務', homeTaskReady:'任務已就緒', homeTaskRunning:'正在監控', homeTaskStopped:'待啟動', homeCheckin:'入住', homeCheckout:'退房', homeNoRegion:'尚未選擇區域', homeEditSearch:'修改條件', homeViewResults:'查看即時結果',
+              homeActivityKicker:'即時動態', homeActivityTitle:'最新空房變化', homeAllEvents:'全部事件', homeActivityEmpty:'尚無空房變化', homeTrendKicker:'資料洞察', homeTrendTitle:'空房與價格趨勢', homeViewTrend:'查看趨勢', homeTrendRecords:'筆歷史記錄', homeTrendEmpty:'資料會在搜尋後自動累積',
+              homeQuickKicker:'快速入口', homeQuickTitle:'開始新的操作', homeQuickArea:'區域搜尋', homeQuickRadius:'方圓搜尋', homeQuickHistory:'搜尋記錄', homeQuickPush:'推送設定', homeHealthKicker:'系統狀態', homeHealthTitle:'服務執行狀態', homeChecking:'檢查中', homeHealthy:'全部正常', homeAttention:'需要留意', homeConnection:'WebUI 連線', homeProviders:'飯店來源', homeNotifications:'推送管道', homeHistoryData:'歷史資料', homeNormal:'正常', homeWaiting:'等待', homeEnabledChannels:'{count} 個啟用', homeHistoryRecords:'{count} 筆', homeProviderReady:'{healthy}/{total} 正常', homeNoProviderChecks:'等待首次搜尋',
+              homeRunningSummary:'正在監控 {count} 家飯店，東橫醬會持續留意新的空房變化。', homeStoppedSummary:'已載入 {count} 家飯店，確認條件後即可開始監控。', homeEmptySummary:'先選擇日期和飯店，東橫醬會持續留意空房變化。', homeGuestRoom:'{people} 人 · {rooms} 房', homeProviderCount:'{count} 個品牌',
+              eventAvailable:'發現空房', eventUnavailable:'房源已消失', eventCountChanged:'可用數量變化', eventReminder:'空房重複提醒', eventSearchError:'搜尋需要確認', eventStarted:'搜尋已啟動', eventStopped:'搜尋已停止', eventGeneric:'監控事件', homeJustNow:'剛剛', homeMinutesAgo:'{count} 分鐘前', homeHoursAgo:'{count} 小時前', homeAvailabilityPrediction:'空房機率 {probability}% · 可信度 {confidence}%', homeNoPrediction:'正在累積樣本'
+            });
+            Object.assign(SINGLE_UI_OVERRIDES.ja, {
+              navHome:'ホーム', homeEyebrow:'今日のモニター', homeGreeting:'おかえりなさい', homeLoading:'前回の検索と監視状態を読み込んでいます…', homeSetupSearch:'検索を作成', homeContinueSearch:'前回の検索を続ける', homeViewMonitor:'監視を見る', homeLiveLabel:'監視状態', homeNextScan:'次回検索', homeMetricStatus:'監視状態', homeMetricAvailable:'現在の空室', homeMetricHotels:'監視ホテル', homeMetricNext:'次回検索', homeMetricTraffic:'WebUI 通信量', homeTrafficAccesses:'{count} リクエスト', homeTrafficTooltip:'WebUI アプリ層の推定値：受信 {down}（{downRate}/s） · 送信 {up}（{upRate}/s） · ページ表示 {visits} 回。ホテルサイト検索通信は含みません', homeReady:'開始できます', homeSelectedHotels:'ホテル {count} 件', homeNoHotels:'未選択', homeWaitingStart:'開始待ち', homeScanning:'検索中', homeWaitingRound:'次回待ち',
+              homeTaskKicker:'現在のタスク', homeTaskEmpty:'監視タスクはありません', homeTaskReady:'準備完了', homeTaskRunning:'監視中', homeTaskStopped:'開始待ち', homeCheckin:'チェックイン', homeCheckout:'チェックアウト', homeNoRegion:'地域未選択', homeEditSearch:'条件を変更', homeViewResults:'リアルタイム結果', homeActivityKicker:'ライブ更新', homeActivityTitle:'最新の空室変化', homeAllEvents:'すべてのイベント', homeActivityEmpty:'空室変化はまだありません', homeTrendKicker:'データ分析', homeTrendTitle:'空室・料金トレンド', homeViewTrend:'トレンドを見る', homeTrendRecords:'件の履歴', homeTrendEmpty:'検索後にデータが蓄積されます',
+              homeQuickKicker:'クイック操作', homeQuickTitle:'新しい操作を開始', homeQuickArea:'地域検索', homeQuickRadius:'周辺検索', homeQuickHistory:'検索履歴', homeQuickPush:'通知設定', homeHealthKicker:'システム状態', homeHealthTitle:'サービス稼働状況', homeChecking:'確認中', homeHealthy:'すべて正常', homeAttention:'確認が必要', homeConnection:'WebUI 接続', homeProviders:'ホテル接続先', homeNotifications:'通知先', homeHistoryData:'履歴データ', homeNormal:'正常', homeWaiting:'待機', homeEnabledChannels:'{count} 件有効', homeHistoryRecords:'{count} 件', homeProviderReady:'{healthy}/{total} 正常', homeNoProviderChecks:'初回検索待ち',
+              homeRunningSummary:'ホテル {count} 件を監視中です。新しい空室を継続して確認します。', homeStoppedSummary:'ホテル {count} 件を読み込み済みです。条件を確認して監視を開始できます。', homeEmptySummary:'日付とホテルを選ぶと、空室の変化を継続して確認します。', homeGuestRoom:'{people} 名 · {rooms} 室', homeProviderCount:'{count} ブランド', eventAvailable:'空室を発見', eventUnavailable:'空室が終了', eventCountChanged:'空室数が変化', eventReminder:'空室リマインダー', eventSearchError:'検索の確認が必要', eventStarted:'検索を開始', eventStopped:'検索を停止', eventGeneric:'監視イベント', homeJustNow:'たった今', homeMinutesAgo:'{count} 分前', homeHoursAgo:'{count} 時間前', homeAvailabilityPrediction:'空室確率 {probability}% · 信頼度 {confidence}%', homeNoPrediction:'サンプル収集中'
+            });
+            Object.assign(SINGLE_UI_OVERRIDES.ko, {
+              navHome:'홈', homeEyebrow:'오늘의 모니터', homeGreeting:'다시 오신 것을 환영합니다', homeLoading:'이전 검색과 모니터링 상태를 불러오는 중…', homeSetupSearch:'검색 만들기', homeContinueSearch:'이전 검색 계속', homeViewMonitor:'모니터 보기', homeLiveLabel:'모니터 상태', homeNextScan:'다음 검색', homeMetricStatus:'모니터 상태', homeMetricAvailable:'현재 빈 객실', homeMetricHotels:'모니터 호텔', homeMetricNext:'다음 검색', homeMetricTraffic:'WebUI 트래픽', homeTrafficAccesses:'요청 {count}회', homeTrafficTooltip:'WebUI 애플리케이션 계층 추정값: 다운로드 {down}（{downRate}/s） · 업로드 {up}（{upRate}/s） · 페이지 열기 {visits}회. 호텔 사이트 검색 트래픽은 제외됩니다', homeReady:'시작 준비', homeSelectedHotels:'호텔 {count}개', homeNoHotels:'선택 안 됨', homeWaitingStart:'시작 대기', homeScanning:'검색 중', homeWaitingRound:'다음 검색 대기',
+              homeTaskKicker:'현재 작업', homeTaskEmpty:'모니터링 작업이 없습니다', homeTaskReady:'작업 준비 완료', homeTaskRunning:'모니터링 중', homeTaskStopped:'시작 대기', homeCheckin:'체크인', homeCheckout:'체크아웃', homeNoRegion:'지역 미선택', homeEditSearch:'조건 수정', homeViewResults:'실시간 결과', homeActivityKicker:'실시간 활동', homeActivityTitle:'최신 빈 객실 변화', homeAllEvents:'모든 이벤트', homeActivityEmpty:'아직 빈 객실 변화가 없습니다', homeTrendKicker:'데이터 인사이트', homeTrendTitle:'객실 및 가격 추세', homeViewTrend:'추세 보기', homeTrendRecords:'개 기록', homeTrendEmpty:'검색 후 데이터가 자동으로 쌓입니다',
+              homeQuickKicker:'빠른 실행', homeQuickTitle:'새 작업 시작', homeQuickArea:'지역 검색', homeQuickRadius:'반경 검색', homeQuickHistory:'검색 기록', homeQuickPush:'푸시 설정', homeHealthKicker:'시스템 상태', homeHealthTitle:'서비스 실행 상태', homeChecking:'확인 중', homeHealthy:'모두 정상', homeAttention:'확인 필요', homeConnection:'WebUI 연결', homeProviders:'호텔 공급자', homeNotifications:'알림 채널', homeHistoryData:'기록 데이터', homeNormal:'정상', homeWaiting:'대기', homeEnabledChannels:'{count}개 활성화', homeHistoryRecords:'{count}개', homeProviderReady:'{healthy}/{total} 정상', homeNoProviderChecks:'첫 검색 대기',
+              homeRunningSummary:'호텔 {count}개를 모니터링하며 새로운 빈 객실 변화를 확인합니다.', homeStoppedSummary:'호텔 {count}개를 불러왔습니다. 조건을 확인한 후 모니터링을 시작하세요.', homeEmptySummary:'날짜와 호텔을 선택하면 빈 객실 변화를 계속 확인합니다.', homeGuestRoom:'{people}명 · {rooms}실', homeProviderCount:'브랜드 {count}개', eventAvailable:'빈 객실 발견', eventUnavailable:'객실 이용 종료', eventCountChanged:'객실 수 변경', eventReminder:'빈 객실 반복 알림', eventSearchError:'검색 확인 필요', eventStarted:'검색 시작', eventStopped:'검색 중지', eventGeneric:'모니터 이벤트', homeJustNow:'방금', homeMinutesAgo:'{count}분 전', homeHoursAgo:'{count}시간 전', homeAvailabilityPrediction:'객실 확률 {probability}% · 신뢰도 {confidence}%', homeNoPrediction:'샘플 수집 중'
+            });
+            Object.assign(EN_UI, {
+              navHome:'Home', homeEyebrow:'Today’s Monitor', homeGreeting:'Welcome back', homeLoading:'Loading your previous search and monitoring state…', homeSetupSearch:'Create search', homeContinueSearch:'Continue last search', homeViewMonitor:'View monitor', homeLiveLabel:'Monitor status', homeNextScan:'Next scan', homeMetricStatus:'Monitor status', homeMetricAvailable:'Available now', homeMetricHotels:'Monitored hotels', homeMetricNext:'Next scan', homeMetricTraffic:'WebUI traffic', homeTrafficAccesses:'{count} requests', homeTrafficTooltip:'WebUI application-layer estimate: down {down} ({downRate}/s) · up {up} ({upRate}/s) · page views {visits}. Hotel-provider scan traffic is excluded', homeReady:'Ready to start', homeSelectedHotels:'{count} hotels', homeNoHotels:'None selected', homeWaitingStart:'Waiting to start', homeScanning:'Scanning', homeWaitingRound:'Waiting for next round',
+              homeTaskKicker:'Current Task', homeTaskEmpty:'No monitoring task yet', homeTaskReady:'Task ready', homeTaskRunning:'Monitoring', homeTaskStopped:'Ready to start', homeCheckin:'Check-in', homeCheckout:'Check-out', homeNoRegion:'No region selected', homeEditSearch:'Edit conditions', homeViewResults:'View live results', homeActivityKicker:'Live Activity', homeActivityTitle:'Latest vacancy changes', homeAllEvents:'All events', homeActivityEmpty:'No vacancy changes yet', homeTrendKicker:'Data Insights', homeTrendTitle:'Availability & price trends', homeViewTrend:'View trends', homeTrendRecords:'historical records', homeTrendEmpty:'History builds automatically after scans',
+              homeQuickKicker:'Quick Actions', homeQuickTitle:'Start something new', homeQuickArea:'Area search', homeQuickRadius:'Radius search', homeQuickHistory:'Search history', homeQuickPush:'Push settings', homeHealthKicker:'System Status', homeHealthTitle:'Service health', homeChecking:'Checking', homeHealthy:'All systems normal', homeAttention:'Needs attention', homeConnection:'WebUI connection', homeProviders:'Hotel providers', homeNotifications:'Notification channels', homeHistoryData:'Historical data', homeNormal:'Normal', homeWaiting:'Waiting', homeEnabledChannels:'{count} enabled', homeHistoryRecords:'{count} records', homeProviderReady:'{healthy}/{total} healthy', homeNoProviderChecks:'Waiting for first scan',
+              homeRunningSummary:'Monitoring {count} hotels and watching for new vacancy changes.', homeStoppedSummary:'Loaded {count} hotels. Review the conditions and start monitoring when ready.', homeEmptySummary:'Choose dates and hotels, then Toyoko Chan will watch for vacancy changes.', homeGuestRoom:'{people} guests · {rooms} rooms', homeProviderCount:'{count} brands', eventAvailable:'Room available', eventUnavailable:'No longer available', eventCountChanged:'Room count changed', eventReminder:'Availability reminder', eventSearchError:'Search needs review', eventStarted:'Search started', eventStopped:'Search stopped', eventGeneric:'Monitoring event', homeJustNow:'Just now', homeMinutesAgo:'{count}m ago', homeHoursAgo:'{count}h ago', homeAvailabilityPrediction:'Availability {probability}% · confidence {confidence}%', homeNoPrediction:'Collecting samples'
+            });
+            const TREND_READABLE_UI = {
+              zh_cn: {
+                trendScopeCurrent:'仅显示当前入住日期、人数、房型等条件下的记录', trendHotel:'酒店', trendRange:'时间范围', trendDays:'{count} 天',
+                trendSelectedSummary:'{count} 次检索记录 · {hotels} 家酒店', trendCurrentStatus:'当前状态', trendLatestPrice:'当前最低价', trendHistoricalRate:'近期检索有房率', trendDataAmount:'数据量',
+                trendAvailableChecks:'{available}/{known} 次检索有房', trendPriceRange:'历史价格 {min} – {max}', trendUpdated:'更新于 {time}', trendRecordsDetail:'{count} 次检索 · {days} 天范围',
+                trendStatusAvailable:'有房', trendStatusUnavailable:'无房', trendStatusUnknown:'需确认', trendNoPrice:'暂无报价', trendNoRoomType:'未取得房型',
+                trendPriceAxis:'最低价', trendAvailabilityAxis:'每次检索结果', trendLegendPrice:'最低价', trendLegendAvailable:'有房', trendLegendUnavailable:'无房', trendLegendUnknown:'需确认', trendEachBlock:'每个色块代表一次检索',
+                trendRecentChecks:'最近检索明细', trendTime:'检索时间', trendStatus:'状态', trendPrice:'最低价', trendRooms:'剩余', trendRoomType:'房型', trendRoomCount:'{count} 间', trendNoHotelHistory:'当前条件下还没有这家酒店的历史记录',
+                homeAvailabilityRate:'近期有房率 {rate}% · {samples} 次检索'
+              },
+              zh_tw: {
+                trendScopeCurrent:'僅顯示目前入住日期、人數、房型等條件下的記錄', trendHotel:'飯店', trendRange:'時間範圍', trendDays:'{count} 天',
+                trendSelectedSummary:'{count} 次搜尋記錄 · {hotels} 家飯店', trendCurrentStatus:'目前狀態', trendLatestPrice:'目前最低價', trendHistoricalRate:'近期搜尋有房率', trendDataAmount:'資料量',
+                trendAvailableChecks:'{available}/{known} 次搜尋有房', trendPriceRange:'歷史價格 {min} – {max}', trendUpdated:'更新於 {time}', trendRecordsDetail:'{count} 次搜尋 · {days} 天範圍',
+                trendStatusAvailable:'有房', trendStatusUnavailable:'無房', trendStatusUnknown:'待確認', trendNoPrice:'暫無報價', trendNoRoomType:'未取得房型',
+                trendPriceAxis:'最低價', trendAvailabilityAxis:'每次搜尋結果', trendLegendPrice:'最低價', trendLegendAvailable:'有房', trendLegendUnavailable:'無房', trendLegendUnknown:'待確認', trendEachBlock:'每個色塊代表一次搜尋',
+                trendRecentChecks:'最近搜尋明細', trendTime:'搜尋時間', trendStatus:'狀態', trendPrice:'最低價', trendRooms:'剩餘', trendRoomType:'房型', trendRoomCount:'{count} 間', trendNoHotelHistory:'目前條件下尚無這家飯店的歷史記錄',
+                homeAvailabilityRate:'近期有房率 {rate}% · {samples} 次搜尋'
+              },
+              ja: {
+                trendScopeCurrent:'現在の宿泊日・人数・部屋条件に一致する履歴のみ表示', trendHotel:'ホテル', trendRange:'期間', trendDays:'{count} 日',
+                trendSelectedSummary:'検索履歴 {count} 件 · ホテル {hotels} 件', trendCurrentStatus:'現在の状態', trendLatestPrice:'現在の最低料金', trendHistoricalRate:'直近検索の空室率', trendDataAmount:'データ量',
+                trendAvailableChecks:'{known} 回中 {available} 回空室あり', trendPriceRange:'履歴料金 {min} – {max}', trendUpdated:'更新 {time}', trendRecordsDetail:'検索 {count} 回 · {days} 日間',
+                trendStatusAvailable:'空室あり', trendStatusUnavailable:'空室なし', trendStatusUnknown:'要確認', trendNoPrice:'料金なし', trendNoRoomType:'部屋タイプ未取得',
+                trendPriceAxis:'最低料金', trendAvailabilityAxis:'検索ごとの結果', trendLegendPrice:'最低料金', trendLegendAvailable:'空室あり', trendLegendUnavailable:'空室なし', trendLegendUnknown:'要確認', trendEachBlock:'色ブロック1つが検索1回を表します',
+                trendRecentChecks:'最近の検索明細', trendTime:'検索時刻', trendStatus:'状態', trendPrice:'最低料金', trendRooms:'残室', trendRoomType:'部屋タイプ', trendRoomCount:'{count} 室', trendNoHotelHistory:'現在の条件ではこのホテルの履歴がありません',
+                homeAvailabilityRate:'直近空室率 {rate}% · 検索 {samples} 回'
+              },
+              ko: {
+                trendScopeCurrent:'현재 숙박일, 인원 및 객실 조건에 맞는 기록만 표시', trendHotel:'호텔', trendRange:'기간', trendDays:'{count}일',
+                trendSelectedSummary:'검색 기록 {count}개 · 호텔 {hotels}개', trendCurrentStatus:'현재 상태', trendLatestPrice:'현재 최저가', trendHistoricalRate:'최근 검색 객실 있음 비율', trendDataAmount:'데이터 양',
+                trendAvailableChecks:'{known}회 중 {available}회 객실 있음', trendPriceRange:'기록 가격 {min} – {max}', trendUpdated:'업데이트 {time}', trendRecordsDetail:'검색 {count}회 · {days}일 범위',
+                trendStatusAvailable:'객실 있음', trendStatusUnavailable:'객실 없음', trendStatusUnknown:'확인 필요', trendNoPrice:'가격 없음', trendNoRoomType:'객실형 정보 없음',
+                trendPriceAxis:'최저가', trendAvailabilityAxis:'검색별 결과', trendLegendPrice:'최저가', trendLegendAvailable:'객실 있음', trendLegendUnavailable:'객실 없음', trendLegendUnknown:'확인 필요', trendEachBlock:'색상 블록 하나가 검색 1회를 나타냅니다',
+                trendRecentChecks:'최근 검색 상세', trendTime:'검색 시간', trendStatus:'상태', trendPrice:'최저가', trendRooms:'남은 객실', trendRoomType:'객실형', trendRoomCount:'{count}실', trendNoHotelHistory:'현재 조건에 맞는 이 호텔의 기록이 없습니다',
+                homeAvailabilityRate:'최근 객실 있음 {rate}% · 검색 {samples}회'
+              },
+              en: {
+                trendScopeCurrent:'Only observations matching the current dates, guests, and room preferences are shown', trendHotel:'Hotel', trendRange:'Range', trendDays:'{count} days',
+                trendSelectedSummary:'{count} scan observations · {hotels} hotels', trendCurrentStatus:'Current status', trendLatestPrice:'Current lowest price', trendHistoricalRate:'Recent availability rate', trendDataAmount:'Data volume',
+                trendAvailableChecks:'Available in {available} of {known} scans', trendPriceRange:'Historical range {min} – {max}', trendUpdated:'Updated {time}', trendRecordsDetail:'{count} scans · {days}-day range',
+                trendStatusAvailable:'Available', trendStatusUnavailable:'Unavailable', trendStatusUnknown:'Check', trendNoPrice:'No current quote', trendNoRoomType:'Room type unavailable',
+                trendPriceAxis:'Lowest price', trendAvailabilityAxis:'Result of each scan', trendLegendPrice:'Lowest price', trendLegendAvailable:'Available', trendLegendUnavailable:'Unavailable', trendLegendUnknown:'Check', trendEachBlock:'Each colored block represents one scan',
+                trendRecentChecks:'Recent scan details', trendTime:'Scan time', trendStatus:'Status', trendPrice:'Lowest price', trendRooms:'Left', trendRoomType:'Room type', trendRoomCount:'{count} rooms', trendNoHotelHistory:'No history for this hotel under the current conditions',
+                homeAvailabilityRate:'Recent availability {rate}% · {samples} scans'
+              }
+            };
+            Object.assign(SINGLE_UI_OVERRIDES.zh_cn, TREND_READABLE_UI.zh_cn);
+            Object.assign(SINGLE_UI_OVERRIDES.zh_tw, TREND_READABLE_UI.zh_tw);
+            Object.assign(SINGLE_UI_OVERRIDES.ja, TREND_READABLE_UI.ja);
+            Object.assign(SINGLE_UI_OVERRIDES.ko, TREND_READABLE_UI.ko);
+            Object.assign(EN_UI, TREND_READABLE_UI.en);
             const CJK_TEXT = /[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/;
             function hasEnglishSuffix(value){
               const text = String(value || '');
@@ -1022,6 +1140,7 @@
               return tx(key).replace(/\{(\w+)\}/g, (_, name) => values && values[name] != null ? String(values[name]) : '');
             }
             const PROVIDER_IDS = ['toyoko', 'routeinn', 'dormy', 'mystays', 'daiwa'];
+            const DEFAULT_PROVIDER_IDS = ['toyoko'];
             function providerShort(provider){
               const key = `${PROVIDER_IDS.includes(provider) ? provider : 'toyoko'}Short`;
               return tx(key);
@@ -1090,7 +1209,7 @@
               }, 240);
             }
             function switchAppView(view, options={}){
-              const next = APP_VIEWS.includes(view) ? view : 'search';
+              const next = APP_VIEWS.includes(view) ? view : 'home';
               ACTIVE_APP_VIEW = next;
               document.querySelectorAll('.app-view').forEach(panel => {
                 const active = panel.dataset.view === next;
@@ -1111,6 +1230,10 @@
               }
               if (next === 'search') {
                 setDetailsOpen(document.getElementById('search_panel'), true);
+              }
+              if (next === 'home') {
+                if (LAST_HOME_PAYLOAD) renderHomeDashboard(LAST_HOME_PAYLOAD);
+                refreshHomeInsights(true);
               }
               setTimeout(() => {
                 try { AREA_SELECTED_MAP?.invalidateSize(); } catch(e) {}
@@ -1148,6 +1271,29 @@
                 try { AREA_SELECTED_MAP?.invalidateSize(); } catch(e) {}
                 try { HOTEL_INFO_MAP?.invalidateSize(); } catch(e) {}
               }, 60);
+            }
+            function openHomeQuickAction(action){
+              if (action === 'push') {
+                switchAppView('push-settings');
+                return;
+              }
+              switchAppView('search');
+              setDetailsOpen(document.getElementById('search_panel'), true);
+              if (action === 'history') {
+                const history = document.getElementById('search_history_panel');
+                if (history) {
+                  setDetailsOpen(history, true);
+                  setTimeout(() => history.scrollIntoView({behavior:'smooth', block:'center'}), 80);
+                }
+                return;
+              }
+              const mode = action === 'radius' ? 'radius' : 'area';
+              const radio = document.querySelector(`input[name="hotel_picker_mode"][value="${mode}"]`);
+              if (radio) {
+                radio.checked = true;
+                radio.dispatchEvent(new Event('change', {bubbles:true}));
+              }
+              setTimeout(() => document.getElementById(mode === 'radius' ? 'radius_query' : 'area_region')?.focus(), 100);
             }
             function setLanguageMenuOpen(open){
               const menu = document.getElementById('language-menu');
@@ -1247,7 +1393,8 @@
               if (shouldRestoreFocus) document.getElementById('update-open-button')?.focus();
             }
             function initAppShell(){
-              const storedView = storageGet(APP_VIEW_KEY, 'search');
+              const requestedView = new URLSearchParams(window.location.search).get('view');
+              const storedView = APP_VIEWS.includes(requestedView) ? requestedView : 'home';
               const storedLanguage = storageGet(LANGUAGE_KEY, '');
               const languageSelect = document.getElementById('primary_language');
               if (languageSelect && ['zh_cn','zh_tw','ja','ko','en'].includes(storedLanguage)) languageSelect.value = storedLanguage;
@@ -1257,6 +1404,28 @@
               switchAppView(storedView, {persist:false, focus:false, scroll:false, instant:true});
               document.querySelectorAll('[data-app-view]').forEach(button => {
                 button.addEventListener('click', () => switchAppView(button.dataset.appView));
+              });
+              document.querySelectorAll('[data-home-nav]').forEach(button => {
+                button.addEventListener('click', () => switchAppView(button.dataset.homeNav || 'home'));
+              });
+              document.getElementById('home-primary-action')?.addEventListener('click', () => switchAppView(LAST_RUNNING ? 'monitor' : 'search'));
+              document.getElementById('home-secondary-action')?.addEventListener('click', () => switchAppView('monitor'));
+              document.getElementById('home-edit-search')?.addEventListener('click', () => switchAppView('search'));
+              document.getElementById('home-view-results')?.addEventListener('click', () => switchAppView('monitor'));
+              document.getElementById('home-events-more')?.addEventListener('click', () => {
+                switchAppView('monitor');
+                const panel = document.getElementById('event-center-panel');
+                if (panel) setDetailsOpen(panel, true);
+                refreshEventCenter();
+              });
+              document.getElementById('home-trend-more')?.addEventListener('click', () => {
+                switchAppView('monitor');
+                const panel = document.getElementById('trend-panel');
+                if (panel) setDetailsOpen(panel, true);
+                refreshTrends(true);
+              });
+              document.querySelectorAll('[data-home-quick]').forEach(button => {
+                button.addEventListener('click', () => openHomeQuickAction(button.dataset.homeQuick || 'area'));
               });
               document.getElementById('mobile-nav-button')?.addEventListener('click', () => {
                 setSidebarOpen(!document.body.classList.contains('sidebar-open'));
@@ -1428,15 +1597,36 @@
               setNodeText('.sidebar-brand div > span', tx('workspace'));
               setLabelFor('primary_language', tx('language'));
               const navLabels = document.querySelectorAll('.sidebar-nav .nav-label');
-              [tx('navSearch'), tx('navMonitor'), tx('searchSettings'), tx('pushSettings'), tx('interfaceSettings')]
+              [tx('navHome'), tx('navSearch'), tx('navMonitor'), tx('searchSettings'), tx('pushSettings')]
                 .forEach((text, idx) => {
                   if (navLabels[idx]) navLabels[idx].textContent = text;
                   const button = navLabels[idx]?.closest('.sidebar-nav-item');
                   if (button) button.title = text;
                 });
+              const interfaceSettingsButton = document.getElementById('interface-settings-button');
+              if (interfaceSettingsButton) {
+                interfaceSettingsButton.setAttribute('aria-label', tx('interfaceSettings'));
+                interfaceSettingsButton.title = tx('interfaceSettings');
+              }
+              [
+                ['#home-eyebrow','homeEyebrow'], ['#home-greeting','homeGreeting'],
+                ['#home-live-label','homeLiveLabel'], ['#home-next-label','homeNextScan'],
+                ['#home-metric-status-label','homeMetricStatus'], ['#home-metric-available-label','homeMetricAvailable'],
+                ['#home-metric-hotels-label','homeMetricHotels'], ['#home-metric-next-label','homeMetricNext'], ['#home-metric-traffic-label','homeMetricTraffic'],
+                ['#home-task-kicker','homeTaskKicker'], ['#home-checkin-label','homeCheckin'], ['#home-checkout-label','homeCheckout'],
+                ['#home-edit-search','homeEditSearch'], ['#home-view-results','homeViewResults'],
+                ['#home-activity-kicker','homeActivityKicker'], ['#home-activity-title','homeActivityTitle'], ['#home-events-more','homeAllEvents'],
+                ['#home-trend-kicker','homeTrendKicker'], ['#home-trend-title','homeTrendTitle'], ['#home-trend-more','homeViewTrend'], ['#home-trend-observations-label','homeTrendRecords'],
+                ['#home-quick-kicker','homeQuickKicker'], ['#home-quick-title','homeQuickTitle'],
+                ['#home-quick-area','homeQuickArea'], ['#home-quick-radius','homeQuickRadius'], ['#home-quick-history','homeQuickHistory'], ['#home-quick-push','homeQuickPush'],
+                ['#home-health-kicker','homeHealthKicker'], ['#home-health-title','homeHealthTitle'],
+                ['#home-health-connection-label','homeConnection'], ['#home-health-providers-label','homeProviders'],
+                ['#home-health-notifications-label','homeNotifications'], ['#home-health-data-label','homeHistoryData']
+              ].forEach(([selector,key]) => setNodeText(selector, tx(key)));
+              if (LAST_HOME_PAYLOAD) renderHomeDashboard(LAST_HOME_PAYLOAD);
               const viewHeaders = document.querySelectorAll('.app-view > .view-header');
-              const viewTitles = [tx('navSearch'), tx('navMonitor'), tx('searchSettings'), tx('pushSettings'), tx('interfaceSettings')];
-              const viewHelp = [tx('searchViewHelp'), tx('monitorViewHelp'), tx('searchSettingsViewHelp'), tx('pushSettingsViewHelp'), tx('interfaceViewHelp')];
+              const viewTitles = [tx('navHome'), tx('navSearch'), tx('navMonitor'), tx('searchSettings'), tx('pushSettings'), tx('interfaceSettings')];
+              const viewHelp = ['', tx('searchViewHelp'), tx('monitorViewHelp'), tx('searchSettingsViewHelp'), tx('pushSettingsViewHelp'), tx('interfaceViewHelp')];
               viewHeaders.forEach((header, idx) => {
                 const title = header.querySelector('h1');
                 const help = header.querySelector('p');
@@ -1554,8 +1744,6 @@
                 if (label) label.textContent = tx(`${provider}Provider`);
               });
               setNodeText('#btn_provider_all', tx('allBrands'));
-              const areaSummary = document.querySelector('#area_picker_panel > summary');
-              if (areaSummary) areaSummary.textContent = tx('areaPicker');
               setInlineLabel('#hotel_picker_mode_tabs label:nth-child(1)', tx('areaMode'));
               setInlineLabel('#hotel_picker_mode_tabs label:nth-child(2)', tx('radiusMode'));
               setLabelFor('area_region', tx('region'));
@@ -1588,7 +1776,7 @@
               const areaFilter = document.getElementById('area_filter');
               if (areaFilter) areaFilter.placeholder = tx('filterPlaceholder');
               syncProviderAllButton();
-              const historySummary = document.querySelector('details.box:not(#area_picker_panel):not(#search_panel):not(.settings-panel) summary');
+              const historySummary = document.querySelector('#search_history_panel > summary');
               if (historySummary) historySummary.textContent = tx('history');
               setNodeText('#btn_history_refresh', tx('refresh'));
               setNodeText('#btn_history_clear', tx('clear'));
@@ -1683,6 +1871,35 @@
               if (pushTitle) pushTitle.textContent = tx('pushStatus');
               setNodeText('.run-title', tx('runTitle'));
               setNodeText('.run-subtitle', tx('runSubtitle'));
+              setNodeText('#diagnostics-title', tx('diagnosticsTitle'));
+              setNodeText('#diagnostics-summary', tx('diagnosticsSummary'));
+              setNodeText('#diagnostics-throughput-label', tx('diagnosticsThroughput'));
+              setNodeText('#diagnostics-eta-label', tx('diagnosticsEta'));
+              setNodeText('#diagnostics-queue-label', tx('diagnosticsQueue'));
+              setNodeText('#diagnostics-latency-label', tx('diagnosticsLatency'));
+              setNodeText('#diagnostics-priority-label', tx('diagnosticsPriority'));
+              setNodeText('#diagnostics-protection-label', tx('diagnosticsProtection'));
+              setNodeText('#diagnostics-cache-label', tx('diagnosticsCache'));
+              setNodeText('#diagnostics-saved-label', tx('diagnosticsSaved'));
+              setNodeText('#btn_cache_clear', tx('clearCache'));
+              setNodeText('#trend-panel-title', tx('trendTitle'));
+              setNodeText('#trend-scope-note', tx('trendScopeCurrent'));
+              setNodeText('#trend-hotel-label', tx('trendHotel'));
+              setNodeText('#trend-range-label', tx('trendRange'));
+              document.querySelectorAll('#trend_days option').forEach(option => {
+                option.textContent = fmt('trendDays', {count:option.value});
+              });
+              setNodeText('#btn_trend_refresh', tx('refresh'));
+              if (LAST_TREND_DATA) renderTrends(LAST_TREND_DATA);
+              setNodeText('#pwa-title', tx('pwaTitle'));
+              setNodeText('#pwa-help', tx('pwaHelp'));
+              setNodeText('#btn_pwa_install', tx('pwaInstall'));
+              setNodeText('#provider-matrix-title', tx('providerMatrixTitle'));
+              setNodeText('#provider-matrix-help', tx('providerMatrixHelp'));
+              setNodeText('#simulation-title', tx('simulationTitle'));
+              setNodeText('#simulation-help', tx('simulationHelp'));
+              setNodeText('#btn_simulation_run', tx('simulationRun'));
+              setNodeText('#event-center-title', tx('eventCenterTitle'));
               setAllText('.metric > span', [tx('status'), tx('loop'), tx('progress'), tx('uptime')]);
               setNodeText('#snapshot-dates-label', tx('dates'));
               setNodeText('#snapshot-hotels-label', tx('snapshotHotels'));
@@ -1757,7 +1974,7 @@
               renderPushStatus(LAST_PUSH_STATUS || []);
               refreshSearchHistory();
               renderUpdateDialog(LAST_UPDATE_STATUS || null);
-              if (Array.isArray(AREA_HOTELS)) renderSelectedHotelMap();
+              if (Array.isArray(AREA_HOTELS)) renderAreaHotels();
               if (typeof updateAreaSelectionSummary === 'function') updateAreaSelectionSummary();
               setConfigDirty(FORM_DIRTY);
               setConnectionOnline(CONNECTION_ONLINE);
@@ -1770,6 +1987,7 @@
                 setNodeText('#action-text', `${tx('currentAction')}: (idle)`);
               }
               renderProviderHealth(LAST_PROVIDER_HEALTH);
+              renderDiagnostics(LAST_DIAGNOSTICS);
               setNodeText('.result-log-table .empty-results', tx('noLog'));
               updateResultsTimestamp();
               if (Array.isArray(LAST_RESULTS)) renderRows();
@@ -1842,12 +2060,44 @@
                 const stateText = cooldown ? `${stateLabels.cooldown} ${cooldown}s` : stateLabels[state];
                 const checks = Math.max(0, Number(item.checks || 0));
                 const average = Math.max(0, Number(item.average_elapsed_ms || 0));
-                const meta = checks ? `${fmt('providerChecks', {count:checks})} · ${fmt('providerAverage', {ms:average})}` : '';
+                const p95 = Math.max(0, Number(item.p95_elapsed_ms || 0));
+                const delay = Math.max(0, Number(item.adaptive_delay_sec || 0));
+                const meta = checks ? `${fmt('providerChecks', {count:checks})} · ${fmt('providerAverage', {ms:average})}${p95 ? ` · P95 ${p95}ms` : ''}${delay ? ` · ${delay}s` : ''}` : '';
                 const title = item.last_error || `${providerShort(provider)} · ${stateText}`;
                 return `<span class="provider-health-chip ${escText(state)}" title="${escText(title)}"><strong>${escText(providerShort(provider))}</strong><span>${escText(stateText)}</span>${meta ? `<small>${escText(meta)}</small>` : ''}</span>`;
               }).join('');
               container.innerHTML = `<span class="provider-health-title">${escText(tx('providerHealth'))}</span>${chips}`;
               container.hidden = false;
+            }
+
+            function renderDiagnostics(diagnostics){
+              LAST_DIAGNOSTICS = diagnostics && typeof diagnostics === 'object' ? diagnostics : {};
+              const value = (id, text) => {
+                const node = document.getElementById(id);
+                if (node) node.textContent = String(text);
+              };
+              const throughput = Math.max(0, Number(LAST_DIAGNOSTICS.throughput_per_min || 0));
+              const eta = Math.max(0, Number(LAST_DIAGNOSTICS.estimated_remaining_sec || 0));
+              const queued = Math.max(0, Number(LAST_DIAGNOSTICS.queue_pending || 0));
+              const active = Math.max(0, Number(LAST_DIAGNOSTICS.in_flight || 0));
+              const p95 = Math.max(0, Number(LAST_DIAGNOSTICS.slowest_p95_ms || 0));
+              const provider = LAST_DIAGNOSTICS.slowest_provider ? providerShort(LAST_DIAGNOSTICS.slowest_provider) : '';
+              const manual = Math.max(0, Number(LAST_DIAGNOSTICS.manual_priority_hotels || 0));
+              const adaptive = Math.max(0, Number(LAST_DIAGNOSTICS.adaptive_priority_hotels || 0));
+              const protection = Math.max(0, Number(LAST_DIAGNOSTICS.access_failures || 0)) + Math.max(0, Number(LAST_DIAGNOSTICS.rate_limited_count || 0));
+              const cacheRate = Math.max(0, Number(LAST_DIAGNOSTICS.cache_hit_rate_percent || 0));
+              const freshCache = Math.max(0, Number(LAST_DIAGNOSTICS.cache_fresh_entries || 0));
+              const savedRequests = Math.max(0, Number(LAST_DIAGNOSTICS.cache_saved_requests || 0));
+              value('diagnostics-throughput', `${throughput}/min`);
+              value('diagnostics-eta', eta ? hms(eta) : '-');
+              value('diagnostics-queue', `${queued} + ${active}`);
+              value('diagnostics-latency', p95 ? `${provider ? `${provider} · ` : ''}${p95}ms` : '-');
+              value('diagnostics-priority', `${manual} + ${adaptive}`);
+              value('diagnostics-protection', protection);
+              value('diagnostics-cache', `${cacheRate}% · ${freshCache}`);
+              value('diagnostics-saved', savedRequests);
+              const summary = document.getElementById('diagnostics-summary');
+              if (summary) summary.textContent = `${tx('diagnosticsSummary')} · ${queued + active}`;
             }
 
             function startProgressSmoothing(){
@@ -1886,6 +2136,200 @@
               set('snapshot-hotels', hotelCount);
               set('snapshot-engine', engine);
               set('snapshot-cadence', cadence);
+            }
+
+            function homeOptionLabel(group, value){
+              const maps = {
+                zh_cn:{noSmoking:'无烟房',Smoking:'吸烟房',all:'不限制',any:'不限房型',single:'单人房',double:'大床房',twin:'双床房'},
+                zh_tw:{noSmoking:'禁菸房',Smoking:'吸菸房',all:'不限制',any:'不限房型',single:'單人房',double:'雙人床房',twin:'雙床房'},
+                ja:{noSmoking:'禁煙',Smoking:'喫煙',all:'指定なし',any:'部屋指定なし',single:'シングル',double:'ダブル',twin:'ツイン'},
+                ko:{noSmoking:'금연',Smoking:'흡연',all:'제한 없음',any:'객실형 제한 없음',single:'싱글',double:'더블',twin:'트윈'},
+                en:{noSmoking:'Non-Smoking',Smoking:'Smoking',all:'Any smoking preference',any:'Any room type',single:'Single',double:'Double',twin:'Twin'}
+              };
+              const labels = maps[currentLang()] || maps.en;
+              if (group === 'smoking') return labels[value] || labels.all;
+              return labels[value] || labels.any;
+            }
+
+            function homeRelativeTime(timestamp){
+              const elapsed = Math.max(0, Date.now() / 1000 - Number(timestamp || 0));
+              if (elapsed < 60) return tx('homeJustNow');
+              if (elapsed < 3600) return fmt('homeMinutesAgo', {count:Math.floor(elapsed / 60)});
+              if (elapsed < 86400) return fmt('homeHoursAgo', {count:Math.floor(elapsed / 3600)});
+              return new Date(Number(timestamp || 0) * 1000).toLocaleDateString();
+            }
+
+            function homeEventMeta(eventType){
+              const map = {
+                'availability.available':['eventAvailable','available','✓'],
+                'availability.unavailable':['eventUnavailable','unavailable','×'],
+                'availability.count_changed':['eventCountChanged','changed','↕'],
+                'availability.reminder':['eventReminder','reminder','↻'],
+                'search.hotel_error':['eventSearchError','warning','!'],
+                'search.started':['eventStarted','started','▶'],
+                'search.stopped':['eventStopped','stopped','■']
+              };
+              const item = map[eventType] || ['eventGeneric','generic','•'];
+              return {label:tx(item[0]), cls:item[1], icon:item[2]};
+            }
+
+            function renderHomeActivity(events){
+              const container = document.getElementById('home-activity-list');
+              if (!container) return;
+              const items = Array.isArray(events) ? events.slice(0, 5) : [];
+              if (!items.length) {
+                container.innerHTML = `<div class="home-empty-state">${escText(tx('homeActivityEmpty'))}</div>`;
+                return;
+              }
+              container.innerHTML = items.map(event => {
+                const meta = homeEventMeta(event.event_type);
+                const code = String(event.payload?.code || '');
+                const result = LAST_RESULTS.find(item => String(item.code || '') === code);
+                const hotel = result?.name_primary || result?.name || result?.name_en || code || meta.label;
+                const count = event.payload?.current_count ?? event.payload?.count;
+                const detail = count != null ? `${meta.label} · ${count}` : meta.label;
+                return `<button class="home-activity-item ${meta.cls}" type="button" data-home-event-code="${escText(code)}">
+                  <i>${meta.icon}</i><span><strong>${escText(hotel)}</strong><small>${escText(detail)}</small></span><time>${escText(homeRelativeTime(event.created_at))}</time>
+                </button>`;
+              }).join('');
+              container.querySelectorAll('[data-home-event-code]').forEach(button => {
+                button.addEventListener('click', () => switchAppView('monitor'));
+              });
+            }
+
+            function renderHomeTrends(data){
+              const list = document.getElementById('home-trend-list');
+              if (!list) return;
+              const points = Array.isArray(data?.points) ? data.points : [];
+              const observations = document.getElementById('home-trend-observations');
+              if (observations) observations.textContent = String(points.length || Number(LAST_HOME_PAYLOAD?.diagnostics?.trend_observations || 0));
+              const hotels = (Array.isArray(data?.hotels) ? data.hotels : [])
+                .filter(item => Number(item.samples || 0) > 0)
+                .sort((a,b) => Number(b.availability_rate_percent || 0) - Number(a.availability_rate_percent || 0))
+                .slice(0, 3);
+              if (!hotels.length) {
+                list.innerHTML = `<div class="home-empty-state">${escText(tx('homeTrendEmpty'))}</div>`;
+                return;
+              }
+              list.innerHTML = hotels.map(item => {
+                const rate = item.availability_rate_percent;
+                const result = LAST_RESULTS.find(resultItem => String(resultItem.code || '') === String(item.code || ''));
+                const name = item.name || result?.name_primary || result?.name || result?.name_en || item.code;
+                const detail = rate == null ? tx('homeNoPrediction') : fmt('homeAvailabilityRate', {rate, samples:item.samples || 0});
+                return `<div class="home-trend-item"><div><strong>${escText(name)}</strong><small>${escText(detail)}</small></div><span>${item.latest_price ? `¥${Number(item.latest_price).toLocaleString()}` : '—'}</span><i><b style="width:${Math.max(4, Number(rate || 0))}%"></b></i></div>`;
+              }).join('');
+            }
+
+            async function refreshHomeInsights(force=false){
+              if (!force && (ACTIVE_APP_VIEW !== 'home' || Date.now() - LAST_HOME_REFRESH < 30000)) return;
+              const codes = LAST_RESULTS.map(item => item.code).filter(Boolean).join(',');
+              LAST_HOME_REFRESH = Date.now();
+              try {
+                const [eventResponse, trendResponse] = await Promise.all([
+                  fetch('/api/v1/events?limit=5'),
+                  fetch(`/api/v1/trends?codes=${encodeURIComponent(codes)}&days=30`)
+                ]);
+                if (eventResponse.ok) {
+                  const payload = await eventResponse.json();
+                  renderHomeActivity(payload.events || []);
+                }
+                if (trendResponse.ok) {
+                  const payload = await trendResponse.json();
+                  renderHomeTrends(payload.trends || {});
+                }
+              } catch(error) {
+                // The regular heartbeat owns the connection state and retry policy.
+              }
+            }
+
+            function formatTrafficBytes(value){
+              let bytes=Math.max(0,Number(value)||0);
+              const units=['B','KB','MB','GB','TB'];
+              let unit=0;
+              while(bytes>=1024&&unit<units.length-1){bytes/=1024;unit+=1;}
+              const digits=unit===0||bytes>=100?0:bytes>=10?1:2;
+              return `${bytes.toFixed(digits)} ${units[unit]}`;
+            }
+
+            function renderHomeDashboard(payload){
+              if (!payload) return;
+              LAST_HOME_PAYLOAD = payload;
+              if (payload.config) LAST_CONFIG = payload.config;
+              const cfg = Object.keys(LAST_CONFIG || {}).length ? LAST_CONFIG : {};
+              const progress = payload.progress || {};
+              const diagnostics = payload.diagnostics || {};
+              const running = !!payload.running;
+              const hotels = Array.isArray(cfg.hotel_codes) ? cfg.hotel_codes.length : (Array.isArray(cfg.selected_hotels) ? cfg.selected_hotels.length : 0);
+              const available = new Set(LAST_RESULTS.filter(item => item.available === true && !item.requirement_unmet).map(item => item.code)).size;
+              const providers = [...new Set((cfg.selected_hotels || []).map(item => item.provider || 'toyoko'))];
+              if (!providers.length && hotels) providers.push(...(cfg.enabled_providers || ['toyoko']));
+              const waiting = running && progress.phase === 'waiting';
+              const remaining = waiting ? Math.max(0, Number(progress.wait_total_sec || 0) - Number(progress.wait_elapsed_sec || 0)) : null;
+              const nextValue = waiting ? `${Math.ceil(remaining)}s` : (running ? `${Number(progress.done || 0)}/${Number(progress.total || hotels)}` : '—');
+              const statusNote = running ? (waiting ? tx('homeWaitingRound') : tx('homeScanning')) : (hotels ? tx('homeReady') : tx('homeWaitingStart'));
+              const set = (id, value) => { const element = document.getElementById(id); if (element) element.textContent = String(value); };
+
+              set('home-live-value', running ? tx('running') : tx('stopped'));
+              set('home-next-value', nextValue);
+              set('home-metric-status', running ? tx('running') : tx('stopped'));
+              set('home-metric-status-note', statusNote);
+              set('home-metric-available', available);
+              set('home-metric-available-note', fmt('homeSelectedHotels', {count:available}));
+              set('home-metric-hotels', hotels);
+              set('home-metric-hotels-note', hotels ? fmt('homeProviderCount', {count:providers.length}) : tx('homeNoHotels'));
+              set('home-metric-next', nextValue);
+              set('home-metric-next-note', statusNote);
+              const traffic = payload.traffic || {};
+              const trafficDown = formatTrafficBytes(traffic.download_bytes);
+              const trafficUp = formatTrafficBytes(traffic.upload_bytes);
+              const trafficDownRate = formatTrafficBytes(traffic.download_bps);
+              const trafficUpRate = formatTrafficBytes(traffic.upload_bps);
+              set('home-metric-traffic-down', `↓ ${trafficDown}`);
+              set('home-metric-traffic-note', `↑ ${trafficUp} · ${fmt('homeTrafficAccesses', {count:Number(traffic.requests || 0)})}`);
+              const trafficCard = document.getElementById('home-traffic-card');
+              if (trafficCard) trafficCard.title = fmt('homeTrafficTooltip', {
+                down:trafficDown,
+                downRate:trafficDownRate,
+                up:trafficUp,
+                upRate:trafficUpRate,
+                visits:Number(traffic.page_views || 0)
+              });
+              document.getElementById('home-live-dot')?.classList.toggle('running', running);
+              document.querySelector('.home-welcome-card')?.classList.toggle('is-running', running);
+
+              const primary = document.getElementById('home-primary-action');
+              if (primary) primary.textContent = running ? tx('homeViewMonitor') : (hotels ? tx('homeContinueSearch') : tx('homeSetupSearch'));
+              set('home-secondary-action', tx('homeViewMonitor'));
+              set('home-hero-summary', running ? fmt('homeRunningSummary', {count:hotels}) : (hotels ? fmt('homeStoppedSummary', {count:hotels}) : tx('homeEmptySummary')));
+
+              const scope = cfg.search_mode === 'radius'
+                ? (cfg.radius_query ? `${cfg.radius_query} · ${Number(cfg.radius_km || 5)} km` : tx('homeNoRegion'))
+                : (cfg.area_detail_label || cfg.area_region_label || tx('homeNoRegion'));
+              set('home-task-title', scope === tx('homeNoRegion') && !hotels ? tx('homeTaskEmpty') : scope);
+              set('home-task-state', running ? tx('homeTaskRunning') : (hotels ? tx('homeTaskReady') : tx('homeTaskStopped')));
+              set('home-task-checkin', cfg.start_date || '—');
+              set('home-task-checkout', cfg.end_date || '—');
+              set('home-task-guests', fmt('homeGuestRoom', {people:Number(cfg.people || 1), rooms:Number(cfg.rooms || 1)}));
+              set('home-task-preference', `${homeOptionLabel('smoking', cfg.smoking || 'noSmoking')} · ${homeOptionLabel('room', cfg.room_requirement || cfg.om_requirement || 'any')}`);
+              set('home-task-scope', scope);
+              const chips = document.getElementById('home-provider-chips');
+              if (chips) chips.innerHTML = providers.map(provider => `<span class="source-badge ${escText(provider)}">${escText(providerShort(provider))}</span>`).join('');
+
+              const channelCount = (payload.notification_status || []).filter(item => item.enabled).length;
+              const providerStates = Object.entries(payload.provider_health || {}).filter(([key]) => !providers.length || providers.includes(key));
+              const providerChecked = providerStates.filter(([,state]) => Number(state.checks || 0) > 0);
+              const providerHealthy = providerChecked.filter(([,state]) => !['degraded','cooldown'].includes(state.state)).length;
+              const providerText = providerChecked.length ? fmt('homeProviderReady', {healthy:providerHealthy, total:providerChecked.length}) : tx('homeNoProviderChecks');
+              const attention = !CONNECTION_ONLINE || providerChecked.some(([,state]) => ['degraded','cooldown'].includes(state.state)) || Number(diagnostics.pending_deliveries || 0) > 0;
+              set('home-health-badge', attention ? tx('homeAttention') : tx('homeHealthy'));
+              set('home-health-connection', CONNECTION_ONLINE ? tx('homeNormal') : tx('connectionOffline'));
+              set('home-health-providers', providerText);
+              set('home-health-notifications', fmt('homeEnabledChannels', {count:channelCount}));
+              set('home-health-data', fmt('homeHistoryRecords', {count:Number(diagnostics.trend_observations || 0)}));
+              set('home-trend-observations', Number(diagnostics.trend_observations || 0));
+              const healthBadge = document.getElementById('home-health-badge');
+              if (healthBadge) healthBadge.classList.toggle('attention', attention);
+              refreshHomeInsights(false);
             }
 
             function pad2(n){ return (n<10? '0':'') + n; }
@@ -1949,7 +2393,8 @@
                 search_keyword: h.search_keyword || '',
                 prefecture: h.prefecture || '',
                 region_id: h.region_id ?? null,
-                prefecture_id: h.prefecture_id ?? null
+                prefecture_id: h.prefecture_id ?? null,
+                priority: !!h.priority
               }));
             }
             function currentSearchMode(){
@@ -2069,6 +2514,63 @@
               if (el) el.value = value == null ? '' : value;
             }
 
+            const AUTO_SAVE_PREFERENCE_IDS = [
+              'primary_language','engine','smart_parallel_enabled','smart_parallel_workers','adaptive_backoff_enabled',
+              'loop_interval','per_hotel_delay','request_jitter','alert_repeat','alert_interval',
+              'notify_available','notify_unavailable','notify_availability_count_change','notify_start','notify_stop','notify_search_error',
+              'enable_telegram','bot_token','chat_id','enable_bark','bark_key','bark_server','bark_critical_enabled','bark_critical_volume','bark_critical_sound',
+              'enable_serverchan','serverchan_sendkey','enable_local','enable_email','smtp_host','smtp_port','smtp_tls','smtp_user','smtp_pass','email_from','email_to'
+            ];
+            const AUTO_SAVE_PREFERENCE_KEYS = [
+              'primary_language','engine','smart_parallel_enabled','smart_parallel_workers','adaptive_backoff_enabled',
+              'loop_interval_seconds','per_hotel_delay_seconds','request_jitter_percent','available_alert_repeat','available_alert_repeat_interval_sec',
+              'notify_available','notify_unavailable','notify_availability_count_change','notify_start','notify_stop','notify_search_error',
+              'enable_telegram','bot_token','chat_id','enable_bark','bark_key','bark_server','bark_critical_enabled','bark_critical_volume','bark_critical_sound',
+              'enable_serverchan','serverchan_sendkey','enable_local','enable_email','smtp_host','smtp_port','smtp_tls','smtp_user','smtp_pass','email_from','email_to'
+            ];
+            function collectPreferencePayload(){
+              const payload = collectPayload();
+              return Object.fromEntries(AUTO_SAVE_PREFERENCE_KEYS.map(key => [key, payload[key]]));
+            }
+            function schedulePreferenceSave(delay=700){
+              if (PREFERENCE_SAVE_TIMER) clearTimeout(PREFERENCE_SAVE_TIMER);
+              PREFERENCE_SAVE_TIMER = setTimeout(savePreferencesNow, Math.max(100, Number(delay) || 700));
+            }
+            async function savePreferencesNow(){
+              PREFERENCE_SAVE_TIMER = null;
+              if (PREFERENCE_SAVE_IN_FLIGHT) {
+                PREFERENCE_SAVE_QUEUED = true;
+                return;
+              }
+              PREFERENCE_SAVE_IN_FLIGHT = true;
+              const startedAt = Date.now();
+              const payload = collectPreferencePayload();
+              try {
+                const response = await fetch('/api/v1/preferences', {
+                  method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)
+                });
+                const result = await response.json();
+                if (!response.ok || !result.ok) throw new Error(result.message || `HTTP ${response.status}`);
+                AUTO_SAVE_PREFERENCE_IDS.forEach(id => {
+                  if (Number(EDIT_TS[id] || 0) <= startedAt) delete EDIT_TS[id];
+                });
+                LAST_CONFIG = {...LAST_CONFIG, ...payload};
+                if (!Object.keys(EDIT_TS).length) {
+                  BLOCK_REMOTE_OVERWRITE = false;
+                  setConfigDirty(false);
+                }
+              } catch(error) {
+                const target = document.getElementById('err');
+                if (target) target.textContent = String(error);
+              } finally {
+                PREFERENCE_SAVE_IN_FLIGHT = false;
+                if (PREFERENCE_SAVE_QUEUED) {
+                  PREFERENCE_SAVE_QUEUED = false;
+                  schedulePreferenceSave(150);
+                }
+              }
+            }
+
             ['start_date','end_date','people','rooms','smoking','room_requirement','membership_status','primary_language','engine',
              'smart_parallel_enabled','smart_parallel_workers','adaptive_backoff_enabled',
              'enable_telegram','bot_token','chat_id','enable_bark','bark_key','bark_server','bark_critical_enabled','bark_critical_volume','bark_critical_sound','enable_serverchan','serverchan_sendkey',
@@ -2078,8 +2580,8 @@
             ].forEach(id=>{
               const el = document.getElementById(id);
               if(!el) return;
-              el.addEventListener('input', ()=>{ markEdited(id); BLOCK_REMOTE_OVERWRITE = true; });
-              el.addEventListener('change', ()=>{ markEdited(id); BLOCK_REMOTE_OVERWRITE = true; });
+              el.addEventListener('input', ()=>{ markEdited(id); BLOCK_REMOTE_OVERWRITE = true; if (AUTO_SAVE_PREFERENCE_IDS.includes(id)) schedulePreferenceSave(); });
+              el.addEventListener('change', ()=>{ markEdited(id); BLOCK_REMOTE_OVERWRITE = true; if (AUTO_SAVE_PREFERENCE_IDS.includes(id)) schedulePreferenceSave(200); });
             });
 
             ['alert_repeat','alert_interval','loop_interval','per_hotel_delay','request_jitter','smart_parallel_workers','radius_km','bark_critical_volume'].forEach(id=>{
@@ -2731,6 +3233,7 @@
                       <a class="hotel-map" href="${escText(h.map_url || '#')}" target="_blank" rel="noreferrer noopener">${escText(tx('openMap'))}</a>
                     </span>
 	                  </label>
+	                  <button type="button" class="hotel-priority-button ${h.priority ? 'active' : ''}" data-hotel-priority="${escText(h.code)}" aria-pressed="${h.priority ? 'true' : 'false'}" title="${escText(tx(h.priority ? 'removePriority' : 'priorityHotel'))}">${h.priority ? '★' : '☆'}</button>
 	                </div>
 	              `).join('');
               wrap.querySelectorAll('.area-hotel-check').forEach(el => {
@@ -2754,6 +3257,19 @@
                 row.addEventListener('click', (event) => {
                   if (event.target.closest('a,button,input,label')) return;
                   focusAreaMarker(code);
+                });
+              });
+              wrap.querySelectorAll('[data-hotel-priority]').forEach(button => {
+                button.addEventListener('click', event => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  const code = String(button.dataset.hotelPriority || '');
+                  const hotel = AREA_HOTELS.find(item => String(item.code || '') === code);
+                  if (!hotel) return;
+                  hotel.priority = !hotel.priority;
+                  markEdited('selected_hotels');
+                  BLOCK_REMOTE_OVERWRITE = true;
+                  renderAreaHotels();
                 });
               });
               updateAreaSelectionSummary();
@@ -2898,7 +3414,8 @@
                 search_keyword: h.search_keyword || '',
                 prefecture: h.prefecture || '',
                 region_id: h.region_id ?? null,
-                prefecture_id: h.prefecture_id ?? null
+                prefecture_id: h.prefecture_id ?? null,
+                priority: !!h.priority
               })).filter(h => h.code);
               return (Array.isArray(record.hotel_codes) ? record.hotel_codes : []).map(code => ({
                 code: String(code),
@@ -3016,10 +3533,10 @@
               });
             }
             function collapseSearchPanels(){
-              setPanelOpen('#search_panel, #area_picker_panel, details.settings-panel', false);
+              setPanelOpen('#search_panel, details.settings-panel', false);
             }
             function expandSearchAreaPicker(){
-              setPanelOpen('#search_panel, #area_picker_panel', true);
+              setPanelOpen('#search_panel', true);
               setTimeout(() => {
                 try {
                   if (AREA_SELECTED_MAP) AREA_SELECTED_MAP.invalidateSize();
@@ -3037,7 +3554,7 @@
               setValue('room_requirement', record.room_requirement || 'any');
               setValue('membership_status', record.membership_status || 'member');
               setValue('primary_language', record.primary_language || 'zh_cn');
-              const historyProviders = Array.isArray(record.enabled_providers) ? record.enabled_providers : PROVIDER_IDS;
+              const historyProviders = Array.isArray(record.enabled_providers) ? record.enabled_providers : DEFAULT_PROVIDER_IDS;
               PROVIDER_IDS.forEach(provider => {
                 const checkbox = document.getElementById(`provider_${provider}`);
                 if (checkbox) checkbox.checked = historyProviders.includes(provider);
@@ -3077,7 +3594,7 @@
 
             function restoreAreaFromConfig(cfg){
               if (!cfg || BLOCK_REMOTE_OVERWRITE) return;
-              const configuredProviders = Array.isArray(cfg.enabled_providers) ? cfg.enabled_providers : PROVIDER_IDS;
+              const configuredProviders = Array.isArray(cfg.enabled_providers) ? cfg.enabled_providers : DEFAULT_PROVIDER_IDS;
               PROVIDER_IDS.forEach(provider => {
                 const checkbox = document.getElementById(`provider_${provider}`);
                 if (checkbox && !recentlyEdited(`provider_${provider}`)) checkbox.checked = configuredProviders.includes(provider);
@@ -3573,7 +4090,207 @@
 
             function registerServiceWorker(){
               if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
-              navigator.serviceWorker.register('/service-worker.js').catch(() => {});
+              navigator.serviceWorker.register('/service-worker.js').then(registration => {
+                if (registration.waiting) registration.waiting.postMessage({type:'SKIP_WAITING'});
+              }).catch(() => {});
+            }
+
+            function pwaStandalone(){
+              return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+            }
+
+            function updatePwaState(){
+              const state = document.getElementById('pwa-state');
+              const button = document.getElementById('btn_pwa_install');
+              if (!state || !button) return;
+              if (pwaStandalone()) {
+                state.textContent = tx('pwaInstalled');
+                button.hidden = true;
+              } else if (PWA_INSTALL_PROMPT) {
+                state.textContent = tx('pwaReady');
+                button.hidden = false;
+              } else {
+                state.textContent = /iphone|ipad|ipod/i.test(navigator.userAgent) ? tx('pwaIos') : tx('pwaHelp');
+                button.hidden = false;
+              }
+            }
+
+            async function installPwa(){
+              if (PWA_INSTALL_PROMPT) {
+                PWA_INSTALL_PROMPT.prompt();
+                await PWA_INSTALL_PROMPT.userChoice.catch(() => null);
+                PWA_INSTALL_PROMPT = null;
+              }
+              updatePwaState();
+            }
+
+            const CAPABILITY_LABELS = {
+              zh_cn:{area_search:'区域',radius_search:'方圆',availability:'空房',room_inventory:'数量',room_type:'房型',smoking:'吸烟',member_price:'会员价',hotel_info:'详情',coordinates:'坐标',conditional_http:'条件请求'},
+              zh_tw:{area_search:'區域',radius_search:'方圓',availability:'空房',room_inventory:'數量',room_type:'房型',smoking:'吸菸',member_price:'會員價',hotel_info:'詳情',coordinates:'座標',conditional_http:'條件請求'},
+              ja:{area_search:'地域',radius_search:'周辺',availability:'空室',room_inventory:'室数',room_type:'部屋',smoking:'喫煙',member_price:'会員料金',hotel_info:'詳細',coordinates:'座標',conditional_http:'条件リクエスト'},
+              ko:{area_search:'지역',radius_search:'반경',availability:'객실',room_inventory:'수량',room_type:'객실형',smoking:'흡연',member_price:'회원가',hotel_info:'상세',coordinates:'좌표',conditional_http:'조건부 요청'},
+              en:{area_search:'Area',radius_search:'Radius',availability:'Vacancy',room_inventory:'Count',room_type:'Room',smoking:'Smoking',member_price:'Member',hotel_info:'Info',coordinates:'Coords',conditional_http:'Conditional'}
+            };
+
+            async function loadProviderCapabilities(){
+              const container = document.getElementById('provider-capability-table');
+              if (!container) return;
+              try {
+                const response = await fetch('/api/v1/providers');
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const payload = await response.json();
+                const matrix = payload.matrix || {};
+                const capabilities = Array.isArray(matrix.capabilities) ? matrix.capabilities : [];
+                const labels = CAPABILITY_LABELS[currentLang()] || CAPABILITY_LABELS.en;
+                const providers = Array.isArray(matrix.providers) ? matrix.providers : [];
+                container.innerHTML = `<table><thead><tr><th>Provider</th>${capabilities.map(key=>`<th title="${escText(key)}">${escText(labels[key] || key)}</th>`).join('')}</tr></thead><tbody>${providers.map(provider=>{
+                  const name = currentLang() === 'en' ? provider.name_en : provider.name;
+                  return `<tr><th><span class="source-badge ${escText(provider.id)}">${escText(name)}</span></th>${capabilities.map(key=>`<td class="${provider.capabilities?.[key] ? 'cap-yes' : 'cap-no'}">${provider.capabilities?.[key] ? '✓' : '—'}</td>`).join('')}</tr>`;
+                }).join('')}</tbody></table>`;
+              } catch (error) {
+                container.textContent = String(error);
+              }
+            }
+
+            function trendLocale(){
+              return {zh_cn:'zh-CN',zh_tw:'zh-TW',ja:'ja-JP',ko:'ko-KR',en:'en-US'}[currentLang()] || 'en-US';
+            }
+
+            function trendDateTime(timestamp){
+              const date = new Date(Number(timestamp || 0) * 1000);
+              if (Number.isNaN(date.getTime())) return '—';
+              return date.toLocaleString(trendLocale(), {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+            }
+
+            function trendMoney(value){
+              const amount = Number(value);
+              return Number.isFinite(amount) && amount > 0 ? `¥${amount.toLocaleString(trendLocale())}` : '—';
+            }
+
+            function trendStatusMeta(value){
+              if (value === true) return {cls:'available',label:tx('trendStatusAvailable'),icon:'✓'};
+              if (value === false) return {cls:'unavailable',label:tx('trendStatusUnavailable'),icon:'×'};
+              return {cls:'unknown',label:tx('trendStatusUnknown'),icon:'?'};
+            }
+
+            function trendHotelName(hotel){
+              const code = String(hotel?.code || '');
+              const result = LAST_RESULTS.find(item => String(item.code || '') === code);
+              return hotel?.name || result?.name_primary || result?.name || result?.name_en || hotel?.display_code || code;
+            }
+
+            function renderTrends(data){
+              LAST_TREND_DATA = data || null;
+              const chart = document.getElementById('trend-chart');
+              const overview = document.getElementById('trend-overview');
+              const observations = document.getElementById('trend-observations');
+              const summary = document.getElementById('trend-summary');
+              const selector = document.getElementById('trend_hotel');
+              if (!chart || !overview || !observations || !summary || !selector) return;
+              const points = Array.isArray(data?.points) ? data.points : [];
+              const hotels = (Array.isArray(data?.hotels) ? data.hotels : [])
+                .filter(hotel => Number(hotel.samples || 0) > 0)
+                .sort((left,right) => Number(right.latest_observed_at || 0) - Number(left.latest_observed_at || 0));
+              summary.textContent = fmt('trendSelectedSummary', {count:points.length, hotels:hotels.length});
+              const previousCode = selector.value;
+              selector.innerHTML = hotels.map(hotel => {
+                const label = `${hotel.display_code || hotel.code} · ${trendHotelName(hotel)}`;
+                return `<option value="${escText(hotel.code)}">${escText(label)}</option>`;
+              }).join('');
+              const selectedHotel = hotels.find(hotel => String(hotel.code) === previousCode) || hotels[0];
+              if (!selectedHotel) {
+                chart.innerHTML = `<div class="trend-empty">${escText(tx('trendWaiting'))}</div>`;
+                overview.innerHTML = '';
+                observations.innerHTML = '';
+                return;
+              }
+              selector.value = String(selectedHotel.code);
+              const series = points
+                .filter(point => String(point.code) === String(selectedHotel.code))
+                .sort((left,right) => Number(left.ts || 0) - Number(right.ts || 0));
+              const latestStatus = trendStatusMeta(selectedHotel.latest_available);
+              const currentPrice = selectedHotel.current_price;
+              const minPrice = trendMoney(selectedHotel.min_price);
+              const maxPrice = trendMoney(selectedHotel.max_price);
+              const known = Number(selectedHotel.known_samples || 0);
+              const availableChecks = Number(selectedHotel.available_checks || 0);
+              const rate = selectedHotel.availability_rate_percent;
+              overview.innerHTML = `
+                <div class="trend-metric status ${latestStatus.cls}"><span>${escText(tx('trendCurrentStatus'))}</span><strong>${latestStatus.icon} ${escText(latestStatus.label)}</strong><small>${escText(fmt('trendUpdated',{time:trendDateTime(selectedHotel.latest_observed_at)}))}</small></div>
+                <div class="trend-metric"><span>${escText(tx('trendLatestPrice'))}</span><strong>${currentPrice ? escText(trendMoney(currentPrice)) : escText(tx('trendNoPrice'))}</strong><small>${escText(fmt('trendPriceRange',{min:minPrice,max:maxPrice}))}</small></div>
+                <div class="trend-metric"><span>${escText(tx('trendHistoricalRate'))}</span><strong>${rate == null ? '—' : `${Number(rate)}%`}</strong><small>${escText(fmt('trendAvailableChecks',{available:availableChecks,known}))}</small></div>
+                <div class="trend-metric"><span>${escText(tx('trendDataAmount'))}</span><strong>${Number(selectedHotel.samples || 0)}</strong><small>${escText(fmt('trendRecordsDetail',{count:selectedHotel.samples || 0,days:data?.days || 30}))}</small></div>`;
+              if (!series.length) {
+                chart.innerHTML = `<div class="trend-empty">${escText(tx('trendNoHotelHistory'))}</div>`;
+                observations.innerHTML = '';
+                return;
+              }
+
+              const width = 960, height = 205, left = 78, right = 18, priceTop = 22, priceBottom = 116;
+              const statusY = 142, statusHeight = 20, plotWidth = width - left - right;
+              const x = index => series.length === 1 ? left + plotWidth / 2 : left + index / (series.length - 1) * plotWidth;
+              const priced = series.map((point,index) => ({point,index,price:Number(point.price)})).filter(item => Number.isFinite(item.price) && item.price > 0);
+              const prices = priced.map(item => item.price);
+              const minP = prices.length ? Math.min(...prices) : 0;
+              const maxP = prices.length ? Math.max(...prices) : 0;
+              const y = price => {
+                if (!prices.length || minP === maxP) return (priceTop + priceBottom) / 2;
+                return priceBottom - (price - minP) / (maxP - minP) * (priceBottom - priceTop);
+              };
+              const tickValues = !prices.length ? [] : minP === maxP ? [minP] : [maxP, Math.round((maxP + minP) / 2), minP];
+              const grid = tickValues.map(price => `<line x1="${left}" y1="${y(price).toFixed(1)}" x2="${width-right}" y2="${y(price).toFixed(1)}" class="trend-grid-line"/><text x="${left-8}" y="${(y(price)+3).toFixed(1)}" text-anchor="end" class="trend-axis-label">${escText(trendMoney(price))}</text>`).join('');
+              const pricePath = priced.length > 1 ? `<path d="${priced.map((item,index)=>`${index?'L':'M'}${x(item.index).toFixed(1)},${y(item.price).toFixed(1)}`).join(' ')}" class="trend-price-line"/>` : '';
+              const pricePoints = priced.map(item => `<circle cx="${x(item.index).toFixed(1)}" cy="${y(item.price).toFixed(1)}" r="4" class="trend-price-point"><title>${escText(trendDateTime(item.point.ts))} · ${escText(trendMoney(item.price))}</title></circle>`).join('');
+              const blockWidth = Math.max(4, Math.min(46, plotWidth / Math.max(1, series.length) - 4));
+              const statusBlocks = series.map((point,index) => {
+                const meta = trendStatusMeta(point.available);
+                const detail = `${trendDateTime(point.ts)} · ${meta.label}${point.price ? ` · ${trendMoney(point.price)}` : ''}`;
+                return `<rect x="${(x(index)-blockWidth/2).toFixed(1)}" y="${statusY}" width="${blockWidth.toFixed(1)}" height="${statusHeight}" rx="4" class="trend-availability-block ${meta.cls}"><title>${escText(detail)}</title></rect>`;
+              }).join('');
+              const firstTime = trendDateTime(series[0].ts);
+              const lastTime = trendDateTime(series[series.length-1].ts);
+              const timeLabels = series.length === 1
+                ? `<text x="${x(0)}" y="188" text-anchor="middle" class="trend-axis-label">${escText(firstTime)}</text>`
+                : `<text x="${left}" y="188" class="trend-axis-label">${escText(firstTime)}</text><text x="${width-right}" y="188" text-anchor="end" class="trend-axis-label">${escText(lastTime)}</text>`;
+              chart.innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escText(tx('trendTitle'))}">
+                <text x="${left}" y="12" class="trend-axis-title">${escText(tx('trendPriceAxis'))}</text>${grid}${pricePath}${pricePoints}
+                <text x="${left}" y="134" class="trend-axis-title">${escText(tx('trendAvailabilityAxis'))}</text>${statusBlocks}${timeLabels}
+              </svg><div class="trend-legend"><span><i></i>${escText(tx('trendLegendPrice'))}</span><span class="available"><i></i>${escText(tx('trendLegendAvailable'))}</span><span class="unavailable"><i></i>${escText(tx('trendLegendUnavailable'))}</span><span class="unknown"><i></i>${escText(tx('trendLegendUnknown'))}</span><small>${escText(tx('trendEachBlock'))}</small></div>`;
+
+              const recent = [...series].reverse().slice(0, 8);
+              observations.innerHTML = `<div class="trend-observations-title">${escText(tx('trendRecentChecks'))}<span>${escText(trendHotelName(selectedHotel))}</span></div>
+                <div class="trend-observation-list"><div class="trend-observation-row header"><span>${escText(tx('trendTime'))}</span><span>${escText(tx('trendStatus'))}</span><span>${escText(tx('trendPrice'))}</span><span>${escText(tx('trendRooms'))}</span><span>${escText(tx('trendRoomType'))}</span></div>
+                ${recent.map(point => { const meta=trendStatusMeta(point.available); return `<div class="trend-observation-row"><span>${escText(trendDateTime(point.ts))}</span><span class="trend-status-chip ${meta.cls}">${meta.icon} ${escText(meta.label)}</span><span>${point.price?escText(trendMoney(point.price)):escText(tx('trendNoPrice'))}</span><span>${point.available===true?escText(fmt('trendRoomCount',{count:Number(point.room_count||0)})):'—'}</span><span title="${escText(point.room_type||'')}">${escText(point.room_type||tx('trendNoRoomType'))}</span></div>`; }).join('')}</div>`;
+            }
+
+            async function refreshTrends(force=false){
+              const panel=document.getElementById('trend-panel');
+              if (!force && (!panel?.open || Date.now()-LAST_TREND_REFRESH<60000)) return;
+              const codes=LAST_RESULTS.map(result=>result.code).filter(Boolean).join(',');
+              const days=document.getElementById('trend_days')?.value||30;
+              try { const response=await fetch(`/api/v1/trends?codes=${encodeURIComponent(codes)}&days=${days}`); if(!response.ok)throw new Error(`HTTP ${response.status}`); const payload=await response.json(); renderTrends(payload.trends||{}); LAST_TREND_REFRESH=Date.now(); } catch(error) { const summary=document.getElementById('trend-summary'); if(summary)summary.textContent=String(error); }
+            }
+
+            async function refreshEventCenter(){
+              const container=document.getElementById('event-center-list');
+              if(!container)return;
+              try{
+                const response=await fetch('/api/v1/events?limit=50');
+                if(!response.ok)throw new Error(`HTTP ${response.status}`);
+                const payload=await response.json(); const events=Array.isArray(payload.events)?payload.events:[];
+                if(!events.length){container.innerHTML=`<div class="trend-empty">${escText(tx('eventNone'))}</div>`;return;}
+                container.innerHTML=events.map(event=>{
+                  const detail=event.payload?.title||event.payload?.code||event.dedupe_key||'';
+                  const deliveries=(event.deliveries||[]).map(item=>`<i>${escText(item.channel)} · ${escText(item.state)}</i>`).join('');
+                  return `<div class="event-center-item"><strong>${escText(event.event_type)}</strong><div><span>${escText(detail)}</span><div class="event-deliveries">${deliveries}</div></div><time>${new Date(Number(event.created_at||0)*1000).toLocaleTimeString()}</time></div>`;
+                }).join('');
+              }catch(error){container.textContent=String(error);}
+            }
+
+            async function runSimulationStress(){
+              const button=document.getElementById('btn_simulation_run'); const output=document.getElementById('simulation-output');
+              if(!button||!output)return; setButtonBusy('btn_simulation_run',true); output.textContent='Running...';
+              try { const response=await fetch('/api/v1/simulation/stress',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({iterations:Number(document.getElementById('simulation_iterations')?.value||500),concurrency:Number(document.getElementById('simulation_concurrency')?.value||4),scenario:'mixed'})}); const payload=await response.json(); if(!response.ok)throw new Error(payload.error||payload.message||`HTTP ${response.status}`); output.textContent=JSON.stringify(payload,null,2); } catch(error) { output.textContent=String(error); } finally { setButtonBusy('btn_simulation_run',false); }
             }
 
             function setRunning(is){
@@ -3868,6 +4585,7 @@
                     detectResultChanges(LAST_RESULTS, results);
                     LAST_RESULTS = results;
                     LAST_RESULTS_FINGERPRINT = fingerprint;
+                    try { localStorage.setItem(OFFLINE_RESULTS_KEY, JSON.stringify({saved_at:Date.now(),results})); } catch(error) {}
                 } else {
                     force = true;
                 }
@@ -3950,7 +4668,15 @@
                             parts.push(checked.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'}));
                         }
                     }
-                    const meta = parts.length ? `<div class="result-telemetry">${safe(parts.join(' · '))}</div>` : '';
+                    let cacheBadge = '';
+                    if (result.cache_fallback) {
+                        cacheBadge = `<span class="result-cache fallback">${safe(tx('cacheFallback'))}</span>`;
+                    } else if (result.cache_validated) {
+                        cacheBadge = `<span class="result-cache validated">${safe(tx('cacheValidated'))}</span>`;
+                    } else if (result.from_cache) {
+                        cacheBadge = `<span class="result-cache">${safe(fmt('cacheFresh', {age:Math.max(0, Number(result.cache_age_sec || 0))}))}</span>`;
+                    }
+                    const meta = (parts.length || cacheBadge) ? `<div class="result-telemetry">${safe(parts.join(' · '))}${cacheBadge}</div>` : '';
                     const error = result.error_summary
                         ? `<div class="result-error" title="${safe(result.error_summary)}">${safe(result.error_summary)}</div>`
                         : '';
@@ -4037,6 +4763,17 @@
                 }
             }
 
+            function restoreOfflineResults(){
+              if (LAST_RESULTS.length) return;
+              try {
+                const snapshot=JSON.parse(localStorage.getItem(OFFLINE_RESULTS_KEY)||'null');
+                if(snapshot&&Array.isArray(snapshot.results)){
+                  LAST_RESULTS=snapshot.results;
+                  LAST_RESULTS_FINGERPRINT=JSON.stringify(snapshot.results);
+                }
+              } catch(error) {}
+            }
+
             function hms(seconds){
               if (seconds == null || !Number.isFinite(Number(seconds))) return '-';
               let s = Math.max(0, Math.floor(Number(seconds)));
@@ -4115,7 +4852,7 @@
             }
 
             async function refreshStatus(manual=false){
-              if (STATUS_REFRESH_IN_FLIGHT || (document.hidden && !manual)) return;
+              if (STATUS_REFRESH_IN_FLIGHT || (document.hidden && !manual)) return null;
               STATUS_REFRESH_IN_FLIGHT = true;
               if (manual) setButtonBusy('btn_results_refresh', true);
               try{
@@ -4135,6 +4872,7 @@
                 setRunning(!!j.running);
                 renderProgress(j.progress);
                 if (j && j.config){
+                  LAST_CONFIG = j.config;
                   setIfNotFocused('start_date', j.config.start_date);
                   setIfNotFocused('end_date', j.config.end_date);
                   setIfNotFocused('people', j.config.people);
@@ -4142,7 +4880,7 @@
                   setIfNotFocused('smoking', j.config.smoking);
                   setIfNotFocused('room_requirement', (j.config.room_requirement || j.config.om_requirement || 'any'));
                   setIfNotFocused('membership_status', j.config.membership_status || 'member');
-                  const activeProviders = Array.isArray(j.config.enabled_providers) ? j.config.enabled_providers : PROVIDER_IDS;
+                  const activeProviders = Array.isArray(j.config.enabled_providers) ? j.config.enabled_providers : DEFAULT_PROVIDER_IDS;
                   PROVIDER_IDS.forEach(provider => {
                     const checkbox = document.getElementById(`provider_${provider}`);
                     if (checkbox && !recentlyEdited(`provider_${provider}`) && !BLOCK_REMOTE_OVERWRITE) checkbox.checked = activeProviders.includes(provider);
@@ -4218,6 +4956,8 @@
                 }
                 renderPushStatus(j.notification_status || []);
                 renderProviderHealth(j.provider_health || {});
+                renderDiagnostics(j.diagnostics || {});
+                renderHomeDashboard(j);
                 if ('hotel_catalog' in j) renderHotelCatalog(j.hotel_catalog || null);
                 if ('provider_catalog' in j) renderProviderCatalog(j.provider_catalog || null);
                 const act = (j && j.action) ? j.action : '(idle)';
@@ -4226,17 +4966,38 @@
                 const actEl = document.getElementById('action-text');
                 if (actEl) actEl.textContent = actLine;
                 STATUS_BOOTSTRAPPED = true;
+                STATUS_FAILURES = 0;
                 LAST_STATUS_UPDATED_AT = new Date();
                 updateResultsTimestamp();
+                if (document.getElementById('trend-panel')?.open) refreshTrends();
+                if (document.getElementById('event-center-panel')?.open) refreshEventCenter();
+                return true;
               }catch(e){
+                STATUS_FAILURES += 1;
                 setConnectionOnline(false);
                 if (manual) {
                   document.getElementById('err').textContent = tx('connectionOffline');
                   document.getElementById('msg').textContent = '';
                 }
+                return false;
               }finally{
                 STATUS_REFRESH_IN_FLIGHT = false;
                 if (manual) setButtonBusy('btn_results_refresh', false);
+              }
+            }
+
+            function scheduleStatusReconnect(delay){
+              if (STATUS_RECONNECT_TIMER) clearTimeout(STATUS_RECONNECT_TIMER);
+              STATUS_RECONNECT_TIMER=setTimeout(runStatusLoop,Math.max(250,Number(delay)||2000));
+            }
+
+            async function runStatusLoop(){
+              const result=await refreshStatus(false);
+              if(result===false){
+                const backoff=Math.min(30000,1000*Math.pow(2,Math.min(5,STATUS_FAILURES)));
+                scheduleStatusReconnect(backoff*(0.85+Math.random()*0.3));
+              }else{
+                scheduleStatusReconnect(document.hidden?8000:2000);
               }
             }
 
@@ -4273,6 +5034,13 @@
               event.preventDefault();
               exportVisibleResults();
             });
+            document.getElementById('btn_trend_refresh')?.addEventListener('click', event=>{event.preventDefault();refreshTrends(true);});
+            document.getElementById('trend_hotel')?.addEventListener('change', ()=>{if(LAST_TREND_DATA)renderTrends(LAST_TREND_DATA);});
+            document.getElementById('trend_days')?.addEventListener('change', ()=>refreshTrends(true));
+            document.getElementById('trend-panel')?.addEventListener('toggle', event=>{if(event.currentTarget.open)refreshTrends(true);});
+            document.getElementById('event-center-panel')?.addEventListener('toggle', event=>{if(event.currentTarget.open)refreshEventCenter();});
+            document.getElementById('btn_pwa_install')?.addEventListener('click', event=>{event.preventDefault();installPwa();});
+            document.getElementById('btn_simulation_run')?.addEventListener('click', event=>{event.preventDefault();runSimulationStress();});
             document.getElementById('btn_today').addEventListener('click', (e)=>{e.preventDefault(); setDateRange(new Date(), 1);});
             document.getElementById('btn_tomorrow').addEventListener('click', (e)=>{e.preventDefault(); const d=new Date(); d.setDate(d.getDate()+1); setDateRange(d, 1);});
             document.getElementById('btn_weekend').addEventListener('click', (e)=>{e.preventDefault(); setNextWeekend();});
@@ -4340,6 +5108,8 @@
               storageSet(LANGUAGE_KEY, primaryLanguage.value || 'zh_cn');
               hideHotelInfoNow();
               applyUiLanguage();
+              loadProviderCapabilities();
+              updatePwaState();
               renderAreaHotels();
               if (currentSearchMode() === 'area' && document.getElementById('area_region')?.value) loadAreaHotels();
             });
@@ -4383,6 +5153,25 @@
             if (btnCatalogRefresh) btnCatalogRefresh.addEventListener('click', (e)=>{ e.preventDefault(); refreshHotelCatalog(); });
             const btnCatalogAck = document.getElementById('btn_catalog_ack');
             if (btnCatalogAck) btnCatalogAck.addEventListener('click', (e)=>{ e.preventDefault(); acknowledgeNewHotels(); });
+            const btnCacheClear = document.getElementById('btn_cache_clear');
+            if (btnCacheClear) btnCacheClear.addEventListener('click', async (event) => {
+              event.preventDefault();
+              setButtonBusy('btn_cache_clear', true);
+              try {
+                const response = await fetch('/api/v1/cache/clear', {method:'POST'});
+                const payload = await response.json();
+                if (!response.ok || !payload.ok) throw new Error(payload.message || `HTTP ${response.status}`);
+                const removed = Math.max(0, Number(payload.removed || 0));
+                const msg = document.getElementById('msg');
+                if (msg) msg.textContent = fmt('cacheCleared', {count:removed});
+                renderDiagnostics({...LAST_DIAGNOSTICS, cache_entries:0, cache_fresh_entries:0, cache_hit_rate_percent:0});
+              } catch (error) {
+                const err = document.getElementById('err');
+                if (err) err.textContent = String(error);
+              } finally {
+                setButtonBusy('btn_cache_clear', false);
+              }
+            });
             document.getElementById('btn_default').addEventListener('click', (e)=>{e.preventDefault();
               // 恢复默认（不会立刻写磁盘）
               document.getElementById('start_date').value = todayStr();
@@ -4397,7 +5186,10 @@
                 langEl.value = 'zh_cn';
                 storageSet(LANGUAGE_KEY, 'zh_cn');
               }
-              PROVIDER_IDS.forEach(name => { const provider = document.getElementById(`provider_${name}`); if (provider) provider.checked = true; });
+              PROVIDER_IDS.forEach(name => {
+                const provider = document.getElementById(`provider_${name}`);
+                if (provider) provider.checked = DEFAULT_PROVIDER_IDS.includes(name);
+              });
               applyUiLanguage();
               const engineEl = document.getElementById('engine');
               if (engineEl) engineEl.value = 'http';
@@ -4453,20 +5245,26 @@
             });
             document.addEventListener('visibilitychange', () => {
               if (!document.hidden) {
-                refreshStatus();
+                scheduleStatusReconnect(50);
                 refreshCatalogSnapshots();
               }
             });
+            window.addEventListener('online',()=>{setConnectionOnline(true);STATUS_FAILURES=0;scheduleStatusReconnect(50);});
+            window.addEventListener('offline',()=>{setConnectionOnline(false);scheduleStatusReconnect(2000);});
+            window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();PWA_INSTALL_PROMPT=event;updatePwaState();});
+            window.addEventListener('appinstalled',()=>{PWA_INSTALL_PROMPT=null;updatePwaState();});
             restoreResultViewPrefs();
             initAnimatedDetails();
             initHotelInfoPreview();
             updateAreaSelectionSummary();
+            restoreOfflineResults();
             renderRows();
-            refreshStatus();
+            runStatusLoop();
             refreshSearchHistory();
             refreshUpdateStatus();
             refreshMobileAccess();
+            loadProviderCapabilities();
+            updatePwaState();
             registerServiceWorker();
-            setInterval(refreshStatus, 2000);
             setInterval(refreshCatalogSnapshots, 30000);
             setInterval(refreshUpdateStatus, 10000);

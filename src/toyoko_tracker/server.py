@@ -119,6 +119,11 @@ def run(app: Flask, argv: Any = None) -> None:
             runtime._save_config_to_file(AUTO_SAVE_PATH)
     except Exception as exc:
         runtime._log(f"[boot] auto-load skipped: {exc}")
+    try:
+        runtime._prune_scan_cache()
+        runtime._restore_runtime_checkpoint()
+    except Exception as exc:
+        runtime._log(f"[boot] checkpoint restore skipped: {exc}")
     runtime._check_pypi_latest_async()
     runtime._start_catalog_scheduler()
     runtime._start_provider_database_scheduler()

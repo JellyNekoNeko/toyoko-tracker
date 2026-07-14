@@ -11,12 +11,15 @@ from .mobile_access import (
     pairing_page,
     protect_request,
     qr_svg_response,
+    require_local_request,
     service_worker_response,
     settings_endpoint,
 )
+from .traffic_meter import configure_traffic_meter, traffic_snapshot_response
 
 app = Flask(__name__)
 configure_flask_app(app)
+configure_traffic_meter(app)
 
 
 @app.before_request
@@ -107,6 +110,49 @@ def status() -> Response:
 @app.route("/api/v1/runtime")
 def runtime_status() -> Response:
     return _runtime.runtime_status()
+
+
+@app.route("/api/v1/traffic")
+def traffic_status() -> Response:
+    return traffic_snapshot_response()
+
+
+@app.route("/api/v1/preferences", methods=["POST"])
+def save_preferences() -> Response:
+    return _runtime.save_preferences()
+
+
+@app.route("/api/v1/cache")
+def cache_status() -> Response:
+    return _runtime.cache_status()
+
+
+@app.route("/api/v1/cache/clear", methods=["POST"])
+def cache_clear() -> Response:
+    return _runtime.cache_clear()
+
+
+@app.route("/api/v1/providers")
+def provider_capabilities_status() -> Response:
+    return _runtime.provider_capabilities_status()
+
+
+@app.route("/api/v1/events")
+def events_status() -> Response:
+    return _runtime.events_status()
+
+
+@app.route("/api/v1/trends")
+def trends_status() -> Response:
+    return _runtime.trends_status()
+
+
+@app.route("/api/v1/simulation/stress", methods=["POST"])
+def simulation_stress() -> Response:
+    local_only = require_local_request()
+    if local_only is not None:
+        return local_only
+    return _runtime.simulation_stress()
 
 
 @app.route("/api/v1/results")
