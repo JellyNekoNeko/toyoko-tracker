@@ -169,7 +169,7 @@ class SimulationAndPwaTests(unittest.TestCase):
         manifest = manifest_response().get_json()
 
         self.assertIn("toyoko-chan-data-v3", worker)
-        self.assertIn("app.js?v=v0.6.0-traffic-1", worker)
+        self.assertIn("app.js?v=v0.7.0-traffic-1", worker)
         self.assertIn("networkFirst(event.request,CACHE)", worker)
         self.assertIn("/api/v1/results", worker)
         self.assertEqual(manifest["display"], "standalone")

@@ -3797,7 +3797,7 @@
               const state = data.state || 'idle';
               const current = versionLabel(data.current_version || document.body.dataset.appVersion);
               const latest = versionLabel(data.latest_version);
-              const desktopUpdate = data.install_method === 'download';
+              const desktopUpdate = data.install_method === 'desktop' || data.install_method === 'download';
               setNodeText('#update-current-version', current);
               setNodeText('#update-latest-version', latest);
 
@@ -3825,10 +3825,18 @@
               } else if (state === 'update_available') {
                 titleText = tx('updateAvailableTitle');
                 messageText = desktopUpdate
-                  ? '将在系统浏览器中打开对应平台的安装包 / The platform download will open in your system browser.'
+                  ? '将自动下载、校验并安装对应平台的新版本 / The update will be downloaded, verified, and installed automatically.'
                   : tx('updateAvailableDetail');
-                upgradeText = desktopUpdate ? '下载新版 / Download' : tx('updateButton');
+                upgradeText = desktopUpdate ? '安装更新 / Install update' : tx('updateButton');
                 canUpgrade = true;
+              } else if (state === 'downloading') {
+                titleText = '正在下载更新 / Downloading update';
+                messageText = data.message || '正在下载桌面应用更新 / Downloading desktop update.';
+                upgradeText = `${Number(data.download_percent || 0)}%`;
+              } else if (state === 'installing') {
+                titleText = '更新已验证 / Update verified';
+                messageText = '应用即将重启并安装新版本，旧版本会保留为回滚备份 / The app will restart and install the update; the previous version is retained for rollback.';
+                upgradeText = '正在重启 / Restarting';
               } else if (state === 'upgrading') {
                 titleText = tx('upgradingTitle');
                 messageText = tx('upgradingMessage');
@@ -3849,7 +3857,7 @@
               }
               if (checkButton) {
                 checkButton.textContent = state === 'checking' ? tx('checkingUpdate') : tx('checkAgain');
-                checkButton.disabled = state === 'checking' || state === 'upgrading';
+                checkButton.disabled = ['checking', 'upgrading', 'downloading', 'installing'].includes(state);
               }
 
               const latestKey = String(data.latest_version || '');

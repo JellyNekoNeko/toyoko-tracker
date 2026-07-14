@@ -152,7 +152,8 @@ installed through the system package manager.
 The `Desktop bundles` GitHub Actions workflow builds all three platforms for
 desktop version tags (`desktop-v*`) and also supports manual runs. Tag builds publish a GitHub
 Release containing all platform archives and `SHA256SUMS.txt`. Frozen desktop
-apps check this release channel. The desktop version declared in
+apps download the matching archive, verify SHA-256, retain a rollback copy,
+install the update, and restart automatically. The desktop version declared in
 `desktop_version.py` must match the WebUI version in `pyproject.toml`; CI blocks
 mismatched releases. Separate tags and update sources prevent the matching
 version numbers from crossing channels. Pip-installed WebUI instances continue
@@ -165,6 +166,10 @@ and `toyoko-tracker.png` for desktop-menu integration.
 Each desktop release contains six native builds: macOS Apple Silicon (arm64),
 macOS Intel (x64), Windows x64, Windows arm64, Linux x64, and Linux arm64.
 The desktop updater selects the matching download for the current OS and CPU.
+Release archives receive GitHub Sigstore provenance attestations. When signing
+secrets are configured, Windows executables are Authenticode-signed and macOS
+apps are Developer ID signed and notarized. See
+[`docs/RELEASING.md`](docs/RELEASING.md) for release setup.
 
 ---
 
@@ -215,7 +220,7 @@ The WebUI includes a PWA manifest and can be added to the phone home screen. Ful
 
 ### 1.7 Version Info
 
-- Current version: `v0.6.0`
+- Current version: `v0.7.0`
 - App name: `东横酱 Toyoko Chan`
 - Author: JellyNeko / bilibili @果冻猫猫丶
 - License: MIT
@@ -883,6 +888,10 @@ Upgrade from PyPI:
 ```bash
 pipx upgrade toyoko-tracker
 ```
+
+The built-in updater detects pipx installations and uses the same upgrade
+command. Version tags (`v*`) are published automatically through PyPI Trusted
+Publishing after the one-time publisher setup.
 
 When installed with `pip`, activate its environment if applicable and use
 `python -m pip install --upgrade toyoko-tracker` instead.

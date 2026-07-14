@@ -19,6 +19,7 @@ import os
 import sys
 import math
 import platform
+import shutil
 import webbrowser
 import socket
 import subprocess
@@ -29,6 +30,7 @@ from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, as_c
 from copy import deepcopy
 from dataclasses import asdict, fields
 from datetime import datetime
+from pathlib import Path
 from typing import List, Optional, Tuple, Dict, Any
 
 import requests
@@ -36,6 +38,11 @@ from flask import request, jsonify, Response
 from bs4 import BeautifulSoup
 
 from .i18n import LANGUAGE_OPTIONS, normalize_primary_language as _normalize_primary_language
+from .desktop_updater import (
+    launch_update_helper as _launch_desktop_update_helper,
+    prepare_desktop_update as _prepare_desktop_update,
+    schedule_process_exit as _schedule_desktop_process_exit,
+)
 from .http_client import get as _http_get
 from .hotel_info import (
     get_hotel_info as _get_hotel_info,
@@ -134,6 +141,7 @@ from .settings import (
     AUTO_SAVE_PATH,
     BASE_DIR,
     BASE_URL,
+    CONFIG_DIR,
     DEFAULT_BARK_SERVER,
     DEFAULT_BARK_CRITICAL_ENABLED,
     DEFAULT_BARK_CRITICAL_SOUND,
@@ -301,6 +309,27 @@ def _is_desktop_distribution() -> bool:
     return bool(getattr(sys, "frozen", False))
 
 
+def _is_pipx_environment() -> bool:
+    if any(os.environ.get(name) for name in ("PIPX_HOME", "PIPX_LOCAL_VENVS")):
+        return True
+    normalized = str(getattr(sys, "prefix", "") or "").replace("\\", "/").lower()
+    return "/pipx/venvs/" in normalized or normalized.endswith("/pipx/venvs/toyoko-tracker")
+
+
+def _install_method() -> str:
+    if _is_desktop_distribution():
+        return "desktop"
+    return "pipx" if _is_pipx_environment() else "pip"
+
+
+def _pypi_upgrade_command() -> List[str]:
+    if _is_pipx_environment():
+        pipx = shutil.which("pipx")
+        if pipx:
+            return [pipx, "upgrade", "toyoko-tracker"]
+    return [sys.executable, "-m", "pip", "install", "--upgrade", "toyoko-tracker"]
+
+
 def _desktop_asset_name() -> str:
     machine = platform.machine().lower()
     architecture = "arm64" if machine in {"arm64", "aarch64"} else "x64"
@@ -319,15 +348,21 @@ def _github_release_details(data: Any) -> Dict[str, Any]:
         raise ValueError("GitHub release did not include a version")
     expected_asset = _desktop_asset_name()
     download_url = ""
+    checksum_url = ""
     for asset in data.get("assets") or []:
-        if isinstance(asset, dict) and str(asset.get("name") or "") == expected_asset:
+        if not isinstance(asset, dict):
+            continue
+        name = str(asset.get("name") or "")
+        if name == expected_asset:
             download_url = str(asset.get("browser_download_url") or "")
-            break
+        elif name == "SHA256SUMS.txt":
+            checksum_url = str(asset.get("browser_download_url") or "")
     normalized_tag = tag[len("desktop-v"):] if tag.lower().startswith("desktop-v") else tag.lstrip("vV")
     return {
         "version": normalized_tag,
         "release_url": str(data.get("html_url") or "https://github.com/JellyNekoNeko/toyoko-tracker/releases/latest"),
         "download_url": download_url,
+        "checksum_url": checksum_url,
         "asset_name": expected_asset,
         "release_notes": str(data.get("body") or "")[:4000],
     }
@@ -353,7 +388,13 @@ def _check_pypi_latest_async() -> None:
     with _UPDATE_LOCK:
         if _UPDATE_STATUS.get("state") in {"checking", "upgrading"}:
             return
-        _UPDATE_STATUS.update({"state": "checking", "message": "checking PyPI", "checked_at": _now_wall()})
+        _UPDATE_STATUS.update({
+            "state": "checking",
+            "source": "pypi",
+            "install_method": _install_method(),
+            "message": "checking PyPI",
+            "checked_at": _now_wall(),
+        })
 
     def worker() -> None:
         try:
@@ -366,6 +407,8 @@ def _check_pypi_latest_async() -> None:
             update_available = _version_key(latest) > _version_key(__version__)
             _set_update_status(
                 state="update_available" if update_available else "up_to_date",
+                source="pypi",
+                install_method=_install_method(),
                 current_version=__version__,
                 latest_version=latest,
                 message="update available" if update_available else "already latest",
@@ -374,6 +417,8 @@ def _check_pypi_latest_async() -> None:
         except Exception as e:
             _set_update_status(
                 state="failed",
+                source="pypi",
+                install_method=_install_method(),
                 current_version=__version__,
                 message=str(e),
                 checked_at=_now_wall(),
@@ -384,12 +429,12 @@ def _check_pypi_latest_async() -> None:
 
 def _check_github_latest_async() -> None:
     with _UPDATE_LOCK:
-        if _UPDATE_STATUS.get("state") in {"checking", "upgrading"}:
+        if _UPDATE_STATUS.get("state") in {"checking", "upgrading", "downloading", "installing"}:
             return
         _UPDATE_STATUS.update({
             "state": "checking",
             "source": "github",
-            "install_method": "download",
+            "install_method": "desktop",
             "message": "checking GitHub Releases",
             "checked_at": _now_wall(),
         })
@@ -408,7 +453,7 @@ def _check_github_latest_async() -> None:
             _set_update_status(
                 state="update_available" if update_available else "up_to_date",
                 source="github",
-                install_method="download",
+                install_method="desktop",
                 current_version=DESKTOP_VERSION,
                 latest_version=latest,
                 message="desktop update available" if update_available else "already latest",
@@ -419,7 +464,7 @@ def _check_github_latest_async() -> None:
             _set_update_status(
                 state="failed",
                 source="github",
-                install_method="download",
+                install_method="desktop",
                 current_version=DESKTOP_VERSION,
                 message=str(exc),
                 checked_at=_now_wall(),
@@ -439,11 +484,18 @@ def _upgrade_from_pypi_async() -> None:
     with _UPDATE_LOCK:
         if _UPDATE_STATUS.get("state") == "upgrading":
             return
-        _UPDATE_STATUS.update({"state": "upgrading", "message": "upgrading from PyPI", "upgrade_output": ""})
+        method = _install_method()
+        _UPDATE_STATUS.update({
+            "state": "upgrading",
+            "source": "pypi",
+            "install_method": method,
+            "message": f"upgrading with {method}",
+            "upgrade_output": "",
+        })
 
     def worker() -> None:
         try:
-            cmd = [sys.executable, "-m", "pip", "install", "--upgrade", "toyoko-tracker"]
+            cmd = _pypi_upgrade_command()
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
             output = ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()[-4000:]
             if proc.returncode == 0:
@@ -456,19 +508,67 @@ def _upgrade_from_pypi_async() -> None:
     threading.Thread(target=worker, name="pypi-upgrade", daemon=True).start()
 
 
-def _open_desktop_update() -> None:
+def _upgrade_desktop_async() -> None:
     with _UPDATE_LOCK:
+        if _UPDATE_STATUS.get("state") in {"downloading", "installing"}:
+            return
         download_url = str(_UPDATE_STATUS.get("download_url") or "")
+        checksum_url = str(_UPDATE_STATUS.get("checksum_url") or "")
         release_url = str(_UPDATE_STATUS.get("release_url") or "")
-    target = download_url or release_url or "https://github.com/JellyNekoNeko/toyoko-tracker/releases/latest"
-    opened = webbrowser.open(target)
-    _set_update_status(
-        state="update_available",
-        source="github",
-        install_method="download",
-        message="download opened in the system browser" if opened else "open the release page to download the update",
-        open_url=target,
-    )
+        version = str(_UPDATE_STATUS.get("latest_version") or "")
+        asset_name = str(_UPDATE_STATUS.get("asset_name") or _desktop_asset_name())
+        _UPDATE_STATUS.update({
+            "state": "downloading",
+            "source": "github",
+            "install_method": "desktop",
+            "message": "downloading desktop update",
+            "download_percent": 0,
+        })
+
+    def progress(received: int, total: int) -> None:
+        percent = int(received * 100 / total) if total else 0
+        _set_update_status(
+            state="downloading",
+            message=f"downloading desktop update ({percent}%)" if total else "downloading desktop update",
+            download_received=received,
+            download_total=total,
+            download_percent=percent,
+        )
+
+    def worker() -> None:
+        try:
+            update = _prepare_desktop_update(
+                version=version,
+                asset_name=asset_name,
+                download_url=download_url,
+                checksum_url=checksum_url,
+                config_dir=Path(CONFIG_DIR),
+                progress=progress,
+            )
+            _set_update_status(
+                state="installing",
+                message="update verified; restarting to install",
+                download_percent=100,
+                backup_path=str(update.backup_root),
+            )
+            _launch_desktop_update_helper(update)
+            threading.Thread(
+                target=_schedule_desktop_process_exit,
+                name="desktop-update-exit",
+                daemon=True,
+            ).start()
+        except Exception as exc:
+            target = download_url or release_url or "https://github.com/JellyNekoNeko/toyoko-tracker/releases/latest"
+            opened = webbrowser.open(target)
+            _set_update_status(
+                state="failed",
+                source="github",
+                install_method="desktop",
+                message=f"{exc}; manual download opened" if opened else str(exc),
+                open_url=target,
+            )
+
+    threading.Thread(target=worker, name="desktop-update", daemon=True).start()
 
 
 set_renderer_hooks(_log, _set_action)
@@ -4735,7 +4835,7 @@ def provider_catalog_refresh() -> Response:
 
 def upgrade() -> Response:
         if _is_desktop_distribution():
-            _open_desktop_update()
+            _upgrade_desktop_async()
         else:
             _upgrade_from_pypi_async()
         with _UPDATE_LOCK:

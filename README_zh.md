@@ -148,8 +148,9 @@ python build_desktop.py
 
 GitHub Actions 的 `Desktop bundles` 工作流会在桌面版本标签（`desktop-v*`）推送时同时
 生成三平台构建产物，也可以在 Actions 页面手动运行。版本标签构建完成后会
-创建 GitHub Release，上传三平台压缩包和 `SHA256SUMS.txt`；桌面版通过该
-Release 检查和下载新版本。桌面版本号在 `desktop_version.py` 中声明，并与
+创建 GitHub Release，上传三平台压缩包和 `SHA256SUMS.txt`；桌面版会
+自动下载对应架构的更新，校验 SHA-256，保留回滚副本，替换应用并重启。
+桌面版本号在 `desktop_version.py` 中声明，并与
 `pyproject.toml` 的 WebUI 主版本号保持一致；CI 会阻止两个版本号不一致的
 发布。两者使用不同标签和更新源，所以相同版本号不会互相干扰。pip/WebUI
 版本仍通过 PyPI 检查和更新。
@@ -161,6 +162,9 @@ Release 检查和下载新版本。桌面版本号在 `desktop_version.py` 中�
 每个桌面 Release 提供六个原生构建：macOS Apple Silicon（arm64）、macOS
 Intel（x64）、Windows x64、Windows arm64、Linux x64 和 Linux arm64。
 应用会根据当前系统及处理器架构选择对应的下载文件。
+Release 压缩包会生成 GitHub Sigstore 构建来源证明；配置签名 Secrets 后，
+Windows 可执行文件会使用 Authenticode 签名，macOS 应用会使用
+Developer ID 签名并提交公证。详见 [`docs/RELEASING.md`](docs/RELEASING.md)。
 
 ---
 
@@ -211,7 +215,7 @@ WebUI 已包含 PWA manifest，可添加到手机主屏幕。完整的 Service W
 
 ### 1.7 版本信息
 
-- 当前版本：`v0.6.0`
+- 当前版本：`v0.7.0`
 - App 名称：`东横酱 Toyoko Chan`
 - 作者：JellyNeko / bilibili @果冻猫猫丶
 - 许可证：MIT
@@ -878,6 +882,9 @@ brew install terminal-notifier
 ```bash
 pipx upgrade toyoko-tracker
 ```
+
+内置更新器会识别 pipx 安装环境并使用同样的升级命令。完成一次性
+PyPI Trusted Publisher 设置后，`v*` 版本标签会自动发布到 PyPI。
 
 如果通过 `pip` 安装，请视情况先激活对应环境，然后执行
 `python -m pip install --upgrade toyoko-tracker`。

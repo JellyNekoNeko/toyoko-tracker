@@ -50,7 +50,11 @@ def test_github_release_selects_current_platform_asset():
             {
                 "name": "ToyokoTracker-macos-arm64.zip",
                 "browser_download_url": "https://example.test/app.zip",
-            }
+            },
+            {
+                "name": "SHA256SUMS.txt",
+                "browser_download_url": "https://example.test/SHA256SUMS.txt",
+            },
         ],
     }
     with patch.object(runtime.sys, "platform", "darwin"), patch.object(
@@ -60,6 +64,7 @@ def test_github_release_selects_current_platform_asset():
 
     assert details["version"] == "0.7.0"
     assert details["download_url"] == "https://example.test/app.zip"
+    assert details["checksum_url"] == "https://example.test/SHA256SUMS.txt"
     assert details["release_notes"] == "Changes"
 
 
@@ -79,3 +84,33 @@ def test_update_dispatch_uses_github_for_frozen_desktop():
 
     github.assert_called_once_with()
     pypi.assert_not_called()
+
+
+def test_pipx_environment_is_detected_from_prefix():
+    with patch.dict(runtime.os.environ, {}, clear=True), patch.object(
+        runtime.sys, "prefix", "/Users/test/.local/pipx/venvs/toyoko-tracker"
+    ), patch.object(runtime, "_is_desktop_distribution", return_value=False):
+        assert runtime._install_method() == "pipx"
+
+
+def test_pipx_upgrade_uses_pipx_executable():
+    with patch.object(runtime, "_is_pipx_environment", return_value=True), patch.object(
+        runtime.shutil, "which", return_value="/opt/homebrew/bin/pipx"
+    ):
+        assert runtime._pypi_upgrade_command() == [
+            "/opt/homebrew/bin/pipx",
+            "upgrade",
+            "toyoko-tracker",
+        ]
+
+
+def test_pip_upgrade_is_used_outside_pipx():
+    with patch.object(runtime, "_is_pipx_environment", return_value=False):
+        assert runtime._pypi_upgrade_command() == [
+            runtime.sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--upgrade",
+            "toyoko-tracker",
+        ]

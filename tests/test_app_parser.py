@@ -1244,7 +1244,7 @@ class AppRouteSecurityTests(unittest.TestCase):
         self.assertIn('id="guide-modal"', body)
         self.assertIn('id="guide-progress"', body)
         self.assertEqual(body.count('data-guide-jump='), 5)
-        self.assertIn('data-app-version="v0.6.0"', body)
+        self.assertIn('data-app-version="v0.7.0"', body)
         self.assertIn('data-theme-choice="system"', body)
 
     def test_home_dashboard_is_default_and_has_overview_modules(self):
@@ -1263,8 +1263,8 @@ class AppRouteSecurityTests(unittest.TestCase):
         self.assertIn('data-home-quick="radius"', body)
         self.assertIn('data-app-view="push-settings"><span class="nav-icon">✉</span>', body)
         self.assertIn('data-home-quick="push"><i>✉</i>', body)
-        self.assertIn('/static/app.js?v=v0.6.0-traffic-1', body)
-        self.assertIn('/static/app.css?v=v0.6.0-traffic-1', body)
+        self.assertIn('/static/app.js?v=v0.7.0-traffic-1', body)
+        self.assertIn('/static/app.css?v=v0.7.0-traffic-1', body)
 
     def test_home_renders_after_search_results_exist(self):
         from toyoko_tracker import runtime
