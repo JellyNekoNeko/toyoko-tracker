@@ -25,7 +25,16 @@ else:
 
 datas = collect_data_files("toyoko_tracker")
 windows_arm64 = sys.platform == "win32" and platform.machine().lower() in {"arm64", "aarch64"}
-hiddenimports = ["webview.platforms.qt"] if windows_arm64 else []
+hiddenimports = [
+    "webview.platforms.qt",
+    "PySide6.QtCore",
+    "PySide6.QtGui",
+    "PySide6.QtNetwork",
+    "PySide6.QtWebChannel",
+    "PySide6.QtWebEngineCore",
+    "PySide6.QtWebEngineWidgets",
+    "PySide6.QtWidgets",
+] if windows_arm64 else []
 excludes = ["pytest", "ruff", "PyQt5", "PyQt6", "PySide2"]
 if windows_arm64:
     excludes.extend(["clr", "clr_loader", "pythonnet", "webview.platforms.winforms"])

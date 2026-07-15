@@ -13,32 +13,40 @@ $process = Start-Process `
 try {
   $deadline = (Get-Date).AddSeconds(45)
   $lastError = ""
-  $ready = $false
+  $httpReady = $false
+  $windowReady = $false
   while ((Get-Date) -lt $deadline) {
     $process.Refresh()
     if ($process.HasExited) {
       throw "ToyokoTracker exited during startup with code $($process.ExitCode)"
     }
-    try {
-      $response = Invoke-WebRequest `
-        -Uri "http://127.0.0.1:$port/" `
-        -UseBasicParsing `
-        -TimeoutSec 3
-      if ($response.StatusCode -eq 200 -and $response.Content -match "Toyoko") {
-        $ready = $true
-        break
+    $windowReady = $process.MainWindowHandle -ne 0
+    if (-not $httpReady) {
+      try {
+        $response = Invoke-WebRequest `
+          -Uri "http://127.0.0.1:$port/" `
+          -UseBasicParsing `
+          -TimeoutSec 3
+        if ($response.StatusCode -eq 200 -and $response.Content -match "Toyoko") {
+          $httpReady = $true
+        }
+        else {
+          $lastError = "unexpected HTTP status $($response.StatusCode)"
+        }
       }
-      $lastError = "unexpected HTTP status $($response.StatusCode)"
+      catch {
+        $lastError = $_.Exception.Message
+      }
     }
-    catch {
-      $lastError = $_.Exception.Message
+    if ($httpReady -and $windowReady) {
+      break
     }
     Start-Sleep -Seconds 1
   }
-  if (-not $ready) {
-    throw "ToyokoTracker did not become ready: $lastError"
+  if (-not $httpReady -or -not $windowReady) {
+    throw "ToyokoTracker did not become ready: HTTP=$httpReady window=$windowReady; $lastError"
   }
-  Write-Output "Desktop smoke test passed: HTTP 200, PID $($process.Id)"
+  Write-Output "Desktop smoke test passed: HTTP 200, visible window, PID $($process.Id)"
 }
 finally {
   Get-Process ToyokoTracker -ErrorAction SilentlyContinue | Stop-Process -Force
