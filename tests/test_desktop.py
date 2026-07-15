@@ -1,5 +1,5 @@
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from toyoko_tracker import desktop
 from toyoko_tracker.desktop import _parser
@@ -40,6 +40,17 @@ def test_windows_arm64_shell_uses_qt_webview():
     assert "import QtWebView" in qml
     assert "WebView" in qml
     assert "url: appUrl" in qml
+
+
+def test_qml_component_waits_for_async_imports():
+    qt_app = Mock()
+    component = Mock()
+    component.isLoading.side_effect = [True, True, False]
+
+    with patch.object(desktop.time, "sleep"):
+        desktop._wait_for_qml_component(qt_app, component)
+
+    assert qt_app.processEvents.call_count == 2
 
 
 def test_desktop_entry_persists_unhandled_startup_errors():

@@ -9,6 +9,7 @@ import os
 import platform
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -71,6 +72,14 @@ def _initialize_qt_webview() -> None:
     initialize()
 
 
+def _wait_for_qml_component(qt_app: Any, component: Any, timeout: float = 15.0) -> None:
+    """Let asynchronous QML imports finish before creating the root object."""
+    deadline = time.monotonic() + timeout
+    while component.isLoading() and time.monotonic() < deadline:
+        qt_app.processEvents()
+        time.sleep(0.01)
+
+
 def _start_windows_arm64_shell(url: str) -> None:
     from PySide6.QtCore import QSize, QUrl
     from PySide6.QtGui import QGuiApplication, QIcon
@@ -88,10 +97,13 @@ def _start_windows_arm64_shell(url: str) -> None:
     view.rootContext().setContextProperty("appUrl", QUrl(url))
     component = QQmlComponent(view.engine())
     component.setData(_ARM64_QML, QUrl("inmemory:toyoko-arm64.qml"))
+    _wait_for_qml_component(qt_app, component)
     root = component.create()
     if root is None:
         errors = "; ".join(error.toString() for error in component.errors())
-        raise RuntimeError(f"Windows ARM64 QtWebView shell failed: {errors}")
+        status = getattr(component.status(), "name", str(component.status()))
+        detail = errors or "QML component did not become ready"
+        raise RuntimeError(f"Windows ARM64 QtWebView shell failed ({status}): {detail}")
     view.setContent(QUrl("inmemory:toyoko-arm64.qml"), component, root)
     view.show()
     qt_app.exec()
