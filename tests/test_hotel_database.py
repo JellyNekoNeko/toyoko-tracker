@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
@@ -78,7 +79,7 @@ class HotelDatabaseTests(unittest.TestCase):
     def test_existing_database_schema_is_migrated_without_losing_baseline(self) -> None:
         import sqlite3
 
-        with sqlite3.connect(self.database_path) as connection:
+        with closing(sqlite3.connect(self.database_path)) as connection, connection:
             connection.executescript(
                 """
                 CREATE TABLE provider_sync (
@@ -105,7 +106,7 @@ class HotelDatabaseTests(unittest.TestCase):
     def test_migration_clears_legacy_full_provider_alert(self) -> None:
         import sqlite3
 
-        with sqlite3.connect(self.database_path) as connection:
+        with closing(sqlite3.connect(self.database_path)) as connection, connection:
             connection.executescript(
                 """
                 CREATE TABLE provider_sync (

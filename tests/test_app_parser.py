@@ -487,6 +487,7 @@ class AppParserTests(unittest.TestCase):
 
         self.assertTrue(repaired)
         self.assertTrue(snapshot["baseline_initialized"])
+        self.assertEqual(snapshot["schema_version"], 2)
         self.assertEqual(snapshot["unseen_new_hotels"], [])
         self.assertEqual(snapshot["last_new_hotels"], [])
 

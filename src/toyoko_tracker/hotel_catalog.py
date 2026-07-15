@@ -166,6 +166,7 @@ def _repair_legacy_full_catalog_alert(snapshot: Dict[str, Any]) -> bool:
     snapshot["unseen_new_hotels"] = []
     snapshot["last_new_hotels"] = []
     snapshot["baseline_initialized"] = True
+    snapshot["schema_version"] = 2
     return True
 
 
