@@ -2485,8 +2485,8 @@ def home() -> Response:
 	              <nav class="sidebar-nav">
 	                <button class="sidebar-nav-item active" data-app-view="home" aria-current="page"><span class="nav-icon">⌂</span><span class="nav-label">首页 / Home</span></button>
 	                <button class="sidebar-nav-item" data-app-view="search"><span class="nav-icon">⌕</span><span class="nav-label">空房检索 / Vacancy Search</span></button>
-	                <button class="sidebar-nav-item" data-app-view="price"><span class="nav-icon">¥</span><span class="nav-label">价格 / Price Calendar</span></button>
 	                <button class="sidebar-nav-item" data-app-view="monitor"><span class="nav-icon">◉</span><span class="nav-label">空房监控 / Vacancy Monitor</span><span class="nav-live-dot" aria-hidden="true"></span></button>
+	                <button class="sidebar-nav-item" data-app-view="price"><span class="nav-icon">¥</span><span class="nav-label">价格日历 / Price Calendar</span></button>
 	                <button class="sidebar-nav-item" data-app-view="search-settings"><span class="nav-icon">≡</span><span class="nav-label">搜索设定 / Search Settings</span></button>
 	                <button class="sidebar-nav-item" data-app-view="push-settings"><span class="nav-icon">✉</span><span class="nav-label">推送设定 / Push Settings</span></button>
 	              </nav>
@@ -2528,10 +2528,11 @@ def home() -> Response:
               </div>
             </div>
             <div class="run-actions">
-	              <button id="btn_scan_once">单次检索 Scan Once</button>
-	              <button class="primary" id="btn_start">启动 Start</button>
-	              <button class="danger" id="btn_stop" disabled>停止 Stop</button>
+	              <button id="btn_scan_once" type="button">单次检索 Scan Once</button>
+	              <button class="primary" id="btn_start" type="button">启动 Start</button>
+	              <button class="danger" id="btn_stop" type="button" disabled>停止 Stop</button>
 	            </div>
+	            <div id="command-feedback" class="command-feedback" role="status" aria-live="polite" hidden></div>
 	          </nav>
 
 	          <section class="app-view active" id="view-home" data-view="home" aria-label="Home">
@@ -4825,6 +4826,63 @@ def _price_calendar_hotels(cfg: AppConfig) -> List[Dict[str, str]]:
     return hotels
 
 
+def _price_calendar_request_config(cfg: AppConfig, payload: Any) -> AppConfig:
+    """Apply the current search draft to an isolated calendar configuration."""
+    candidate = deepcopy(cfg)
+    if not isinstance(payload, dict):
+        return candidate
+
+    candidate.people = _int_from_payload(payload, "people", candidate.people, 1, 5)
+    candidate.rooms = _int_from_payload(payload, "rooms", candidate.rooms, 1, 9)
+    smoking = str(payload.get("smoking", candidate.smoking))
+    if smoking in {"Smoking", "noSmoking", "all"}:
+        candidate.smoking = smoking
+    membership_status = str(
+        payload.get(
+            "membership_status",
+            getattr(candidate, "membership_status", DEFAULT_MEMBERSHIP_STATUS),
+        )
+    )
+    if membership_status in {"member", "non_member", "unknown"}:
+        candidate.membership_status = membership_status
+    room_requirement = str(
+        payload.get(
+            "room_requirement",
+            getattr(candidate, "room_requirement", getattr(candidate, "om_requirement", "any")),
+        )
+    )
+    if room_requirement in {"any", "single", "double", "twin"}:
+        candidate.room_requirement = room_requirement
+    candidate.primary_language = _normalize_primary_language(
+        payload.get(
+            "primary_language",
+            getattr(candidate, "primary_language", DEFAULT_PRIMARY_LANGUAGE),
+        )
+    )
+
+    if "hotel_codes" in payload:
+        raw_codes = payload.get("hotel_codes")
+        codes: List[str] = []
+        if isinstance(raw_codes, list):
+            for raw_code in raw_codes:
+                code = str(raw_code or "").strip()
+                if not code:
+                    continue
+                normalized = code.zfill(5) if code.isdigit() else code
+                if normalized not in codes:
+                    codes.append(normalized)
+        candidate.hotel_codes = codes
+
+        selected = _clean_selected_hotels(payload.get("selected_hotels"))
+        selected_by_code = {str(item.get("code") or ""): item for item in selected}
+        ordered = [selected_by_code.get(code, {"code": code}) for code in codes]
+        candidate.selected_hotels = _localize_selected_hotels(
+            ordered,
+            candidate.primary_language,
+        )
+    return candidate
+
+
 def _price_calendar_context(
     cfg: AppConfig,
     hotel_code: str = "",
@@ -4941,6 +4999,9 @@ def _run_price_calendar_job(
     live_checks = 0
     try:
         for index, stay_date in enumerate(dates):
+            with _PRICE_CALENDAR_JOB_LOCK:
+                if _PRICE_CALENDAR_JOB.get("id") != job_id:
+                    return
             if not force and stay_date in fresh_dates:
                 _update_price_calendar_job(
                     job_id,
@@ -5068,13 +5129,15 @@ def _start_price_calendar_job(
     hotel_code: str,
     month: str,
     force: bool = False,
+    replace: bool = False,
 ) -> Tuple[Dict[str, Any], bool]:
     global _PRICE_CALENDAR_JOB, _PRICE_CALENDAR_THREAD
     key = _price_calendar_job_key(cfg, hotel_code, month)
     with _PRICE_CALENDAR_JOB_LOCK:
         if _PRICE_CALENDAR_JOB.get("running"):
             same = _PRICE_CALENDAR_JOB.get("key") == key
-            return deepcopy(_PRICE_CALENDAR_JOB), same
+            if same or not replace:
+                return deepcopy(_PRICE_CALENDAR_JOB), same
         job_id = hashlib.sha256(f"{key}:{time.time_ns()}".encode("utf-8")).hexdigest()[:16]
         _PRICE_CALENDAR_JOB = {
             "id": job_id,
@@ -5103,13 +5166,14 @@ def _start_price_calendar_job(
 
 
 def price_calendar_status() -> Response:
+    payload = (request.get_json(silent=True) or {}) if request.method == "POST" else {}
     with _CONFIG_LOCK:
-        cfg = deepcopy(_CONFIG)
+        cfg = _price_calendar_request_config(_CONFIG, payload)
     try:
         hotel_code, month, hotels = _price_calendar_context(
             cfg,
-            request.args.get("hotel_code", ""),
-            request.args.get("month", ""),
+            payload.get("hotel_code", request.args.get("hotel_code", "")),
+            payload.get("month", request.args.get("month", "")),
         )
     except ValueError as exc:
         return jsonify({"ok": False, "message": str(exc)}), 400
@@ -5119,7 +5183,7 @@ def price_calendar_status() -> Response:
 def price_calendar_refresh() -> Response:
     payload = request.get_json(force=True, silent=True) or {}
     with _CONFIG_LOCK:
-        cfg = deepcopy(_CONFIG)
+        cfg = _price_calendar_request_config(_CONFIG, payload)
     try:
         hotel_code, month, hotels = _price_calendar_context(
             cfg,
@@ -5134,6 +5198,7 @@ def price_calendar_refresh() -> Response:
         hotel_code,
         month,
         bool(payload.get("force", False)),
+        bool(payload.get("replace", False)),
     )
     if not accepted:
         return jsonify({

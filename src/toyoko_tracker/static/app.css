@@ -245,7 +245,7 @@
           .push-chip.failed{background:#fbeaea;color:#a33a3a;}
           .push-chip.disabled{background:#eef2f7;color:#667085;}
           .push-message{font-size:11px;color:#667085;margin-top:6px;min-height:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-          .command-dock{position:sticky;top:10px;z-index:40;display:flex;align-items:center;justify-content:space-between;gap:16px;margin:0 0 14px;padding:10px 12px;border:1px solid #d3dce7;border-radius:8px;background:rgba(255,255,255,.96);box-shadow:0 4px 14px rgba(16,24,40,.08);backdrop-filter:blur(12px);}
+          .command-dock{position:sticky;top:10px;z-index:40;display:flex;align-items:center;justify-content:space-between;gap:10px 16px;flex-wrap:wrap;margin:0 0 14px;padding:10px 12px;border:1px solid #d3dce7;border-radius:8px;background:rgba(255,255,255,.96);box-shadow:0 4px 14px rgba(16,24,40,.08);backdrop-filter:blur(12px);}
           .command-state{display:flex;align-items:center;gap:10px;min-width:0;}
           .command-state strong,.command-state span{display:block;}
           .command-state strong{font-size:13px;color:#27364a;}
@@ -261,6 +261,10 @@
           .command-dot.running{background:#2f8a45;box-shadow:0 0 0 4px #e6f4ea;}
           .command-dock .run-actions{margin:0;}
           .command-dock .run-actions button{min-height:34px;}
+          .command-feedback{flex:1 0 100%;padding:7px 9px;border-radius:6px;background:#eef6ff;color:#15559c;font-size:10px;font-weight:750;line-height:1.45;}
+          .command-feedback.error{background:#fff0ef;color:#b42318;}
+          .command-feedback.success{background:#eaf7ef;color:#287d3d;}
+          .command-feedback[hidden]{display:none!important;}
           .run-snapshot{display:grid;grid-template-columns:2fr .6fr .8fr .7fr .9fr;gap:0;margin-top:12px;border:1px solid #e2e7ee;border-radius:6px;background:#fafbfc;overflow:hidden;}
           .run-snapshot > div{padding:8px 10px;border-right:1px solid #e2e7ee;min-width:0;}
           .run-snapshot > div:last-child{border-right:0;}
@@ -1013,6 +1017,7 @@
           body[data-theme="dark"] button.danger:hover:not(:disabled){border-color:#cb5959;background:#b94a4a;}
           body[data-theme="dark"] .language-menu button.active,body[data-theme="dark"] .theme-options button.active{background:#31445f;color:#b9d7ff;}
           body[data-theme="dark"] .command-dock,body[data-theme="dark"] .box,body[data-theme="dark"] .search-panel,body[data-theme="dark"] .run-panel,body[data-theme="dark"] .results-panel,body[data-theme="dark"] .settings-panel,body[data-theme="dark"] .settings-card,body[data-theme="dark"] .interface-card,body[data-theme="dark"] .hotel-picker,body[data-theme="dark"] .selected-map-panel,body[data-theme="dark"] .history-list,body[data-theme="dark"] .push-card,body[data-theme="dark"] .hotel-info-popover{border-color:#383d45;background:#202329;color:#e8ebef;}
+          body[data-theme="dark"] .command-feedback{background:#24354a;color:#b8d7ff;}body[data-theme="dark"] .command-feedback.error{background:#472927;color:#ffb4ad;}body[data-theme="dark"] .command-feedback.success{background:#233c2d;color:#9fdbad;}
           body[data-theme="dark"] .mobile-access-state,body[data-theme="dark"] .mobile-access-details,body[data-theme="dark"] .mobile-access-controls{border-color:#41464f;background:#262a30;}
           body[data-theme="dark"] .mobile-access-state strong{color:#edf0f4;}
           body[data-theme="dark"] .mobile-access-state span,body[data-theme="dark"] .mobile-access-field label,body[data-theme="dark"] .interface-card .mobile-access-note,body[data-theme="dark"] .mobile-access-qr figcaption,body[data-theme="dark"] .mobile-access-heading p,body[data-theme="dark"] .mobile-access-steps span{color:#a8afb9;}

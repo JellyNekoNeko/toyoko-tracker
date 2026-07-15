@@ -44,6 +44,7 @@
             let PRICE_CALENDAR_REQUEST = 0;
             let PRICE_CALENDAR_POLL_TIMER = null;
             let PRICE_CALENDAR_AUTO_KEY = '';
+            let COMMAND_FEEDBACK_TIMER = null;
             let LAST_HOME_REFRESH = 0;
             let LAST_HOME_PAYLOAD = null;
             let LAST_CONFIG = {};
@@ -57,7 +58,7 @@
             const THEME_KEY = 'toyoko-chan-theme-v1';
             const LANGUAGE_KEY = 'toyoko-chan-language-v1';
             const GUIDE_SEEN_KEY = 'toyoko-chan-guide-seen-version';
-            const APP_VIEWS = ['home', 'search', 'price', 'monitor', 'search-settings', 'push-settings', 'interface'];
+            const APP_VIEWS = ['home', 'search', 'monitor', 'price', 'search-settings', 'push-settings', 'interface'];
             let ACTIVE_APP_VIEW = 'home';
             let THEME_PREFERENCE = 'system';
             let GUIDE_STEP = 0;
@@ -1059,7 +1060,7 @@
             });
             const PRICE_CALENDAR_UI = {
               zh_cn: {
-                navPrice:'价格', priceEyebrow:'住宿价格视图', priceTitle:'价格日历', priceSubtitle:'按天查看已选酒店的一晚最低价、会员价与空房状态。', priceHotel:'酒店',
+                navPrice:'价格日历', priceEyebrow:'住宿价格视图', priceTitle:'价格日历', priceSubtitle:'按天查看已选酒店的一晚最低价、会员价与空房状态。', priceHotel:'酒店',
                 priceLowest:'本月最低价', priceMemberLowest:'会员最低 {price}', priceAvailableDays:'有房日期', priceCoverage:'日历覆盖', priceRecentUpdate:'最近更新', priceWaitingQuery:'等待查询', priceOnDemand:'按需载入', priceNeverQueried:'尚未查询',
                 priceThisMonth:'本月', priceRefreshMonth:'刷新本月', priceLoading:'正在读取价格', priceProgress:'{done} / {total} 天 · {date}', priceAvailable:'有房', priceSoldOut:'满房', priceCheck:'待确认', priceNotLoaded:'未查询', pricePast:'已过期', priceMember:'会员 {price}',
                 priceBookingNote:'点击有报价的日期可打开官网预订页', priceSelectHotel:'先选择酒店', priceSelectHotelCopy:'在空房检索中勾选酒店后，即可查看价格日历。', priceGoSearch:'前往空房检索',
@@ -1068,7 +1069,7 @@
                 priceSmokingAll:'不限吸烟条件', priceSmokingNon:'无烟房', priceSmokingYes:'吸烟房', priceRoomAny:'不限房型', priceRoomSingle:'单人房', priceRoomDouble:'大床房', priceRoomTwin:'双床房', priceMembershipMember:'会员价格优先', priceMembershipNon:'非会员价格', priceMembershipUnknown:'同时显示价格'
               },
               zh_tw: {
-                navPrice:'價格', priceEyebrow:'住宿價格檢視', priceTitle:'價格日曆', priceSubtitle:'按日查看已選飯店的一晚最低價、會員價與空房狀態。', priceHotel:'飯店',
+                navPrice:'價格日曆', priceEyebrow:'住宿價格檢視', priceTitle:'價格日曆', priceSubtitle:'按日查看已選飯店的一晚最低價、會員價與空房狀態。', priceHotel:'飯店',
                 priceLowest:'本月最低價', priceMemberLowest:'會員最低 {price}', priceAvailableDays:'有房日期', priceCoverage:'日曆覆蓋', priceRecentUpdate:'最近更新', priceWaitingQuery:'等待查詢', priceOnDemand:'按需載入', priceNeverQueried:'尚未查詢',
                 priceThisMonth:'本月', priceRefreshMonth:'重新整理本月', priceLoading:'正在讀取價格', priceProgress:'{done} / {total} 天 · {date}', priceAvailable:'有房', priceSoldOut:'客滿', priceCheck:'待確認', priceNotLoaded:'未查詢', pricePast:'已過期', priceMember:'會員 {price}',
                 priceBookingNote:'點擊有報價的日期可開啟官網預訂頁', priceSelectHotel:'先選擇飯店', priceSelectHotelCopy:'在空房搜尋中勾選飯店後，即可查看價格日曆。', priceGoSearch:'前往空房搜尋',
@@ -1077,7 +1078,7 @@
                 priceSmokingAll:'不限吸菸條件', priceSmokingNon:'禁菸房', priceSmokingYes:'吸菸房', priceRoomAny:'不限房型', priceRoomSingle:'單人房', priceRoomDouble:'雙人床房', priceRoomTwin:'雙床房', priceMembershipMember:'會員價格優先', priceMembershipNon:'非會員價格', priceMembershipUnknown:'同時顯示價格'
               },
               ja: {
-                navPrice:'料金', priceEyebrow:'宿泊料金ビュー', priceTitle:'料金カレンダー', priceSubtitle:'選択したホテルの1泊最低料金、会員料金、空室状況を日別に確認できます。', priceHotel:'ホテル',
+                navPrice:'料金カレンダー', priceEyebrow:'宿泊料金ビュー', priceTitle:'料金カレンダー', priceSubtitle:'選択したホテルの1泊最低料金、会員料金、空室状況を日別に確認できます。', priceHotel:'ホテル',
                 priceLowest:'今月の最低料金', priceMemberLowest:'会員最安 {price}', priceAvailableDays:'空室ありの日', priceCoverage:'カレンダー取得状況', priceRecentUpdate:'最終更新', priceWaitingQuery:'検索待ち', priceOnDemand:'必要時に取得', priceNeverQueried:'未検索',
                 priceThisMonth:'今月', priceRefreshMonth:'今月を更新', priceLoading:'料金を取得中', priceProgress:'{done} / {total} 日 · {date}', priceAvailable:'空室あり', priceSoldOut:'満室', priceCheck:'要確認', priceNotLoaded:'未検索', pricePast:'終了', priceMember:'会員 {price}',
                 priceBookingNote:'料金のある日をクリックすると公式予約ページを開きます', priceSelectHotel:'ホテルを選択してください', priceSelectHotelCopy:'空室検索でホテルを選択すると料金カレンダーを表示できます。', priceGoSearch:'空室検索へ',
@@ -1086,7 +1087,7 @@
                 priceSmokingAll:'喫煙条件なし', priceSmokingNon:'禁煙室', priceSmokingYes:'喫煙室', priceRoomAny:'部屋タイプ指定なし', priceRoomSingle:'シングル', priceRoomDouble:'ダブル', priceRoomTwin:'ツイン', priceMembershipMember:'会員料金を優先', priceMembershipNon:'一般料金', priceMembershipUnknown:'両方の料金を表示'
               },
               ko: {
-                navPrice:'가격', priceEyebrow:'숙박 가격 보기', priceTitle:'가격 달력', priceSubtitle:'선택한 호텔의 1박 최저가, 회원가와 객실 상태를 날짜별로 확인합니다.', priceHotel:'호텔',
+                navPrice:'가격 달력', priceEyebrow:'숙박 가격 보기', priceTitle:'가격 달력', priceSubtitle:'선택한 호텔의 1박 최저가, 회원가와 객실 상태를 날짜별로 확인합니다.', priceHotel:'호텔',
                 priceLowest:'이번 달 최저가', priceMemberLowest:'회원 최저 {price}', priceAvailableDays:'객실 있는 날짜', priceCoverage:'달력 조회 범위', priceRecentUpdate:'최근 업데이트', priceWaitingQuery:'조회 대기', priceOnDemand:'필요할 때 불러오기', priceNeverQueried:'조회 전',
                 priceThisMonth:'이번 달', priceRefreshMonth:'이번 달 새로고침', priceLoading:'가격 불러오는 중', priceProgress:'{done} / {total}일 · {date}', priceAvailable:'객실 있음', priceSoldOut:'만실', priceCheck:'확인 필요', priceNotLoaded:'조회 전', pricePast:'지난 날짜', priceMember:'회원 {price}',
                 priceBookingNote:'가격이 있는 날짜를 누르면 공식 예약 페이지를 엽니다', priceSelectHotel:'호텔을 먼저 선택하세요', priceSelectHotelCopy:'빈 객실 검색에서 호텔을 선택하면 가격 달력을 볼 수 있습니다.', priceGoSearch:'빈 객실 검색으로',
@@ -1491,24 +1492,24 @@
               document.getElementById('price-hotel-select')?.addEventListener('change', event => {
                 PRICE_CALENDAR_HOTEL = String(event.target?.value || '');
                 PRICE_CALENDAR_DATA = null;
-                loadPriceCalendar(false);
+                loadPriceCalendar(true, true);
               });
               document.getElementById('price-hotel-prev')?.addEventListener('click', () => cyclePriceHotel(-1));
               document.getElementById('price-hotel-next')?.addEventListener('click', () => cyclePriceHotel(1));
               document.getElementById('price-month-prev')?.addEventListener('click', () => {
                 PRICE_CALENDAR_MONTH = shiftPriceMonth(PRICE_CALENDAR_MONTH, -1);
                 PRICE_CALENDAR_DATA = null;
-                loadPriceCalendar(false);
+                loadPriceCalendar(true, true);
               });
               document.getElementById('price-month-next')?.addEventListener('click', () => {
                 PRICE_CALENDAR_MONTH = shiftPriceMonth(PRICE_CALENDAR_MONTH, 1);
                 PRICE_CALENDAR_DATA = null;
-                loadPriceCalendar(false);
+                loadPriceCalendar(true, true);
               });
               document.getElementById('price-month-today')?.addEventListener('click', () => {
                 PRICE_CALENDAR_MONTH = priceCurrentMonth();
                 PRICE_CALENDAR_DATA = null;
-                loadPriceCalendar(false);
+                loadPriceCalendar(true, true);
               });
               document.getElementById('price-calendar-refresh')?.addEventListener('click', () => startPriceCalendarRefresh(true));
               document.getElementById('price-empty-action')?.addEventListener('click', () => switchAppView('search'));
@@ -1599,9 +1600,10 @@
               }, 450);
             }
             function priceCalendarHotels(){
-              const selected = Array.isArray(LAST_CONFIG?.selected_hotels) ? LAST_CONFIG.selected_hotels : [];
+              const draft = priceCalendarDraftPayload();
+              const selected = Array.isArray(draft.selected_hotels) ? draft.selected_hotels : [];
               const selectedByCode = new Map(selected.map(item => [String(item.code || ''), item]));
-              return (Array.isArray(LAST_CONFIG?.hotel_codes) ? LAST_CONFIG.hotel_codes : []).map(rawCode => {
+              return (Array.isArray(draft.hotel_codes) ? draft.hotel_codes : []).map(rawCode => {
                 const code = String(rawCode || '');
                 const item = selectedByCode.get(code) || {};
                 return {
@@ -1611,6 +1613,25 @@
                   name:String(item.name_primary || item.name || item.name_en || item.name_zh_cn || code)
                 };
               }).filter(item => item.code);
+            }
+            function priceCalendarDraftPayload(){
+              const hasLoadedPicker = Array.isArray(AREA_HOTELS) && AREA_HOTELS.length > 0;
+              const selectedHotels = hasLoadedPicker
+                ? selectedAreaHotels()
+                : (Array.isArray(LAST_CONFIG?.selected_hotels) ? LAST_CONFIG.selected_hotels : []);
+              const hotelCodes = hasLoadedPicker
+                ? selectedAreaCodes()
+                : (Array.isArray(LAST_CONFIG?.hotel_codes) ? LAST_CONFIG.hotel_codes : []);
+              return {
+                people:Number(document.getElementById('people')?.value || LAST_CONFIG?.people || 1),
+                rooms:Number(document.getElementById('rooms')?.value || LAST_CONFIG?.rooms || 1),
+                smoking:document.getElementById('smoking')?.value || LAST_CONFIG?.smoking || 'noSmoking',
+                room_requirement:document.getElementById('room_requirement')?.value || LAST_CONFIG?.room_requirement || 'any',
+                membership_status:document.getElementById('membership_status')?.value || LAST_CONFIG?.membership_status || 'member',
+                primary_language:document.getElementById('primary_language')?.value || LAST_CONFIG?.primary_language || 'zh_cn',
+                hotel_codes:hotelCodes.map(code => String(code || '')).filter(Boolean),
+                selected_hotels:selectedHotels
+              };
             }
             function priceCurrentMonth(){
               const now = new Date();
@@ -1809,14 +1830,14 @@
               if (ACTIVE_APP_VIEW !== 'price') return;
               PRICE_CALENDAR_POLL_TIMER = setTimeout(() => loadPriceCalendar(true), 1400);
             }
-            async function startPriceCalendarRefresh(force=false){
+            async function startPriceCalendarRefresh(force=false, replace=false){
               if (!PRICE_CALENDAR_HOTEL) return;
               const refresh = document.getElementById('price-calendar-refresh');
               if (refresh) refresh.disabled = true;
               try {
                 const response = await fetch('/api/v1/price-calendar/refresh', {
                   method:'POST', headers:{'Content-Type':'application/json'},
-                  body:JSON.stringify({hotel_code:PRICE_CALENDAR_HOTEL, month:PRICE_CALENDAR_MONTH, force:Boolean(force)})
+                  body:JSON.stringify({...priceCalendarDraftPayload(), hotel_code:PRICE_CALENDAR_HOTEL, month:PRICE_CALENDAR_MONTH, force:Boolean(force), replace:Boolean(replace)})
                 });
                 const payload = await response.json();
                 if (response.status === 409 && payload.job) {
@@ -1832,28 +1853,35 @@
                 renderPriceJob({state:'failed', running:false});
               }
             }
-            async function loadPriceCalendar(autoStart=true){
+            async function loadPriceCalendar(autoStart=true, replaceRunning=false){
               const requestId = ++PRICE_CALENDAR_REQUEST;
               if (!PRICE_CALENDAR_HOTEL) return;
               try {
-                const query = new URLSearchParams({hotel_code:PRICE_CALENDAR_HOTEL, month:PRICE_CALENDAR_MONTH || priceCurrentMonth()});
-                const response = await fetch(`/api/v1/price-calendar?${query}`);
+                const response = await fetch('/api/v1/price-calendar', {
+                  method:'POST', headers:{'Content-Type':'application/json'},
+                  body:JSON.stringify({...priceCalendarDraftPayload(), hotel_code:PRICE_CALENDAR_HOTEL, month:PRICE_CALENDAR_MONTH || priceCurrentMonth()})
+                });
                 const payload = await response.json();
                 if (requestId !== PRICE_CALENDAR_REQUEST) return;
                 if (!response.ok || !payload.ok) throw new Error(payload.message || `HTTP ${response.status}`);
                 renderPriceCalendarPayload(payload);
                 const job = payload.job || {};
+                const total = priceQueryableDays(payload.month);
+                const fresh = (payload.days || []).filter(day => day.date >= todayStr() && !day.stale).length;
+                const needsRefresh = fresh < total;
                 if (job.running || job.state === 'busy') {
+                  if (autoStart && replaceRunning && job.state === 'busy' && needsRefresh) {
+                    startPriceCalendarRefresh(false, true);
+                    return;
+                  }
                   schedulePriceCalendarPoll();
                   return;
                 }
-                if (autoStart) {
-                  const total = priceQueryableDays(payload.month);
-                  const fresh = (payload.days || []).filter(day => day.date >= todayStr() && !day.stale).length;
+                if (autoStart && needsRefresh) {
                   const autoKey = `${payload.hotel?.code || ''}:${payload.month}:${JSON.stringify(payload.conditions || {})}`;
                   if (fresh < total && PRICE_CALENDAR_AUTO_KEY !== autoKey) {
                     PRICE_CALENDAR_AUTO_KEY = autoKey;
-                    startPriceCalendarRefresh(false);
+                    startPriceCalendarRefresh(false, replaceRunning);
                   }
                 }
               } catch (error) {
@@ -1863,7 +1891,7 @@
                 else renderPriceJob({state:'failed', running:false});
               }
             }
-            function preparePriceCalendar(autoStart=true){
+            function preparePriceCalendar(autoStart=true, replaceRunning=false){
               const hotels = priceCalendarHotels();
               if (!hotels.length) {
                 PRICE_CALENDAR_HOTEL = '';
@@ -1875,7 +1903,7 @@
               if (!PRICE_CALENDAR_HOTEL || !hotels.some(item => item.code === PRICE_CALENDAR_HOTEL)) PRICE_CALENDAR_HOTEL = hotels[0].code;
               if (!PRICE_CALENDAR_MONTH) PRICE_CALENDAR_MONTH = priceCurrentMonth();
               renderPriceHotelOptions(hotels);
-              loadPriceCalendar(autoStart);
+              loadPriceCalendar(autoStart, replaceRunning);
             }
             function cyclePriceHotel(direction){
               const hotels = PRICE_CALENDAR_DATA?.hotels || priceCalendarHotels();
@@ -1883,7 +1911,7 @@
               const current = Math.max(0, hotels.findIndex(item => item.code === PRICE_CALENDAR_HOTEL));
               PRICE_CALENDAR_HOTEL = hotels[(current + direction + hotels.length) % hotels.length].code;
               PRICE_CALENDAR_DATA = null;
-              preparePriceCalendar(false);
+              preparePriceCalendar(true, true);
             }
             function localizePriceCalendar(){
               [
@@ -1981,7 +2009,7 @@
               setNodeText('.sidebar-brand div > span', tx('workspace'));
               setLabelFor('primary_language', tx('language'));
               const navLabels = document.querySelectorAll('.sidebar-nav .nav-label');
-              [tx('navHome'), tx('navSearch'), tx('navPrice'), tx('navMonitor'), tx('searchSettings'), tx('pushSettings')]
+              [tx('navHome'), tx('navSearch'), tx('navMonitor'), tx('navPrice'), tx('searchSettings'), tx('pushSettings')]
                 .forEach((text, idx) => {
                   if (navLabels[idx]) navLabels[idx].textContent = text;
                   const button = navLabels[idx]?.closest('.sidebar-nav-item');
@@ -2870,14 +2898,20 @@
                 } catch(e) {}
               }
               if (value.length > 48) {
-                document.getElementById('err').textContent = tx('barkKeyTooLong');
+                const detail = tx('barkKeyTooLong');
+                document.getElementById('err').textContent = detail;
                 document.getElementById('msg').textContent = '';
+                switchAppView('push-settings', {instant:true});
+                showCommandFeedback(detail, 'error');
                 el.focus();
                 return false;
               }
               if (value && value.length < 8) {
-                document.getElementById('err').textContent = tx('barkKeyTooShort');
+                const detail = tx('barkKeyTooShort');
+                document.getElementById('err').textContent = detail;
                 document.getElementById('msg').textContent = '';
+                switchAppView('push-settings', {instant:true});
+                showCommandFeedback(detail, 'error');
                 el.focus();
                 return false;
               }
@@ -4017,6 +4051,21 @@
               else button.disabled = false;
               button.setAttribute('aria-busy', busy ? 'true' : 'false');
             }
+            function showCommandFeedback(message, kind='info'){
+              const feedback = document.getElementById('command-feedback');
+              if (!feedback) return;
+              if (COMMAND_FEEDBACK_TIMER) clearTimeout(COMMAND_FEEDBACK_TIMER);
+              const detail = String(message || '').trim();
+              feedback.textContent = detail;
+              feedback.className = `command-feedback ${kind}`;
+              feedback.hidden = !detail;
+              if (detail) {
+                COMMAND_FEEDBACK_TIMER = setTimeout(() => {
+                  feedback.hidden = true;
+                  feedback.textContent = '';
+                }, kind === 'error' ? 10000 : 5000);
+              }
+            }
             function preflightSearch(){
               const payload = collectPayload();
               const error = document.getElementById('err');
@@ -4025,6 +4074,7 @@
                 switchAppView('search', {instant:true});
                 if (error) error.textContent = tx('invalidDates');
                 if (message) message.textContent = '';
+                showCommandFeedback(tx('invalidDates'), 'error');
                 setPanelOpen('#search_panel', true);
                 document.getElementById('start_date')?.focus();
                 return null;
@@ -4034,6 +4084,7 @@
                 switchAppView('search', {instant:true});
                 if (error) error.textContent = tx('selectHotelsFirst');
                 if (message) message.textContent = '';
+                showCommandFeedback(tx('selectHotelsFirst'), 'error');
                 expandSearchAreaPicker();
                 document.getElementById('area_picker_panel')?.scrollIntoView({behavior:'smooth', block:'center'});
                 return null;
@@ -4050,10 +4101,12 @@
                 const r = await fetch('/start', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
                 const j = await r.json();
                 if (j.ok) {
-                  document.getElementById('msg').textContent = runOnce
+                  const detail = runOnce
                     ? tx('scanningOnce')
                     : (j.restarted ? tx('restartedMessage') : tx('startedMessage'));
+                  document.getElementById('msg').textContent = detail;
                   document.getElementById('err').textContent = '';
+	                  showCommandFeedback(detail, 'success');
 	                  setRunning(true);
 	                  Object.keys(EDIT_TS).forEach(key => delete EDIT_TS[key]);
 	                  BLOCK_REMOTE_OVERWRITE = false;
@@ -4066,13 +4119,17 @@
 	                  collapseSearchPanels();
 	                  refreshSearchHistory();
                 } else {
-                  document.getElementById('err').textContent = j.error || tx('failedToStart');
+                  const detail = j.error || j.message || tx('failedToStart');
+                  document.getElementById('err').textContent = detail;
                   document.getElementById('msg').textContent = '';
+                  showCommandFeedback(detail, 'error');
                 }
                 refreshStatus();
               } catch(e) {
-                document.getElementById('err').textContent = e;
+                const detail = String(e);
+                document.getElementById('err').textContent = detail;
                 document.getElementById('msg').textContent = '';
+                showCommandFeedback(detail, 'error');
               } finally {
                 setButtonBusy(buttonId, false);
               }
@@ -4083,17 +4140,23 @@
                 const r = await fetch('/stop', {method:'POST'});
                 const j = await r.json();
                 if (j.ok) {
-                  document.getElementById('msg').textContent = tx('stoppedMessage');
+                  const detail = tx('stoppedMessage');
+                  document.getElementById('msg').textContent = detail;
                   document.getElementById('err').textContent = '';
+	                  showCommandFeedback(detail, 'success');
 	                  setRunning(false);
 	                  expandSearchAreaPicker();
                 } else {
-                  document.getElementById('err').textContent = tx('failedToStop');
+                  const detail = j.error || j.message || tx('failedToStop');
+                  document.getElementById('err').textContent = detail;
                   document.getElementById('msg').textContent = '';
+                  showCommandFeedback(detail, 'error');
                 }
               } catch(e) {
-                document.getElementById('err').textContent = e;
+                const detail = String(e);
+                document.getElementById('err').textContent = detail;
                 document.getElementById('msg').textContent = '';
+                showCommandFeedback(detail, 'error');
               } finally {
                 setButtonBusy('btn_stop', false);
               }

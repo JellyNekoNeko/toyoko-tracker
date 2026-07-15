@@ -121,6 +121,92 @@ def test_price_calendar_endpoint_lists_selected_hotels_and_conditions():
     assert payload["days"] == []
 
 
+def test_price_calendar_endpoint_uses_unsaved_search_draft_selection():
+    cfg = AppConfig(hotel_codes=[], selected_hotels=[])
+    current_month = date.today().strftime("%Y-%m")
+    draft = {
+        "hotel_code": "routeinn:demo",
+        "month": current_month,
+        "people": 3,
+        "rooms": 2,
+        "room_requirement": "twin",
+        "hotel_codes": ["routeinn:demo"],
+        "selected_hotels": [{
+            "code": "routeinn:demo",
+            "display_code": "DEMO",
+            "provider": "routeinn",
+            "name_primary": "Draft Hotel",
+        }],
+    }
+    app.config.update(TESTING=True)
+    with tempfile.TemporaryDirectory() as tmp_dir, \
+         patch.object(runtime, "_CONFIG", cfg), \
+         patch.object(price_calendar, "HOTEL_DATABASE_PATH", str(Path(tmp_dir) / "calendar.sqlite3")):
+        response = app.test_client().post(
+            "/api/v1/price-calendar",
+            data=json.dumps(draft),
+            content_type="application/json",
+        )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["hotel"] == {
+        "code": "routeinn:demo",
+        "display_code": "DEMO",
+        "provider": "routeinn",
+        "name": "Draft Hotel",
+    }
+    assert payload["conditions"]["people"] == 3
+    assert payload["conditions"]["rooms"] == 2
+    assert payload["conditions"]["room_requirement"] == "twin"
+
+
+def test_price_calendar_refresh_passes_isolated_draft_to_worker():
+    cfg = AppConfig(hotel_codes=[], selected_hotels=[])
+    current_month = date.today().strftime("%Y-%m")
+    draft = {
+        "hotel_code": "routeinn:demo",
+        "month": current_month,
+        "replace": True,
+        "hotel_codes": ["routeinn:demo"],
+        "selected_hotels": [{
+            "code": "routeinn:demo",
+            "display_code": "DEMO",
+            "provider": "routeinn",
+            "name_primary": "Draft Hotel",
+        }],
+    }
+    job = {"state": "queued", "running": True, "hotel_code": "routeinn:demo", "month": current_month}
+    app.config.update(TESTING=True)
+    with tempfile.TemporaryDirectory() as tmp_dir, \
+         patch.object(runtime, "_CONFIG", cfg), \
+         patch.object(price_calendar, "HOTEL_DATABASE_PATH", str(Path(tmp_dir) / "calendar.sqlite3")), \
+         patch.object(runtime, "_start_price_calendar_job", return_value=(job, True)) as starter:
+        response = app.test_client().post(
+            "/api/v1/price-calendar/refresh",
+            data=json.dumps(draft),
+            content_type="application/json",
+        )
+
+    assert response.status_code == 202
+    worker_cfg = starter.call_args.args[0]
+    assert worker_cfg.hotel_codes == ["routeinn:demo"]
+    assert worker_cfg.selected_hotels[0]["name_primary"] == "Draft Hotel"
+    assert starter.call_args.args[4] is True
+    assert cfg.hotel_codes == []
+
+
+def test_sidebar_places_price_calendar_below_vacancy_monitor():
+    app.config.update(TESTING=True)
+    body = app.test_client().get("/").get_data(as_text=True)
+
+    monitor_index = body.index('data-app-view="monitor"')
+    price_index = body.index('data-app-view="price"')
+    assert monitor_index < price_index
+    assert "价格日历 / Price Calendar" in body
+    assert 'id="command-feedback"' in body
+
+
 def test_price_calendar_refresh_reports_existing_other_job():
     cfg = _config()
     current_month = date.today().strftime("%Y-%m")
@@ -136,6 +222,35 @@ def test_price_calendar_refresh_reports_existing_other_job():
 
     assert response.status_code == 409
     assert response.get_json()["job"]["hotel_code"] == "00002"
+
+
+def test_price_calendar_job_can_replace_previous_month_immediately():
+    cfg = _config()
+    current_month = date.today().strftime("%Y-%m")
+    next_month = runtime._month_offset(current_month, 1)
+    old_job = {
+        "id": "old-job",
+        "key": runtime._price_calendar_job_key(cfg, "00001", current_month),
+        "state": "running",
+        "running": True,
+        "hotel_code": "00001",
+        "month": current_month,
+    }
+    thread = Mock()
+    with patch.object(runtime, "_PRICE_CALENDAR_JOB", old_job), \
+         patch.object(runtime, "_PRICE_CALENDAR_THREAD", None), \
+         patch.object(runtime.threading, "Thread", return_value=thread):
+        job, accepted = runtime._start_price_calendar_job(
+            cfg,
+            "00001",
+            next_month,
+            replace=True,
+        )
+
+    assert accepted is True
+    assert job["id"] != "old-job"
+    assert job["month"] == next_month
+    thread.start.assert_called_once_with()
 
 
 def test_price_calendar_worker_scans_each_future_night_without_notifications():

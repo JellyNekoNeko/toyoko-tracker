@@ -137,7 +137,7 @@ def provider_capabilities_status() -> Response:
     return _runtime.provider_capabilities_status()
 
 
-@app.route("/api/v1/price-calendar")
+@app.route("/api/v1/price-calendar", methods=["GET", "POST"])
 def price_calendar_status() -> Response:
     return _runtime.price_calendar_status()
 
