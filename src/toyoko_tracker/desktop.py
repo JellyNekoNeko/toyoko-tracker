@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import platform
+import sys
 import threading
 from typing import Any
 
@@ -33,6 +35,12 @@ def _parser() -> argparse.ArgumentParser:
 
 def _serve(server: BaseWSGIServer) -> None:
     server.serve_forever()
+
+
+def _preferred_gui() -> str | None:
+    if sys.platform == "win32" and platform.machine().lower() in {"arm64", "aarch64"}:
+        return "qt"
+    return None
 
 
 def main(argv: Any = None) -> None:
@@ -67,7 +75,7 @@ def main(argv: Any = None) -> None:
             min_size=(960, 640),
             text_select=True,
         )
-        webview.start(debug=bool(args.debug))
+        webview.start(gui=_preferred_gui(), debug=bool(args.debug))
     finally:
         server.shutdown()
         server.server_close()

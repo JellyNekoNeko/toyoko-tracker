@@ -1,16 +1,7 @@
+from unittest.mock import patch
+
+from toyoko_tracker import desktop
 from toyoko_tracker.desktop import _parser
-
-from importlib.util import module_from_spec, spec_from_file_location
-from pathlib import Path
-
-
-_PREPARE_SPEC = spec_from_file_location(
-    "prepare_windows_arm64",
-    Path(__file__).resolve().parents[1] / "packaging" / "prepare_windows_arm64.py",
-)
-assert _PREPARE_SPEC and _PREPARE_SPEC.loader
-prepare_windows_arm64 = module_from_spec(_PREPARE_SPEC)
-_PREPARE_SPEC.loader.exec_module(prepare_windows_arm64)
 
 
 def test_desktop_parser_defaults():
@@ -28,32 +19,15 @@ def test_desktop_parser_supports_local_mode_and_port():
     assert args.debug is True
 
 
-def test_arm64_clr_loader_source_patches():
-    project = "<RuntimeIdentifiers>win-x86;win-x64</RuntimeIdentifiers>\n</Project>"
-    architecture = """import sys
-
-def load_netfx():
-    if sys.maxsize > 2**32:
-        arch = "amd64"
-    else:
-        arch = "x86"
-"""
-
-    patched_project = prepare_windows_arm64.patch_project(project)
-    patched_architecture = prepare_windows_arm64.patch_architecture_detection(architecture)
-
-    assert "win-arm64" in patched_project
-    assert "<PlatformTarget>ARM64</PlatformTarget>" in patched_project
-    assert 'arch = "arm64"' in patched_architecture
+def test_windows_arm64_uses_native_qt_backend():
+    with patch.object(desktop.sys, "platform", "win32"), patch.object(
+        desktop.platform, "machine", return_value="ARM64"
+    ):
+        assert desktop._preferred_gui() == "qt"
 
 
-def test_arm64_clr_loader_pe_machine_check(tmp_path):
-    bridge = tmp_path / "ClrLoader.dll"
-    data = bytearray(256)
-    data[:2] = b"MZ"
-    data[0x3C:0x40] = (128).to_bytes(4, "little")
-    data[128:132] = b"PE\0\0"
-    data[132:134] = prepare_windows_arm64.PE_MACHINE_ARM64.to_bytes(2, "little")
-    bridge.write_bytes(data)
-
-    assert prepare_windows_arm64._pe_machine(bridge) == 0xAA64
+def test_other_desktop_platforms_keep_default_backend():
+    with patch.object(desktop.sys, "platform", "darwin"), patch.object(
+        desktop.platform, "machine", return_value="arm64"
+    ):
+        assert desktop._preferred_gui() is None

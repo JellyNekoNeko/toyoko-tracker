@@ -49,11 +49,6 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - if: runner.os == 'Windows' && runner.arch == 'ARM64'
-        uses: actions/setup-dotnet@v5
-        with:
-          dotnet-version: "8.0.x"
-          architecture: arm64
       - if: runner.os == 'Linux'
         run: |
           sudo apt-get update
@@ -68,7 +63,7 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -e ".[desktop-build]"
       - if: runner.os == 'Windows' && runner.arch == 'ARM64'
-        run: python packaging/prepare_windows_arm64.py
+        run: python -m pip install "pywebview[pyside6]>=5.4,<7"
       - if: startsWith(github.ref, 'refs/tags/desktop-v')
         shell: bash
         run: |

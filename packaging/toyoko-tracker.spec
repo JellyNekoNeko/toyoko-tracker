@@ -1,6 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 import os
+import platform
 import sys
 
 from PyInstaller.utils.hooks import collect_data_files
@@ -23,16 +24,23 @@ else:
     app_icon = None
 
 datas = collect_data_files("toyoko_tracker")
+windows_arm64 = sys.platform == "win32" and platform.machine().lower() in {"arm64", "aarch64"}
+hiddenimports = ["webview.platforms.qt"] if windows_arm64 else []
+excludes = ["pytest", "ruff", "PyQt5", "PyQt6", "PySide2"]
+if windows_arm64:
+    excludes.extend(["clr", "clr_loader", "pythonnet", "webview.platforms.winforms"])
+else:
+    excludes.append("PySide6")
 
 a = Analysis(
     [entrypoint],
     pathex=[src_root],
     binaries=[],
     datas=datas,
-    hiddenimports=[],
+    hiddenimports=hiddenimports,
     hookspath=[],
     runtime_hooks=[],
-    excludes=["pytest", "ruff", "PyQt5", "PyQt6", "PySide2", "PySide6"],
+    excludes=excludes,
     noarchive=False,
 )
 pyz = PYZ(a.pure)
