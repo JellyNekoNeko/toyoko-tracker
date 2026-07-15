@@ -47,7 +47,12 @@ try {
     Start-Sleep -Seconds 1
   }
   if (-not $httpReady -or -not $windowReady) {
-    throw "ToyokoTracker did not become ready: HTTP=$httpReady window=$windowReady; $lastError"
+    $process.Refresh()
+    $startupLog = Join-Path $configDirectory "desktop-startup-error.log"
+    if (Test-Path $startupLog) {
+      $lastError = "$lastError`n$(Get-Content -Raw $startupLog)"
+    }
+    throw "ToyokoTracker did not become ready: HTTP=$httpReady window=$windowReady handle=$($process.MainWindowHandle) title='$($process.MainWindowTitle)'; $lastError"
   }
   Write-Output "Desktop smoke test passed: HTTP 200, window '$($process.MainWindowTitle)', PID $($process.Id)"
 }

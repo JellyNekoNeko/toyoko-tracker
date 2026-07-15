@@ -75,7 +75,9 @@ jobs:
           }
       - run: python build_desktop.py
       - name: Smoke-test Windows application
+        id: windows-smoke
         if: runner.os == 'Windows'
+        continue-on-error: true
         shell: pwsh
         run: ./packaging/smoke_test_windows.ps1
       - name: Sign Windows executable
@@ -145,6 +147,10 @@ jobs:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.archive }}
           if-no-files-found: error
+      - name: Enforce Windows startup test
+        if: runner.os == 'Windows' && steps.windows-smoke.outcome == 'failure'
+        shell: pwsh
+        run: throw "The packaged Windows application did not pass its startup test"
 
   release:
     if: startsWith(github.ref, 'refs/tags/desktop-v')

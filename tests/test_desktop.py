@@ -1,3 +1,4 @@
+from pathlib import Path
 from unittest.mock import patch
 
 from toyoko_tracker import desktop
@@ -39,3 +40,12 @@ def test_windows_arm64_shell_uses_qt_webview():
     assert "import QtWebView" in qml
     assert "WebView" in qml
     assert "url: appUrl" in qml
+
+
+def test_desktop_entry_persists_unhandled_startup_errors():
+    entrypoint = (
+        Path(__file__).resolve().parents[1] / "packaging" / "desktop_entry.py"
+    ).read_text(encoding="utf-8")
+
+    assert "desktop-startup-error.log" in entrypoint
+    assert "traceback.print_exc" in entrypoint
