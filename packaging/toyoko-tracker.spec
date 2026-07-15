@@ -3,6 +3,7 @@
 import os
 import platform
 import sys
+from glob import glob
 
 from PyInstaller.utils.hooks import collect_data_files
 
@@ -26,26 +27,43 @@ else:
 datas = collect_data_files("toyoko_tracker")
 windows_arm64 = sys.platform == "win32" and platform.machine().lower() in {"arm64", "aarch64"}
 hiddenimports = [
-    "webview.platforms.qt",
     "PySide6.QtCore",
     "PySide6.QtGui",
-    "PySide6.QtNetwork",
-    "PySide6.QtWebChannel",
-    "PySide6.QtWebEngineCore",
-    "PySide6.QtWebEngineWidgets",
-    "PySide6.QtWidgets",
+    "PySide6.QtQml",
+    "PySide6.QtQuick",
 ] if windows_arm64 else []
 excludes = ["pytest", "ruff", "PyQt5", "PyQt6", "PySide2"]
+extra_binaries = []
+extra_datas = []
 if windows_arm64:
-    excludes.extend(["clr", "clr_loader", "pythonnet", "webview.platforms.winforms"])
+    excludes.extend(["clr", "clr_loader", "pythonnet", "webview"])
+    import PySide6
+
+    pyside_root = os.path.dirname(PySide6.__file__)
+    for filename in ("Qt6WebView.dll", "Qt6WebViewQuick.dll"):
+        extra_binaries.append((os.path.join(pyside_root, filename), "PySide6"))
+    for source in glob(os.path.join(pyside_root, "plugins", "webview", "*.dll")):
+        extra_binaries.append((source, "PySide6/plugins/webview"))
+    qml_webview_root = os.path.join(pyside_root, "qml", "QtWebView")
+    for source in glob(os.path.join(qml_webview_root, "**", "*"), recursive=True):
+        if not os.path.isfile(source):
+            continue
+        destination = os.path.join(
+            "PySide6/qml/QtWebView",
+            os.path.relpath(os.path.dirname(source), qml_webview_root),
+        )
+        if source.lower().endswith(".dll"):
+            extra_binaries.append((source, destination))
+        else:
+            extra_datas.append((source, destination))
 else:
     excludes.append("PySide6")
 
 a = Analysis(
     [entrypoint],
     pathex=[src_root],
-    binaries=[],
-    datas=datas,
+    binaries=extra_binaries,
+    datas=datas + extra_datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     runtime_hooks=[],

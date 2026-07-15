@@ -20,7 +20,10 @@ try {
     if ($process.HasExited) {
       throw "ToyokoTracker exited during startup with code $($process.ExitCode)"
     }
-    $windowReady = $process.MainWindowHandle -ne 0
+    $windowReady = (
+      $process.MainWindowHandle -ne 0 -and
+      $process.MainWindowTitle -match "Toyoko Chan"
+    )
     if (-not $httpReady) {
       try {
         $response = Invoke-WebRequest `
@@ -46,7 +49,7 @@ try {
   if (-not $httpReady -or -not $windowReady) {
     throw "ToyokoTracker did not become ready: HTTP=$httpReady window=$windowReady; $lastError"
   }
-  Write-Output "Desktop smoke test passed: HTTP 200, visible window, PID $($process.Id)"
+  Write-Output "Desktop smoke test passed: HTTP 200, window '$($process.MainWindowTitle)', PID $($process.Id)"
 }
 finally {
   Get-Process ToyokoTracker -ErrorAction SilentlyContinue | Stop-Process -Force

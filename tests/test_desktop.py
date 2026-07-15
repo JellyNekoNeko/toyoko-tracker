@@ -23,11 +23,19 @@ def test_windows_arm64_uses_native_qt_backend():
     with patch.object(desktop.sys, "platform", "win32"), patch.object(
         desktop.platform, "machine", return_value="ARM64"
     ):
-        assert desktop._preferred_gui() == "qt"
+        assert desktop._is_windows_arm64()
 
 
 def test_other_desktop_platforms_keep_default_backend():
     with patch.object(desktop.sys, "platform", "darwin"), patch.object(
         desktop.platform, "machine", return_value="arm64"
     ):
-        assert desktop._preferred_gui() is None
+        assert not desktop._is_windows_arm64()
+
+
+def test_windows_arm64_shell_uses_qt_webview():
+    qml = desktop._ARM64_QML.decode("utf-8")
+
+    assert "import QtWebView" in qml
+    assert "WebView" in qml
+    assert "url: appUrl" in qml

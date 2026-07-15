@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import logging
 import os
 import platform
 import sys
 import threading
+from pathlib import Path
 from typing import Any
 
 from werkzeug.serving import BaseWSGIServer, make_server
@@ -21,6 +23,22 @@ from .server import (
     write_instance_state,
 )
 from .settings import APP_NAME
+
+
+_QT_WEBVIEW_LIBRARY: Any = None
+_ARM64_QML = b"""
+import QtQuick
+import QtWebView
+
+Item {
+    width: 1280
+    height: 820
+    WebView {
+        anchors.fill: parent
+        url: appUrl
+    }
+}
+"""
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -37,10 +55,46 @@ def _serve(server: BaseWSGIServer) -> None:
     server.serve_forever()
 
 
-def _preferred_gui() -> str | None:
-    if sys.platform == "win32" and platform.machine().lower() in {"arm64", "aarch64"}:
-        return "qt"
-    return None
+def _is_windows_arm64() -> bool:
+    return sys.platform == "win32" and platform.machine().lower() in {"arm64", "aarch64"}
+
+
+def _initialize_qt_webview() -> None:
+    global _QT_WEBVIEW_LIBRARY
+    import PySide6
+
+    library_path = Path(PySide6.__file__).resolve().parent / "Qt6WebView.dll"
+    _QT_WEBVIEW_LIBRARY = ctypes.WinDLL(str(library_path))
+    initialize = getattr(_QT_WEBVIEW_LIBRARY, "?initialize@QtWebView@@YAXXZ")
+    initialize.argtypes = []
+    initialize.restype = None
+    initialize()
+
+
+def _start_windows_arm64_shell(url: str) -> None:
+    from PySide6.QtCore import QSize, QUrl
+    from PySide6.QtGui import QGuiApplication, QIcon
+    from PySide6.QtQml import QQmlComponent
+    from PySide6.QtQuick import QQuickView
+
+    _initialize_qt_webview()
+    qt_app = QGuiApplication.instance() or QGuiApplication([APP_NAME])
+    view = QQuickView()
+    view.setTitle(APP_NAME)
+    view.setMinimumSize(QSize(960, 640))
+    view.resize(1280, 820)
+    if getattr(sys, "frozen", False):
+        view.setIcon(QIcon(sys.executable))
+    view.rootContext().setContextProperty("appUrl", QUrl(url))
+    component = QQmlComponent(view.engine())
+    component.setData(_ARM64_QML, QUrl("inmemory:toyoko-arm64.qml"))
+    root = component.create()
+    if root is None:
+        errors = "; ".join(error.toString() for error in component.errors())
+        raise RuntimeError(f"Windows ARM64 QtWebView shell failed: {errors}")
+    view.setContent(QUrl("inmemory:toyoko-arm64.qml"), component, root)
+    view.show()
+    qt_app.exec()
 
 
 def main(argv: Any = None) -> None:
@@ -61,21 +115,24 @@ def main(argv: Any = None) -> None:
     thread = threading.Thread(target=_serve, args=(server,), name="toyoko-web", daemon=True)
     thread.start()
     try:
-        try:
-            import webview
-        except ImportError as exc:
-            raise SystemExit(
-                'pywebview is required; install with: pip install "toyoko-tracker[desktop]"'
-            ) from exc
-        webview.create_window(
-            APP_NAME,
-            url,
-            width=1280,
-            height=820,
-            min_size=(960, 640),
-            text_select=True,
-        )
-        webview.start(gui=_preferred_gui(), debug=bool(args.debug))
+        if _is_windows_arm64():
+            _start_windows_arm64_shell(url)
+        else:
+            try:
+                import webview
+            except ImportError as exc:
+                raise SystemExit(
+                    'pywebview is required; install with: pip install "toyoko-tracker[desktop]"'
+                ) from exc
+            webview.create_window(
+                APP_NAME,
+                url,
+                width=1280,
+                height=820,
+                min_size=(960, 640),
+                text_select=True,
+            )
+            webview.start(debug=bool(args.debug))
     finally:
         server.shutdown()
         server.server_close()
