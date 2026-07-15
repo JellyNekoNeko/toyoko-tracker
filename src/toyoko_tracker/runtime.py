@@ -652,7 +652,9 @@ def _load_config_from_file(path: str) -> bool:
         with open(path, 'r', encoding='utf-8') as f:
             data = json.load(f)
         with _CONFIG_LOCK:
-            cfg = _CONFIG
+            # Parse into a detached candidate so one malformed late field does
+            # not leave the live configuration half migrated.
+            cfg = deepcopy(_CONFIG)
             cfg.start_date = data.get('start_date', cfg.start_date)
             cfg.end_date = data.get('end_date', cfg.end_date)
             if isinstance(data.get('hotel_codes'), list):
@@ -775,6 +777,8 @@ def _load_config_from_file(path: str) -> bool:
                             cfg.hotel_codes = [h["code"] for h in cfg.selected_hotels]
                 except Exception as e:
                     _log(f"[boot] search history restore skipped: {e}")
+            _CONFIG.__dict__.clear()
+            _CONFIG.__dict__.update(cfg.__dict__)
         _log(f"Loaded config from {path}")
         return True
     except Exception as e:
@@ -4368,6 +4372,18 @@ def start() -> Response:
         run_once = bool(payload.get("run_once", False))
         restarted = False
 
+        try:
+            with _CONFIG_LOCK:
+                candidate = deepcopy(_CONFIG)
+                _apply_payload_to_config(candidate, payload)
+                if not candidate.hotel_codes:
+                    return jsonify({
+                        "ok": False,
+                        "message": "Please load and select hotels in Area Hotel Picker first.",
+                    }), 400
+        except ValueError as e:
+            return jsonify({"ok": False, "message": str(e), "error": str(e)}), 400
+
         if _worker_thread and _worker_thread.is_alive():
             restarted = True
             _RUN_REQUESTED = False
@@ -4378,18 +4394,9 @@ def start() -> Response:
             _worker_thread = None
             _stop_event.clear()
 
-        try:
-            with _CONFIG_LOCK:
-                _apply_payload_to_config(_CONFIG, payload)
-        except ValueError as e:
-            return jsonify({"ok": False, "message": str(e), "error": str(e)}), 400
-
         with _CONFIG_LOCK:
-            if not _CONFIG.hotel_codes:
-                return jsonify({
-                    "ok": False,
-                    "message": "Please load and select hotels in Area Hotel Picker first.",
-                }), 400
+            _CONFIG.__dict__.clear()
+            _CONFIG.__dict__.update(candidate.__dict__)
 
         # Mark that user explicitly wants the worker to run
         _RUN_REQUESTED = True

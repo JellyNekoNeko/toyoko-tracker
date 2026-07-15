@@ -30,6 +30,7 @@ _BOOKING_CODE_CACHE: Dict[str, str] = {}
 _HOTEL_NAME_CACHE: Dict[Tuple[str, str], str] = {}
 _SESSION_TOKEN = ""
 _SESSION_TOKEN_AT = 0.0
+_MAX_CLOCK_SKEW_SECONDS = 300
 
 _TRIPLA_LOCALES = {
     "zh_cn": "zh_Hans",
@@ -214,11 +215,21 @@ def _storelocator_hotel(point: Dict[str, Any], primary_language: str) -> Optiona
     }
 
 
+def _cache_timestamp_is_fresh(
+    cached_at: float,
+    ttl_seconds: float,
+    *,
+    now: Optional[float] = None,
+) -> bool:
+    age = (time.time() if now is None else float(now)) - float(cached_at)
+    return -_MAX_CLOCK_SKEW_SECONDS <= age < float(ttl_seconds)
+
+
 def fetch_coordinate_hotels(primary_language: str = "zh_cn", force: bool = False) -> List[Dict[str, Any]]:
     global _COORDINATE_CACHE
     with _CACHE_LOCK:
         cached_at, cached_hotels = _COORDINATE_CACHE
-        if cached_hotels and not force and time.time() - cached_at < 6 * 60 * 60:
+        if cached_hotels and not force and _cache_timestamp_is_fresh(cached_at, 6 * 60 * 60):
             source = cached_hotels
         else:
             source = []
@@ -277,7 +288,7 @@ def fetch_area_hotels(
     cache_key = urlencode(params)
     with _CACHE_LOCK:
         cached = _AREA_CACHE.get(cache_key)
-        if cached and time.time() - cached[0] < 30 * 60:
+        if cached and _cache_timestamp_is_fresh(cached[0], 30 * 60):
             return _attach_coordinates(parse_hotel_list_html(cached[1], cached[2], primary_language), primary_language)
     response = requests.get(ROUTEINN_HOTEL_LIST_URL, params=params, headers=HEADERS, timeout=25)
     response.raise_for_status()
@@ -302,7 +313,9 @@ def _tripla_headers(locale: str, *, refresh_token: bool = False) -> Dict[str, st
 def _tripla_session_token(force: bool = False) -> str:
     global _SESSION_TOKEN, _SESSION_TOKEN_AT
     with _TOKEN_LOCK:
-        if _SESSION_TOKEN and not force and time.time() - _SESSION_TOKEN_AT < 6 * 60 * 60:
+        if _SESSION_TOKEN and not force and _cache_timestamp_is_fresh(
+            _SESSION_TOKEN_AT, 6 * 60 * 60
+        ):
             return _SESSION_TOKEN
         response = _http_post(
             TRIPLA_IDP_URL,

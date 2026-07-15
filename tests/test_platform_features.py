@@ -81,6 +81,17 @@ class LocalNotificationPlatformTests(unittest.TestCase):
         self.assertEqual(status["state"], "failed")
         self.assertIn("libnotify", status["message"])
 
+    def test_future_notification_status_never_reports_negative_age(self):
+        with notifications._PUSH_STATUS_LOCK:
+            notifications._PUSH_STATUS["local"] = {
+                "state": "success", "message": "", "ts": 5_000.0,
+            }
+
+        with patch.object(notifications.time, "time", return_value=1_000.0):
+            status = self._local_status()
+
+        self.assertIsNone(status["age_sec"])
+
 
 class PersistentPathPlatformTests(unittest.TestCase):
     def test_windows_uses_roaming_appdata(self):

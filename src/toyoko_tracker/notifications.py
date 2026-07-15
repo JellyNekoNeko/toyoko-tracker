@@ -48,6 +48,7 @@ _PUSH_STATUS: Dict[str, Dict[str, Any]] = {}
 _MAIL_QUEUE: "queue.Queue[Dict[str, Any]]" = queue.Queue()
 _MAIL_THREAD: Optional[threading.Thread] = None
 _MAIL_STOP = threading.Event()
+_MAX_CLOCK_SKEW_SECONDS = 300
 
 
 def set_notification_hooks(log: Callable[[str], None], set_action: Callable[[str], None]) -> None:
@@ -78,7 +79,10 @@ def availability_log_snapshot() -> List[Dict[str, Any]]:
         entry = deepcopy(item)
         start_ts = float(entry.get("appeared_ts") or 0)
         end_ts = entry.get("disappeared_ts")
-        entry["duration_sec"] = int((float(end_ts) if end_ts else now) - start_ts) if start_ts else None
+        entry["duration_sec"] = (
+            max(0, int((float(end_ts) if end_ts else now) - start_ts))
+            if start_ts else None
+        )
         out.append(entry)
     return out
 
@@ -141,6 +145,10 @@ def notification_status_snapshot(cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
         state = str(item.get("state") or "waiting")
         if not enabled:
             state = "disabled"
+        timestamp = float(item.get("ts") or 0)
+        age = now - timestamp if timestamp else None
+        if age is not None and age < -_MAX_CLOCK_SKEW_SECONDS:
+            age = None
         out.append({
             "key": key,
             "label_zh": label_zh,
@@ -148,7 +156,7 @@ def notification_status_snapshot(cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
             "enabled": enabled,
             "state": state,
             "message": item.get("message") or "",
-            "age_sec": int(now - float(item.get("ts") or now)) if item.get("ts") else None,
+            "age_sec": max(0, int(age)) if age is not None else None,
         })
     return out
 
@@ -1124,7 +1132,9 @@ def _close_availability_log(key: str, now: float) -> None:
             if entry.get("key") == key and entry.get("disappeared_ts") is None:
                 entry["disappeared_ts"] = now
                 entry["disappeared_at"] = datetime.fromtimestamp(now).strftime("%Y-%m-%d %H:%M:%S")
-                entry["duration_sec"] = int(now - float(entry.get("appeared_ts") or now))
+                entry["duration_sec"] = max(
+                    0, int(now - float(entry.get("appeared_ts") or now))
+                )
                 _AVAILABILITY_LOG_REVISION += 1
                 return
 
@@ -1251,7 +1261,14 @@ def process_notifications(cfg: AppConfig, results: List[HotelResult], start_date
             sent = int(st.get("sent", 0) or 0)
             reminders_sent = max(0, sent - 1)
             repeat_forever = repeat_limit >= 11
-            if (repeat_forever or reminders_sent < repeat_limit) and (now - st.get("last", 0)) >= interval:
+            last_sent = float(st.get("last", 0) or 0)
+            elapsed = now - last_sent
+            if elapsed < -_MAX_CLOCK_SKEW_SECONDS:
+                # A restored checkpoint from a clock that was far ahead must
+                # not postpone reminders until that wall-clock time returns.
+                st["last"] = now
+                elapsed = 0
+            if (repeat_forever or reminders_sent < repeat_limit) and elapsed >= interval:
                 next_reminder = reminders_sent + 1
                 limit_text = "INF" if repeat_forever else str(repeat_limit)
                 title = _push_title(cfg, "🔁", "room_reminder")

@@ -4,7 +4,7 @@ import importlib
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -1048,6 +1048,20 @@ class AppParserTests(unittest.TestCase):
         self.assertEqual(restored.enabled_providers, ["routeinn", "dormy"])
         self.assertEqual(restored.available_alert_repeat, 4)
 
+    def test_malformed_saved_config_does_not_partially_mutate_live_state(self):
+        from toyoko_tracker import runtime
+
+        restored = tracker_app.AppConfig(start_date="2026-05-16", people=1)
+        saved = {"start_date": "2099-01-01", "people": "not-a-number"}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "auto_save.json"
+            path.write_text(json.dumps(saved), encoding="utf-8")
+            with patch.object(runtime, "_CONFIG", restored):
+                self.assertFalse(runtime._load_config_from_file(str(path)))
+
+        self.assertEqual(restored.start_date, "2026-05-16")
+        self.assertEqual(restored.people, 1)
+
     def test_adaptive_backoff_escalates_and_recovers(self):
         unknown = tracker_app.HotelResult(code="00001", url="#", name=None, available=None)
         healthy = tracker_app.HotelResult(code="00002", url="#", name="Test", available=False)
@@ -1390,6 +1404,64 @@ class AppParserTests(unittest.TestCase):
         self.assertIsNotNone(logs[0]["disappeared_ts"])
         self.assertIsInstance(logs[0]["duration_sec"], int)
 
+    def test_availability_log_duration_never_becomes_negative_after_clock_rollback(self):
+        from toyoko_tracker import notifications
+
+        notifications.clear_alert_state()
+        notifications.restore_notification_checkpoint({
+            "availability_logs": [{
+                "key": "00001|stay", "appeared_ts": 5_000.0,
+                "disappeared_ts": None,
+            }],
+        })
+
+        with patch.object(notifications.time, "time", return_value=1_000.0):
+            logs = notifications.availability_log_snapshot()
+
+        self.assertEqual(logs[0]["duration_sec"], 0)
+
+    def test_routeinn_future_in_memory_cache_is_not_fresh(self):
+        from toyoko_tracker import routeinn
+
+        self.assertFalse(
+            routeinn._cache_timestamp_is_fresh(5_000.0, 3600, now=1_000.0)
+        )
+        self.assertTrue(
+            routeinn._cache_timestamp_is_fresh(900.0, 3600, now=1_000.0)
+        )
+
+    def test_future_notification_checkpoint_does_not_block_reminders_indefinitely(self):
+        from toyoko_tracker import notifications
+
+        cfg = tracker_app.AppConfig()
+        cfg.available_alert_repeat = 1
+        cfg.available_alert_repeat_interval_sec = 60
+        result = tracker_app.HotelResult(
+            code="00001", url="https://example.test", name="Test",
+            available=True, min_remaining="1",
+        )
+        key = "00001|2026-05-16|2026-05-17"
+        notifications.clear_alert_state()
+        notifications.restore_notification_checkpoint({
+            "alert_state": {
+                key: {"available": True, "sent": 1, "last": 5_000.0, "count": 1},
+            },
+        })
+
+        with patch.object(notifications, "_publish_and_notify") as publish:
+            with patch.object(notifications.time, "time", return_value=1_000.0):
+                notifications.process_notifications(
+                    cfg, [result], "2026-05-16", "2026-05-17"
+                )
+            publish.assert_not_called()
+            with patch.object(notifications.time, "time", return_value=1_061.0):
+                notifications.process_notifications(
+                    cfg, [result], "2026-05-16", "2026-05-17"
+                )
+
+        publish.assert_called_once()
+        self.assertEqual(publish.call_args.args[1], "availability.reminder")
+
     def test_transient_unknown_result_preserves_available_state(self):
         from toyoko_tracker import notifications
 
@@ -1427,6 +1499,35 @@ class AppRouteSecurityTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["app"], "toyoko-tracker")
         self.assertEqual(payload["version"], tracker_app.__version__)
+
+    def test_invalid_start_payload_does_not_partially_mutate_live_config(self):
+        from toyoko_tracker import runtime
+
+        restored = tracker_app.AppConfig(
+            start_date="2026-05-16", hotel_codes=["00001"]
+        )
+        with patch.object(runtime, "_CONFIG", restored):
+            response = self.client.post("/start", json={
+                "start_date": "2099-01-01",
+                "enabled_providers": [],
+            })
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(restored.start_date, "2026-05-16")
+
+    def test_invalid_restart_payload_keeps_existing_worker_running(self):
+        from toyoko_tracker import runtime
+
+        restored = tracker_app.AppConfig(hotel_codes=["00001"])
+        worker = Mock()
+        worker.is_alive.return_value = True
+        with patch.object(runtime, "_CONFIG", restored), patch.object(
+            runtime, "_worker_thread", worker
+        ):
+            response = self.client.post("/start", json={"enabled_providers": []})
+
+        self.assertEqual(response.status_code, 400)
+        worker.join.assert_not_called()
 
     def test_status_does_not_expose_notification_secrets(self):
         from toyoko_tracker import runtime
