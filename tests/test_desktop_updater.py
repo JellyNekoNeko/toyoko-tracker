@@ -1,4 +1,5 @@
 import hashlib
+import os
 import stat
 import zipfile
 from pathlib import Path
@@ -32,6 +33,7 @@ def test_zip_extraction_rejects_parent_traversal(tmp_path: Path):
         desktop_updater._extract_zip(archive, tmp_path / "extract")
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows release ZIPs do not use symbolic links")
 def test_zip_extraction_preserves_safe_symbolic_link(tmp_path: Path):
     archive = tmp_path / "links.zip"
     link = zipfile.ZipInfo("ToyokoTracker/current")
@@ -92,7 +94,8 @@ def test_prepare_desktop_update_verifies_and_stages_zip(tmp_path: Path):
     assert prepared.staged_root.name == "ToyokoTracker"
     assert (prepared.staged_root / "ToyokoTracker").read_text() == "new executable"
     assert prepared.helper_path.exists()
-    assert "parent_pid=123" in prepared.helper_path.read_text()
+    helper = prepared.helper_path.read_text()
+    assert "parent_pid=123" in helper or "$parentPid = 123" in helper
     assert prepared.backup_root.name == "ToyokoTracker.previous"
 
 

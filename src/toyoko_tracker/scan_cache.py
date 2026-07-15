@@ -6,8 +6,9 @@ import sqlite3
 import threading
 import time
 from copy import deepcopy
+from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Optional, TypeVar
+from typing import Any, Callable, Dict, Iterator, Optional, TypeVar
 
 from .settings import HOTEL_DATABASE_PATH
 
@@ -46,7 +47,8 @@ class _Inflight:
     error: Optional[BaseException] = None
 
 
-def _connect() -> sqlite3.Connection:
+@contextmanager
+def _connect() -> Iterator[sqlite3.Connection]:
     os.makedirs(os.path.dirname(HOTEL_DATABASE_PATH), exist_ok=True)
     connection = sqlite3.connect(HOTEL_DATABASE_PATH, timeout=20)
     connection.row_factory = sqlite3.Row
@@ -74,7 +76,11 @@ def _connect() -> sqlite3.Connection:
         );
         """
     )
-    return connection
+    try:
+        with connection:
+            yield connection
+    finally:
+        connection.close()
 
 
 def _metric(name: str, amount: int = 1) -> None:

@@ -6,8 +6,9 @@ import sqlite3
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from .settings import HOTEL_DATABASE_PATH
 
@@ -25,7 +26,8 @@ class EventRecord:
     created: bool
 
 
-def _connect() -> sqlite3.Connection:
+@contextmanager
+def _connect() -> Iterator[sqlite3.Connection]:
     os.makedirs(os.path.dirname(HOTEL_DATABASE_PATH) or ".", exist_ok=True)
     connection = sqlite3.connect(HOTEL_DATABASE_PATH, timeout=20)
     connection.row_factory = sqlite3.Row
@@ -54,7 +56,11 @@ def _connect() -> sqlite3.Connection:
         );
         """
     )
-    return connection
+    try:
+        with connection:
+            yield connection
+    finally:
+        connection.close()
 
 
 def publish_event(

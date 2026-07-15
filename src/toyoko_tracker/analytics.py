@@ -8,7 +8,8 @@ import sqlite3
 import threading
 import time
 from collections import defaultdict
-from typing import Any, Dict, Iterable, List, Optional
+from contextlib import contextmanager
+from typing import Any, Dict, Iterable, Iterator, List, Optional
 
 from .models import AppConfig, HotelResult
 from .settings import HOTEL_DATABASE_PATH
@@ -17,7 +18,8 @@ from .settings import HOTEL_DATABASE_PATH
 _LOCK = threading.RLock()
 
 
-def _connect() -> sqlite3.Connection:
+@contextmanager
+def _connect() -> Iterator[sqlite3.Connection]:
     os.makedirs(os.path.dirname(HOTEL_DATABASE_PATH) or ".", exist_ok=True)
     connection = sqlite3.connect(HOTEL_DATABASE_PATH, timeout=20)
     connection.row_factory = sqlite3.Row
@@ -46,7 +48,11 @@ def _connect() -> sqlite3.Connection:
             ON scan_observations(scope_key, observed_at DESC);
         """
     )
-    return connection
+    try:
+        with connection:
+            yield connection
+    finally:
+        connection.close()
 
 
 def _scope_key(cfg: AppConfig) -> str:
