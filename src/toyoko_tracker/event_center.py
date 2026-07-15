@@ -80,10 +80,10 @@ def publish_event(
             row = connection.execute(
                 """
                 SELECT event_id, payload_json, created_at FROM tracker_events
-                WHERE event_type=? AND dedupe_key=? AND created_at>=?
+                WHERE event_type=? AND dedupe_key=? AND created_at BETWEEN ? AND ?
                 ORDER BY created_at DESC LIMIT 1
                 """,
-                (event_type, dedupe_key, now - window),
+                (event_type, dedupe_key, now - window, now + 300),
             ).fetchone()
             if row is not None:
                 try:
@@ -185,10 +185,10 @@ def event_status_snapshot() -> Dict[str, int]:
         row = connection.execute(
             """
             SELECT COUNT(*) AS total,
-                   SUM(CASE WHEN created_at>=? THEN 1 ELSE 0 END) AS recent
+                   SUM(CASE WHEN created_at BETWEEN ? AND ? THEN 1 ELSE 0 END) AS recent
             FROM tracker_events
             """,
-            (time.time() - 24 * 60 * 60,),
+            (time.time() - 24 * 60 * 60, time.time() + 300),
         ).fetchone()
         pending = connection.execute(
             "SELECT COUNT(*) FROM notification_deliveries WHERE state IN ('queued','sending')"

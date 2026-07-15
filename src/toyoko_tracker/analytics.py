@@ -121,7 +121,8 @@ def record_results(cfg: AppConfig, results: Iterable[HotelResult], source: str =
                 and previous["min_price"] == price
                 and str(previous["room_type"] or "") == room_type
             )
-            if unchanged and now - float(previous["observed_at"]) < 15 * 60:
+            previous_age = now - float(previous["observed_at"]) if previous else 0
+            if unchanged and -300 <= previous_age < 15 * 60:
                 continue
             connection.execute(
                 """
@@ -183,8 +184,9 @@ def trend_snapshot(
     days = max(1, min(180, int(days)))
     limit = max(1, min(10000, int(limit)))
     placeholders = ",".join("?" for _ in codes)
-    conditions = [f"hotel_code IN ({placeholders})", "observed_at>=?"]
-    params: List[Any] = [*codes, time.time() - days * 24 * 60 * 60]
+    now = time.time()
+    conditions = [f"hotel_code IN ({placeholders})", "observed_at BETWEEN ? AND ?"]
+    params: List[Any] = [*codes, now - days * 24 * 60 * 60, now + 300]
     if scope_key:
         conditions.append("scope_key=?")
         params.append(str(scope_key))

@@ -247,6 +247,301 @@ class AppParserTests(unittest.TestCase):
         self.assertEqual(updated_cache["hotels"][-1]["lat"], 35.1)
         self.assertEqual(updated_snapshot["last_new_hotels"][0]["code"], "00300")
 
+    def test_first_catalog_refresh_establishes_baseline_without_new_hotel_alerts(self):
+        from toyoko_tracker import hotel_catalog
+
+        current = [
+            {
+                "code": str(number).zfill(5),
+                "name": f"Hotel {number:05d}",
+                "name_en": f"Hotel {number:05d}",
+                "status": "operation",
+                "country": 1,
+                "prefecture": 13,
+                "lat": 35.0,
+                "lng": 139.0,
+            }
+            for number in range(1, 301)
+        ]
+
+        class FakeResponse:
+            text = "unused"
+
+            def raise_for_status(self):
+                return None
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            snapshot_path = str(Path(tmp_dir) / "catalog.json")
+            cache_path = str(Path(tmp_dir) / "radius.json")
+            with patch.object(hotel_catalog, "HOTEL_CATALOG_SNAPSHOT_PATH", snapshot_path), \
+                 patch.object(hotel_catalog, "RADIUS_HOTELS_CACHE_PATH", cache_path), \
+                 patch.object(hotel_catalog, "parse_official_catalog_html", return_value=current), \
+                 patch.object(hotel_catalog.requests, "get", return_value=FakeResponse()):
+                status = hotel_catalog.refresh_catalog(force=True)
+
+            snapshot = json.loads(Path(snapshot_path).read_text(encoding="utf-8"))
+
+        self.assertEqual(status["state"], "fresh")
+        self.assertEqual(status["new_hotels"], [])
+        self.assertEqual(snapshot["last_new_hotels"], [])
+        self.assertEqual(snapshot["unseen_new_hotels"], [])
+        self.assertEqual(len(snapshot["current_hotels"]), 300)
+
+    def test_second_catalog_refresh_reports_only_the_real_addition(self):
+        from toyoko_tracker import hotel_catalog
+
+        baseline = [
+            {
+                "code": str(number).zfill(5),
+                "name": f"Hotel {number:05d}",
+                "status": "operation",
+                "country": 1,
+                "prefecture": 13,
+                "lat": 35.0,
+                "lng": 139.0,
+            }
+            for number in range(1, 301)
+        ]
+        updated = [*baseline, {
+            "code": "00301", "name": "New Hotel", "status": "operation",
+            "country": 1, "prefecture": 13, "lat": 35.1, "lng": 139.1,
+        }]
+
+        class FakeResponse:
+            text = "unused"
+
+            def raise_for_status(self):
+                return None
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            snapshot_path = str(Path(tmp_dir) / "catalog.json")
+            cache_path = str(Path(tmp_dir) / "radius.json")
+            with patch.object(hotel_catalog, "HOTEL_CATALOG_SNAPSHOT_PATH", snapshot_path), \
+                 patch.object(hotel_catalog, "RADIUS_HOTELS_CACHE_PATH", cache_path), \
+                 patch.object(hotel_catalog, "parse_official_catalog_html", side_effect=[baseline, updated]), \
+                 patch.object(hotel_catalog.requests, "get", return_value=FakeResponse()):
+                first = hotel_catalog.refresh_catalog(force=True)
+                second = hotel_catalog.refresh_catalog(force=True)
+
+        self.assertEqual(first["new_hotels"], [])
+        self.assertEqual([hotel["code"] for hotel in second["new_hotels"]], ["00301"])
+
+    def test_recent_snapshot_without_coordinate_cache_is_rebuilt(self):
+        from datetime import datetime, timezone
+        from toyoko_tracker import hotel_catalog
+
+        current = [
+            {
+                "code": str(number).zfill(5),
+                "name": f"Hotel {number:05d}",
+                "status": "operation",
+                "country": 1,
+                "prefecture": 13,
+                "lat": 35.0,
+                "lng": 139.0,
+            }
+            for number in range(1, 301)
+        ]
+
+        class FakeResponse:
+            text = "unused"
+
+            def raise_for_status(self):
+                return None
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            snapshot_path = str(Path(tmp_dir) / "catalog.json")
+            cache_path = str(Path(tmp_dir) / "missing-radius.json")
+            Path(snapshot_path).write_text(
+                json.dumps({
+                    "checked_at": datetime.now(timezone.utc).isoformat(),
+                    "current_hotels": current,
+                }),
+                encoding="utf-8",
+            )
+            with patch.object(hotel_catalog, "HOTEL_CATALOG_SNAPSHOT_PATH", snapshot_path), \
+                 patch.object(hotel_catalog, "RADIUS_HOTELS_CACHE_PATH", cache_path), \
+                 patch.object(hotel_catalog, "parse_official_catalog_html", return_value=current) as parser, \
+                 patch.object(hotel_catalog.requests, "get", return_value=FakeResponse()):
+                status = hotel_catalog.refresh_catalog(force=False)
+
+            rebuilt = json.loads(Path(cache_path).read_text(encoding="utf-8"))
+
+        self.assertEqual(parser.call_count, 1)
+        self.assertEqual(status["state"], "fresh")
+        self.assertEqual(status["new_hotels"], [])
+        self.assertEqual(len(rebuilt["hotels"]), 300)
+
+    def test_mismatched_snapshot_and_cache_revision_is_rebuilt(self):
+        from datetime import datetime, timezone
+        from toyoko_tracker import hotel_catalog
+
+        current = [
+            {
+                "code": str(number).zfill(5), "name": f"Hotel {number:05d}",
+                "status": "operation", "country": 1, "prefecture": 13,
+                "lat": 35.0, "lng": 139.0,
+            }
+            for number in range(1, 301)
+        ]
+
+        class FakeResponse:
+            text = "unused"
+
+            def raise_for_status(self):
+                return None
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            snapshot_path = str(Path(tmp_dir) / "catalog.json")
+            cache_path = str(Path(tmp_dir) / "radius.json")
+            Path(snapshot_path).write_text(json.dumps({
+                "checked_at": datetime.now(timezone.utc).isoformat(),
+                "catalog_revision": "old-revision",
+                "current_hotels": current,
+            }), encoding="utf-8")
+            Path(cache_path).write_text(json.dumps({
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "catalog_revision": "partial-new-revision",
+                "hotels": current,
+            }), encoding="utf-8")
+            with patch.object(hotel_catalog, "HOTEL_CATALOG_SNAPSHOT_PATH", snapshot_path), \
+                 patch.object(hotel_catalog, "RADIUS_HOTELS_CACHE_PATH", cache_path), \
+                 patch.object(hotel_catalog, "parse_official_catalog_html", return_value=current) as parser, \
+                 patch.object(hotel_catalog.requests, "get", return_value=FakeResponse()):
+                status = hotel_catalog.refresh_catalog(force=False)
+
+            snapshot = json.loads(Path(snapshot_path).read_text(encoding="utf-8"))
+            cache = json.loads(Path(cache_path).read_text(encoding="utf-8"))
+
+        self.assertEqual(parser.call_count, 1)
+        self.assertEqual(status["state"], "fresh")
+        self.assertEqual(snapshot["catalog_revision"], cache["catalog_revision"])
+
+    def test_matching_revision_does_not_hide_truncated_coordinate_cache(self):
+        from toyoko_tracker.hotel_catalog import _catalog_files_compatible
+
+        snapshot = {
+            "catalog_revision": "same-revision",
+            "current_hotels": [{"code": "00001"}, {"code": "00002"}],
+        }
+        cache = {
+            "catalog_revision": "same-revision",
+            "hotels": [{"code": "00001", "lat": 35.0, "lng": 139.0}],
+        }
+
+        self.assertFalse(_catalog_files_compatible(snapshot, cache))
+
+    def test_cache_write_failure_does_not_publish_fresh_snapshot(self):
+        from toyoko_tracker import hotel_catalog
+
+        current = [
+            {
+                "code": str(number).zfill(5),
+                "name": f"Hotel {number:05d}",
+                "status": "operation",
+                "country": 1,
+                "prefecture": 13,
+                "lat": 35.0,
+                "lng": 139.0,
+            }
+            for number in range(1, 301)
+        ]
+
+        class FakeResponse:
+            text = "unused"
+
+            def raise_for_status(self):
+                return None
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            snapshot_path = str(Path(tmp_dir) / "catalog.json")
+            cache_path = str(Path(tmp_dir) / "radius.json")
+            with patch.object(hotel_catalog, "HOTEL_CATALOG_SNAPSHOT_PATH", snapshot_path), \
+                 patch.object(hotel_catalog, "RADIUS_HOTELS_CACHE_PATH", cache_path), \
+                 patch.object(hotel_catalog, "parse_official_catalog_html", return_value=current), \
+                 patch.object(hotel_catalog.requests, "get", return_value=FakeResponse()), \
+                 patch.object(hotel_catalog, "_atomic_write_json", side_effect=OSError("disk full")) as writer:
+                status = hotel_catalog.refresh_catalog(force=True)
+
+            self.assertFalse(Path(snapshot_path).exists())
+
+        self.assertEqual(status["state"], "failed")
+        self.assertEqual(writer.call_args_list[0].args[0], cache_path)
+        self.assertEqual(writer.call_count, 1)
+
+    def test_legacy_full_catalog_alert_is_repaired(self):
+        from toyoko_tracker.hotel_catalog import _repair_legacy_full_catalog_alert
+
+        hotels = [
+            {"code": str(number).zfill(5), "name": f"Hotel {number:05d}"}
+            for number in range(1, 350)
+        ]
+        snapshot = {
+            "schema_version": 1,
+            "current_hotels": list(hotels),
+            "unseen_new_hotels": list(hotels),
+            "last_new_hotels": list(hotels),
+        }
+
+        repaired = _repair_legacy_full_catalog_alert(snapshot)
+
+        self.assertTrue(repaired)
+        self.assertTrue(snapshot["baseline_initialized"])
+        self.assertEqual(snapshot["unseen_new_hotels"], [])
+        self.assertEqual(snapshot["last_new_hotels"], [])
+
+    def test_small_real_new_hotel_alert_is_not_repaired(self):
+        from toyoko_tracker.hotel_catalog import _repair_legacy_full_catalog_alert
+
+        hotels = [{"code": str(number).zfill(5)} for number in range(1, 350)]
+        snapshot = {
+            "schema_version": 1,
+            "current_hotels": hotels,
+            "unseen_new_hotels": [hotels[-1]],
+        }
+
+        self.assertFalse(_repair_legacy_full_catalog_alert(snapshot))
+        self.assertEqual(snapshot["unseen_new_hotels"], [hotels[-1]])
+
+    def test_region_hotel_search_uses_local_catalog_cache(self):
+        from toyoko_tracker import runtime
+
+        local_hotels = [
+            {"code": "00165", "name": "Fukuoka", "prefecture": 40, "lat": 33.5, "lng": 130.4},
+            {"code": "00001", "name": "Tokyo", "prefecture": 13, "lat": 35.6, "lng": 139.7},
+        ]
+        runtime._AREA_HOTELS_CACHE.clear()
+        with patch.object(
+            runtime, "_find_area_selection", return_value=("pref-40", [("prefecture", 40)])
+        ), patch.object(
+            runtime, "_load_catalog_coordinate_cache", return_value=local_hotels
+        ), patch.object(runtime, "_fetch_hotels_for_selector") as network_fetch:
+            hotels = runtime._hotels_for_area_selection(7, "pref-40", "en")
+
+        self.assertEqual([hotel["code"] for hotel in hotels], ["00165"])
+        network_fetch.assert_not_called()
+
+    def test_catalog_coordinate_count_excludes_missing_and_invalid_points(self):
+        from toyoko_tracker import hotel_catalog
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cache_path = str(Path(tmp_dir) / "radius.json")
+            Path(cache_path).write_text(
+                json.dumps({
+                    "generated_at": "2026-07-15T00:00:00+00:00",
+                    "hotels": [
+                        {"code": "00001", "lat": 35.0, "lng": 139.0},
+                        {"code": "00002", "lat": None, "lng": None},
+                        {"code": "00003", "lat": 999, "lng": 139.0},
+                    ],
+                }),
+                encoding="utf-8",
+            )
+            with patch.object(hotel_catalog, "RADIUS_HOTELS_CACHE_PATH", cache_path):
+                metadata = hotel_catalog._cache_metadata()
+
+        self.assertEqual(metadata["coordinate_count"], 1)
+
     def test_expired_coordinate_cache_can_still_be_used_while_refreshing(self):
         from toyoko_tracker import hotel_catalog
 
@@ -262,6 +557,43 @@ class AppParserTests(unittest.TestCase):
 
         self.assertEqual(stale_allowed[0]["code"], "00001")
         self.assertIsNone(fresh_only)
+
+    def test_far_future_coordinate_cache_is_not_treated_as_fresh(self):
+        from toyoko_tracker import hotel_catalog
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cache_path = str(Path(tmp_dir) / "radius.json")
+            Path(cache_path).write_text(json.dumps({
+                "generated_at": "2099-01-01T00:00:00+00:00",
+                "hotels": [{"code": "00001", "lat": 35.0, "lng": 139.0}],
+            }), encoding="utf-8")
+            with patch.object(hotel_catalog, "RADIUS_HOTELS_CACHE_PATH", cache_path):
+                stale_allowed = hotel_catalog.load_coordinate_cache(allow_stale=True)
+                fresh_only = hotel_catalog.load_coordinate_cache(allow_stale=False)
+
+        self.assertEqual(stale_allowed[0]["code"], "00001")
+        self.assertIsNone(fresh_only)
+
+    def test_far_future_chain_provider_cache_is_not_treated_as_fresh(self):
+        from toyoko_tracker import chain_providers
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cache_path = str(Path(tmp_dir) / "providers.json")
+            Path(cache_path).write_text(json.dumps({
+                "providers": {
+                    "dormy": {
+                        "generated_at": 4_000_000_000,
+                        "hotels": [{"code": "dormy:1"}],
+                    }
+                }
+            }), encoding="utf-8")
+            chain_providers._PROVIDER_CACHE.clear()
+            with patch.object(chain_providers, "CHAIN_PROVIDER_CACHE_PATH", cache_path), patch.object(
+                chain_providers.time, "time", return_value=1_000.0
+            ):
+                cached = chain_providers._cached("dormy")
+
+        self.assertIsNone(cached)
 
     def test_official_hotel_info_parser_and_locale_urls(self):
         hotel_info = importlib.import_module("toyoko_tracker.hotel_info")

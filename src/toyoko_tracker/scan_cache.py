@@ -98,6 +98,12 @@ def get(cache_key: str, *, allow_expired: bool = False, count_metrics: bool = Tr
             if count_metrics:
                 _metric("misses")
             return None
+        if float(row["stored_at"]) > now + 300:
+            connection.execute("DELETE FROM scan_cache WHERE cache_key=?", (cache_key,))
+            _metric("evictions")
+            if count_metrics:
+                _metric("misses")
+            return None
         expired = float(row["expires_at"]) <= now
         if expired and not allow_expired:
             if count_metrics:
@@ -282,11 +288,15 @@ def load_checkpoint(scope_key: str, max_age_seconds: int = 24 * 60 * 60) -> Opti
         row = connection.execute(
             "SELECT payload_json, updated_at FROM runtime_checkpoints WHERE scope_key=?", (scope_key,)
         ).fetchone()
-    if row is None or time.time() - float(row["updated_at"]) > max(60, int(max_age_seconds)):
+    now = time.time()
+    if row is None:
+        return None
+    age = now - float(row["updated_at"])
+    if age < -300 or age > max(60, int(max_age_seconds)):
         return None
     try:
         payload = json.loads(row["payload_json"])
     except (TypeError, ValueError, json.JSONDecodeError):
         return None
-    payload["checkpoint_age_sec"] = max(0, int(time.time() - float(row["updated_at"])))
+    payload["checkpoint_age_sec"] = max(0, int(age))
     return payload

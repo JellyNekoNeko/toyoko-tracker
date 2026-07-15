@@ -96,10 +96,15 @@ def region_id_for_prefecture_id(prefecture_id: Optional[int]) -> Optional[int]:
     return _PREFECTURE_REGION.get(prefecture)
 
 
+def _cache_timestamp_is_fresh(cached_at: float, *, now: Optional[float] = None) -> bool:
+    age = (time.time() if now is None else float(now)) - float(cached_at)
+    return -300 <= age < _CACHE_TTL
+
+
 def _cached(provider: str) -> Optional[List[Dict[str, Any]]]:
     with _CACHE_LOCK:
         cached_at, hotels = _PROVIDER_CACHE.get(provider, (0.0, []))
-        if hotels and time.time() - cached_at < _CACHE_TTL:
+        if hotels and _cache_timestamp_is_fresh(cached_at):
             return [dict(hotel) for hotel in hotels]
         try:
             with open(CHAIN_PROVIDER_CACHE_PATH, "r", encoding="utf-8") as stream:
@@ -107,7 +112,7 @@ def _cached(provider: str) -> Optional[List[Dict[str, Any]]]:
             record = (document.get("providers") or {}).get(provider) or {}
             cached_at = float(record.get("generated_at") or 0.0)
             hotels = record.get("hotels") if isinstance(record.get("hotels"), list) else []
-            if hotels and time.time() - cached_at < _CACHE_TTL:
+            if hotels and _cache_timestamp_is_fresh(cached_at):
                 _PROVIDER_CACHE[provider] = (cached_at, hotels)
                 return [dict(hotel) for hotel in hotels]
         except (OSError, ValueError, TypeError, json.JSONDecodeError):

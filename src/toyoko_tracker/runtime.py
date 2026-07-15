@@ -3381,6 +3381,34 @@ _PROVIDER_DATABASE_LOCK = threading.Lock()
 _PROVIDER_DATABASE_STOP = threading.Event()
 _PROVIDER_DATABASE_THREAD: Optional[threading.Thread] = None
 _PROVIDER_DATABASE_INTERVAL = 6 * 60 * 60
+_DATABASE_PROVIDERS = ("routeinn", "dormy", "mystays", "daiwa")
+
+
+def _provider_database_is_fresh(
+    status: Optional[Dict[str, Any]] = None,
+    *,
+    max_age_seconds: int = _PROVIDER_DATABASE_INTERVAL,
+) -> bool:
+    records = (status or _db_status_snapshot()).get("providers") or {}
+    now = time.time()
+    for provider in _DATABASE_PROVIDERS:
+        row = records.get(provider) or {}
+        if not bool(row.get("initialized")) or str(row.get("error") or ""):
+            return False
+        # Every currently supported provider has a non-empty public catalog.
+        # A zero count means a bootstrap or parser failure, not a fresh cache.
+        if int(row.get("hotel_count") or 0) <= 0:
+            return False
+        try:
+            checked_at = datetime.fromisoformat(
+                str(row.get("checked_at") or "").replace("Z", "+00:00")
+            ).timestamp()
+        except (TypeError, ValueError):
+            return False
+        age = now - checked_at
+        if age < -300 or age > max(1, int(max_age_seconds)):
+            return False
+    return True
 
 
 def _detail_area_references() -> Dict[int, List[Tuple[int, float, float]]]:
@@ -3458,8 +3486,17 @@ def _refresh_provider_database(force: bool = False) -> Dict[str, Any]:
     if not _PROVIDER_DATABASE_LOCK.acquire(blocking=False):
         return {"ok": True, "state": "checking", "providers": {}}
     try:
+        database_status = _db_status_snapshot()
+        if not force and _provider_database_is_fresh(database_status):
+            _log("[database] local provider database is fresh; network refresh skipped")
+            return {"ok": True, "state": "fresh", **database_status}
         _log("[database] refreshing non-Toyoko hotel database...")
         references = _detail_area_references()
+        reference_count = sum(len(items) for items in references.values())
+        if reference_count < 100:
+            raise RuntimeError(
+                f"Toyoko area reference validation failed: only {reference_count} coordinates"
+            )
         fetchers = {
             "routeinn": lambda: _fetch_routeinn_coordinate_hotels(DEFAULT_PRIMARY_LANGUAGE, force=force),
             "dormy": lambda: _fetch_chain_provider_hotels("dormy", DEFAULT_PRIMARY_LANGUAGE, force=force),
@@ -3472,7 +3509,16 @@ def _refresh_provider_database(force: bool = False) -> Dict[str, Any]:
             for future in as_completed(futures):
                 provider = futures[future]
                 try:
-                    hotels = _classify_provider_hotels(future.result(), references)
+                    source_hotels = future.result()
+                    if not source_hotels:
+                        raise ValueError(f"{provider} catalog returned no hotels")
+                    previous_count = _db_provider_count(provider)
+                    if previous_count and len(source_hotels) < max(1, previous_count // 2):
+                        raise ValueError(
+                            f"{provider} catalog validation failed: "
+                            f"{len(source_hotels)} hotels versus previous {previous_count}"
+                        )
+                    hotels = _classify_provider_hotels(source_hotels, references)
                     results[provider] = _db_sync_provider(provider, hotels)
                     _log(f"[database] {provider}: {len(hotels)} hotels synchronized")
                 except Exception as exc:
@@ -3480,6 +3526,14 @@ def _refresh_provider_database(force: bool = False) -> Dict[str, Any]:
                     results[provider] = {"error": str(exc)}
                     _log(f"[database] {provider} refresh failed: {exc}")
         return {"ok": True, "state": "complete", "providers": results}
+    except Exception as exc:
+        for provider in _DATABASE_PROVIDERS:
+            try:
+                _db_record_sync_error(provider, str(exc))
+            except Exception:
+                pass
+        _log(f"[database] provider database refresh failed: {exc}")
+        return {"ok": False, "state": "failed", "error": str(exc), "providers": {}}
     finally:
         _PROVIDER_DATABASE_LOCK.release()
 
@@ -3783,6 +3837,21 @@ def _hotel_for_primary_language(hotel: Dict[str, Any], primary_language: Optiona
 def _hotels_for_area_selection(region_id: Optional[int], detail_id: str, primary_language: Optional[str] = None) -> List[Dict[str, Any]]:
     selection_key, selectors = _find_area_selection(region_id, detail_id)
     cached = _AREA_HOTELS_CACHE.get(selection_key)
+    if cached is None and selectors and all(kind == "prefecture" for kind, _ in selectors):
+        # The catalog refresh already stores the complete official Toyoko list
+        # with prefecture and coordinates. Region/prefecture searches should use
+        # that local cache rather than re-scraping the same official endpoints.
+        prefecture_ids = {selector_id for _, selector_id in selectors}
+        catalog_hotels = _load_catalog_coordinate_cache(allow_stale=True) or []
+        cached = sorted(
+            [
+                hotel for hotel in catalog_hotels
+                if _optional_int(hotel.get("prefecture")) in prefecture_ids
+            ],
+            key=lambda item: str(item.get("code") or ""),
+        )
+        if cached:
+            _AREA_HOTELS_CACHE[selection_key] = cached
     if cached is None:
         merged: Dict[str, Dict[str, Any]] = {}
         for kind, selector_id in selectors:
@@ -4125,6 +4194,13 @@ def _optional_float(value: Any) -> Optional[float]:
     try:
         return float(value)
     except Exception:
+        return None
+
+
+def _optional_int(value: Any) -> Optional[int]:
+    try:
+        return int(value) if value not in (None, "") else None
+    except (TypeError, ValueError):
         return None
 
 

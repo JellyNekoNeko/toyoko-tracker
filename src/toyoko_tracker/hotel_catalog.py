@@ -4,6 +4,7 @@ import json
 import os
 import tempfile
 import threading
+import uuid
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -38,7 +39,7 @@ def _noop_refresh() -> None:
 _LOG_HOOK: Callable[[str], None] = _noop_log
 _REFRESH_HOOK: Callable[[], None] = _noop_refresh
 _STATE_HYDRATED = False
-_CACHE_META_MTIME: Optional[float] = None
+_CACHE_META_SIGNATURE: Optional[Tuple[int, int]] = None
 _CACHE_META_DOCUMENT: Dict[str, Any] = {}
 
 _STATE: Dict[str, Any] = {
@@ -131,6 +132,41 @@ def _hotel_summary(hotel: Dict[str, Any]) -> Dict[str, Any]:
         "status": hotel.get("status") or hotel.get("hotelStatus") or "",
         "url": hotel.get("url") or "",
     }
+
+
+def _has_valid_coordinates(hotel: Dict[str, Any]) -> bool:
+    try:
+        lat = float(hotel["lat"])
+        lng = float(hotel["lng"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    return -90 <= lat <= 90 and -180 <= lng <= 180
+
+
+def _repair_legacy_full_catalog_alert(snapshot: Dict[str, Any]) -> bool:
+    """Clear the pre-0.7 first-run alert that marked the whole catalog new."""
+    if snapshot.get("baseline_initialized"):
+        return False
+    current = snapshot.get("current_hotels")
+    unseen = snapshot.get("unseen_new_hotels")
+    if not isinstance(current, list) or not isinstance(unseen, list) or len(current) < 300:
+        return False
+    current_codes = {
+        str(item.get("code") or "").zfill(5)
+        for item in current
+        if isinstance(item, dict) and item.get("code")
+    }
+    unseen_codes = {
+        str(item.get("code") or "").zfill(5)
+        for item in unseen
+        if isinstance(item, dict) and item.get("code")
+    }
+    if current_codes != unseen_codes:
+        return False
+    snapshot["unseen_new_hotels"] = []
+    snapshot["last_new_hotels"] = []
+    snapshot["baseline_initialized"] = True
+    return True
 
 
 def parse_official_catalog_html(page_html: str) -> List[Dict[str, Any]]:
@@ -242,38 +278,76 @@ def _load_coordinate_cache_document() -> Dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _catalog_files_compatible(snapshot: Dict[str, Any], cache: Dict[str, Any]) -> bool:
+    snapshot_hotels = snapshot.get("current_hotels")
+    cache_hotels = cache.get("hotels")
+    if isinstance(snapshot_hotels, list) and snapshot_hotels:
+        if not isinstance(cache_hotels, list) or not cache_hotels:
+            return False
+        snapshot_codes = {
+            str(item.get("code") or "").zfill(5)
+            for item in snapshot_hotels
+            if isinstance(item, dict) and item.get("code")
+        }
+        cache_codes = {
+            str(item.get("code") or "").zfill(5)
+            for item in cache_hotels
+            if isinstance(item, dict) and item.get("code")
+        }
+        if not snapshot_codes or snapshot_codes != cache_codes:
+            return False
+    snapshot_revision = str(snapshot.get("catalog_revision") or "")
+    cache_revision = str(cache.get("catalog_revision") or "")
+    if snapshot_revision or cache_revision:
+        return bool(snapshot_revision and snapshot_revision == cache_revision)
+    # Legacy pairs predate revision markers. They remain usable together and
+    # receive a marker on their next successful refresh.
+    return True
+
+
 def load_coordinate_cache(*, allow_stale: bool = True) -> Optional[List[Dict[str, Any]]]:
     payload = _load_coordinate_cache_document()
     hotels = payload.get("hotels")
     if not isinstance(hotels, list) or not hotels:
         return None
     generated_at = _parse_iso(payload.get("generated_at"))
-    fresh = bool(generated_at and (_utc_now() - generated_at).total_seconds() <= HOTEL_COORDINATE_CACHE_TTL_SECONDS)
+    age = (_utc_now() - generated_at).total_seconds() if generated_at else None
+    fresh = bool(
+        age is not None and -300 <= age <= HOTEL_COORDINATE_CACHE_TTL_SECONDS
+    )
     if not allow_stale and not fresh:
         return None
     return [item for item in hotels if isinstance(item, dict)]
 
 
 def _cache_metadata() -> Dict[str, Any]:
-    global _CACHE_META_MTIME, _CACHE_META_DOCUMENT
+    global _CACHE_META_SIGNATURE, _CACHE_META_DOCUMENT
     try:
-        mtime = os.path.getmtime(RADIUS_HOTELS_CACHE_PATH)
+        stat = os.stat(RADIUS_HOTELS_CACHE_PATH)
+        signature = (stat.st_mtime_ns, stat.st_size)
     except OSError:
-        mtime = None
+        signature = None
     with _STATE_LOCK:
-        if mtime != _CACHE_META_MTIME:
+        if signature != _CACHE_META_SIGNATURE:
             _CACHE_META_DOCUMENT = _load_coordinate_cache_document()
-            _CACHE_META_MTIME = mtime
+            _CACHE_META_SIGNATURE = signature
         payload = deepcopy(_CACHE_META_DOCUMENT)
     generated = _parse_iso(payload.get("generated_at"))
-    age = max(0, int((_utc_now() - generated).total_seconds())) if generated else None
+    raw_age = (_utc_now() - generated).total_seconds() if generated else None
+    age = max(0, int(raw_age)) if raw_age is not None else None
     hotels = payload.get("hotels") if isinstance(payload.get("hotels"), list) else []
     return {
         "cache_generated_at": generated.isoformat(timespec="seconds") if generated else None,
         "cache_age_seconds": age,
         "cache_ttl_seconds": HOTEL_COORDINATE_CACHE_TTL_SECONDS,
-        "cache_fresh": bool(age is not None and age <= HOTEL_COORDINATE_CACHE_TTL_SECONDS),
-        "coordinate_count": len(hotels),
+        "cache_fresh": bool(
+            raw_age is not None
+            and raw_age >= -300
+            and raw_age <= HOTEL_COORDINATE_CACHE_TTL_SECONDS
+        ),
+        "coordinate_count": sum(
+            _has_valid_coordinates(item) for item in hotels if isinstance(item, dict)
+        ),
     }
 
 
@@ -285,6 +359,11 @@ def _hydrate_state_from_snapshot() -> None:
     if not isinstance(snapshot, dict):
         _STATE_HYDRATED = True
         return
+    if _repair_legacy_full_catalog_alert(snapshot):
+        try:
+            _atomic_write_json(HOTEL_CATALOG_SNAPSHOT_PATH, snapshot)
+        except OSError:
+            pass
     with _STATE_LOCK:
         _STATE.update({
             "checked_at": snapshot.get("checked_at"),
@@ -302,6 +381,11 @@ def catalog_status_snapshot() -> Dict[str, Any]:
     with _STATE_LOCK:
         state = deepcopy(_STATE)
     state.update(_cache_metadata())
+    if int(state.get("open_japan_count") or 0):
+        state["unresolved_coordinate_count"] = max(
+            0,
+            int(state.get("open_japan_count") or 0) - int(state.get("coordinate_count") or 0),
+        )
     checked = _parse_iso(state.get("checked_at"))
     if checked:
         state["next_check_at"] = (checked + timedelta(seconds=HOTEL_CATALOG_CHECK_INTERVAL_SECONDS)).isoformat(timespec="seconds")
@@ -314,10 +398,26 @@ def refresh_catalog(*, force: bool = False) -> Dict[str, Any]:
     try:
         previous_snapshot = _read_json(HOTEL_CATALOG_SNAPSHOT_PATH)
         previous_snapshot = previous_snapshot if isinstance(previous_snapshot, dict) else {}
+        if _repair_legacy_full_catalog_alert(previous_snapshot):
+            try:
+                _atomic_write_json(HOTEL_CATALOG_SNAPSHOT_PATH, previous_snapshot)
+            except OSError:
+                pass
         last_checked = _parse_iso(previous_snapshot.get("checked_at"))
         if not force and last_checked:
             age = (_utc_now() - last_checked).total_seconds()
-            if age < HOTEL_CATALOG_CHECK_INTERVAL_SECONDS:
+            # A snapshot is only a valid refresh marker when its corresponding
+            # coordinate cache is readable and non-empty. Rebuild if either
+            # file was deleted, truncated, or only partially restored.
+            cache_document = _load_coordinate_cache_document()
+            cache_hotels = cache_document.get("hotels")
+            cache_available = bool(isinstance(cache_hotels, list) and cache_hotels)
+            files_compatible = _catalog_files_compatible(previous_snapshot, cache_document)
+            if (
+                -300 <= age < HOTEL_CATALOG_CHECK_INTERVAL_SECONDS
+                and cache_available
+                and files_compatible
+            ):
                 with _STATE_LOCK:
                     _STATE.update({"state": "fresh", "message": "hotel data is current", "last_error": ""})
                 return catalog_status_snapshot()
@@ -337,26 +437,29 @@ def refresh_catalog(*, force: bool = False) -> Dict[str, Any]:
         old_cache = load_coordinate_cache(allow_stale=True) or []
         old_by_code = {str(item.get("code") or "").zfill(5): item for item in old_cache}
         previous_current = previous_snapshot.get("current_hotels")
-        if isinstance(previous_current, list) and previous_current:
+        has_snapshot_baseline = isinstance(previous_current, list) and bool(previous_current)
+        has_cache_baseline = bool(old_by_code)
+        if has_snapshot_baseline:
             previous_by_code = {str(item.get("code") or "").zfill(5): item for item in previous_current}
         else:
             previous_by_code = old_by_code
         current_by_code = {hotel["code"]: hotel for hotel in current}
-        new_codes = sorted(set(current_by_code) - set(previous_by_code))
-        removed_codes = sorted(set(previous_by_code) - set(current_by_code))
+        # A fresh installation has neither a catalog snapshot nor a coordinate
+        # cache. Treat its first successful refresh as the baseline instead of
+        # announcing every existing hotel as newly opened.
+        if has_snapshot_baseline or has_cache_baseline:
+            new_codes = sorted(set(current_by_code) - set(previous_by_code))
+            removed_codes = sorted(set(previous_by_code) - set(current_by_code))
+        else:
+            new_codes = []
+            removed_codes = []
 
         merged: List[Dict[str, Any]] = []
         unresolved = 0
         for hotel in current:
             existing = dict(old_by_code.get(hotel["code"], {}))
             item = {**existing, **hotel}
-            lat = item.get("lat")
-            lng = item.get("lng")
-            try:
-                valid_coordinates = lat is not None and lng is not None and -90 <= float(lat) <= 90 and -180 <= float(lng) <= 180
-            except (TypeError, ValueError):
-                valid_coordinates = False
-            if not valid_coordinates:
+            if not _has_valid_coordinates(item):
                 coordinates = None
                 try:
                     coordinates = _resolve_official_coordinates(hotel)
@@ -374,6 +477,7 @@ def refresh_catalog(*, force: bool = False) -> Dict[str, Any]:
             merged.append(item)
 
         checked_at = _iso_now()
+        catalog_revision = uuid.uuid4().hex
         unseen = {
             str(item.get("code") or "").zfill(5): item
             for item in (previous_snapshot.get("unseen_new_hotels") or [])
@@ -384,7 +488,9 @@ def refresh_catalog(*, force: bool = False) -> Dict[str, Any]:
         removed = [_hotel_summary(previous_by_code[code]) for code in removed_codes]
         upcoming_summaries = [_hotel_summary(hotel) for hotel in upcoming]
         snapshot = {
-            "schema_version": 1,
+            "schema_version": 2,
+            "baseline_initialized": True,
+            "catalog_revision": catalog_revision,
             "source": HOTEL_CATALOG_URL,
             "checked_at": checked_at,
             "official_count": len(official),
@@ -394,14 +500,19 @@ def refresh_catalog(*, force: bool = False) -> Dict[str, Any]:
             "last_new_hotels": [_hotel_summary(current_by_code[code]) for code in new_codes],
             "last_removed_hotels": removed,
         }
-        _atomic_write_json(HOTEL_CATALOG_SNAPSHOT_PATH, snapshot)
+        # Write the data cache before the snapshot. The snapshot's checked_at
+        # is the commit marker used to skip later network refreshes; publishing
+        # it first could leave a fresh-looking snapshot beside a missing cache
+        # after an interrupted or failed write.
         _atomic_write_json(RADIUS_HOTELS_CACHE_PATH, {
             "schema_version": 2,
+            "catalog_revision": catalog_revision,
             "source": HOTEL_CATALOG_URL,
             "generated_at": checked_at,
             "expires_at": (_utc_now() + timedelta(seconds=HOTEL_COORDINATE_CACHE_TTL_SECONDS)).isoformat(timespec="seconds"),
             "hotels": sorted(merged, key=lambda item: item["code"]),
         })
+        _atomic_write_json(HOTEL_CATALOG_SNAPSHOT_PATH, snapshot)
         try:
             _REFRESH_HOOK()
         except Exception as exc:
@@ -409,6 +520,7 @@ def refresh_catalog(*, force: bool = False) -> Dict[str, Any]:
 
         state_name = "updated" if new_codes or removed_codes else "fresh"
         message = f"{len(current)} open Japan hotels; {len(upcoming)} upcoming"
+        coordinate_count = sum(_has_valid_coordinates(item) for item in merged)
         with _STATE_LOCK:
             _STATE.update({
                 "state": state_name,
@@ -417,7 +529,7 @@ def refresh_catalog(*, force: bool = False) -> Dict[str, Any]:
                 "official_count": len(official),
                 "open_japan_count": len(current),
                 "upcoming_count": len(upcoming),
-                "coordinate_count": len(merged),
+                "coordinate_count": coordinate_count,
                 "unresolved_coordinate_count": unresolved,
                 "new_hotels": list(unseen.values()),
                 "removed_hotels": removed,

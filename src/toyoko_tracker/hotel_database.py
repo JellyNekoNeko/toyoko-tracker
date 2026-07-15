@@ -13,6 +13,15 @@ from .settings import HOTEL_DATABASE_PATH
 _LOCK = threading.RLock()
 
 
+def _has_valid_coordinates(hotel: Dict[str, Any]) -> bool:
+    try:
+        lat = float(hotel["lat"])
+        lng = float(hotel["lng"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    return -90 <= lat <= 90 and -180 <= lng <= 180
+
+
 @contextmanager
 def _connect() -> Iterator[sqlite3.Connection]:
     os.makedirs(os.path.dirname(HOTEL_DATABASE_PATH), exist_ok=True)
@@ -48,10 +57,32 @@ def _connect() -> Iterator[sqlite3.Connection]:
             removed_count INTEGER NOT NULL DEFAULT 0,
             new_hotels_json TEXT NOT NULL DEFAULT '[]',
             removed_hotels_json TEXT NOT NULL DEFAULT '[]',
-            error TEXT NOT NULL DEFAULT ''
+            error TEXT NOT NULL DEFAULT '',
+            initialized INTEGER NOT NULL DEFAULT 0
         );
         """
     )
+    columns = {
+        str(row["name"])
+        for row in connection.execute("PRAGMA table_info(provider_sync)").fetchall()
+    }
+    if "initialized" not in columns:
+        connection.execute(
+            "ALTER TABLE provider_sync ADD COLUMN initialized INTEGER NOT NULL DEFAULT 0"
+        )
+        # Existing successful rows already represent an established baseline.
+        # A row containing only a first-run error must remain uninitialized so
+        # that its first later success does not announce the whole provider.
+        connection.execute(
+            "UPDATE provider_sync SET initialized=1 WHERE hotel_count>0 OR error=''"
+        )
+        connection.execute(
+            """
+            UPDATE provider_sync
+            SET new_count=0, new_hotels_json='[]'
+            WHERE hotel_count>=10 AND new_count=hotel_count
+            """
+        )
     try:
         with connection:
             yield connection
@@ -69,9 +100,12 @@ def sync_provider(provider: str, hotels: Iterable[Dict[str, Any]]) -> Dict[str, 
                 "SELECT code, data_json FROM hotels WHERE provider=? AND active=1", (provider,)
             )
         }
-        baseline = not bool(previous) and connection.execute(
-            "SELECT 1 FROM provider_sync WHERE provider=?", (provider,)
-        ).fetchone() is None
+        sync_state = connection.execute(
+            "SELECT initialized FROM provider_sync WHERE provider=?", (provider,)
+        ).fetchone()
+        baseline = not bool(previous) and not bool(
+            sync_state and int(sync_state["initialized"] or 0)
+        )
         current_codes = {str(hotel["code"]) for hotel in rows}
         new_codes = set() if baseline else current_codes - set(previous)
         removed_codes = set() if baseline else set(previous) - current_codes
@@ -113,18 +147,18 @@ def sync_provider(provider: str, hotels: Iterable[Dict[str, Any]]) -> Dict[str, 
                 f"UPDATE hotels SET active=0, last_seen_at=? WHERE provider=? AND code NOT IN ({placeholders})",
                 (now, provider, *sorted(current_codes)),
             )
-        coordinate_count = sum(hotel.get("lat") is not None and hotel.get("lng") is not None for hotel in rows)
+        coordinate_count = sum(_has_valid_coordinates(hotel) for hotel in rows)
         connection.execute(
             """
             INSERT INTO provider_sync (
                 provider, checked_at, hotel_count, coordinate_count, new_count, removed_count,
-                new_hotels_json, removed_hotels_json, error
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '')
+                new_hotels_json, removed_hotels_json, error, initialized
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', 1)
             ON CONFLICT(provider) DO UPDATE SET
                 checked_at=excluded.checked_at, hotel_count=excluded.hotel_count,
                 coordinate_count=excluded.coordinate_count, new_count=excluded.new_count,
                 removed_count=excluded.removed_count, new_hotels_json=excluded.new_hotels_json,
-                removed_hotels_json=excluded.removed_hotels_json, error=''
+                removed_hotels_json=excluded.removed_hotels_json, error='', initialized=1
             """,
             (
                 provider, now, len(rows), coordinate_count, len(new_hotels), len(removed_hotels),

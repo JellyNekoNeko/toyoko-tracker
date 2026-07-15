@@ -49,6 +49,11 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+      - if: runner.os == 'Windows' && runner.arch == 'ARM64'
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "8.0.x"
+          architecture: arm64
       - if: runner.os == 'Linux'
         run: |
           sudo apt-get update
@@ -62,6 +67,8 @@ jobs:
             pkg-config
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -e ".[desktop-build]"
+      - if: runner.os == 'Windows' && runner.arch == 'ARM64'
+        run: python packaging/prepare_windows_arm64.py
       - if: startsWith(github.ref, 'refs/tags/desktop-v')
         shell: bash
         run: |
@@ -72,6 +79,10 @@ jobs:
             exit 1
           }
       - run: python build_desktop.py
+      - name: Smoke-test Windows application
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./packaging/smoke_test_windows.ps1
       - name: Sign Windows executable
         if: runner.os == 'Windows' && env.WINDOWS_CERTIFICATE_BASE64 != ''
         shell: pwsh

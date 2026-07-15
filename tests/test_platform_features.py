@@ -1,6 +1,8 @@
 import sys
 import tempfile
 import unittest
+import ntpath
+import posixpath
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -80,6 +82,47 @@ class LocalNotificationPlatformTests(unittest.TestCase):
         self.assertIn("libnotify", status["message"])
 
 
+class PersistentPathPlatformTests(unittest.TestCase):
+    def test_windows_uses_roaming_appdata(self):
+        from toyoko_tracker import settings
+
+        fake_os = SimpleNamespace(
+            name="nt",
+            environ={"APPDATA": r"C:\Users\jelly\AppData\Roaming"},
+            path=ntpath,
+        )
+        with patch.object(settings, "os", fake_os):
+            path = settings._default_config_dir()
+
+        self.assertEqual(path, r"C:\Users\jelly\AppData\Roaming\toyoko-tracker")
+
+    def test_macos_uses_application_support(self):
+        from toyoko_tracker import settings
+
+        fake_path = SimpleNamespace(
+            join=posixpath.join,
+            expanduser=lambda value: value.replace("~", "/Users/jelly", 1),
+        )
+        fake_os = SimpleNamespace(name="posix", environ={}, path=fake_path)
+        with patch.object(settings, "os", fake_os), patch.object(settings.sys, "platform", "darwin"):
+            path = settings._default_config_dir()
+
+        self.assertEqual(path, "/Users/jelly/Library/Application Support/toyoko-tracker")
+
+    def test_linux_honors_xdg_config_home(self):
+        from toyoko_tracker import settings
+
+        fake_os = SimpleNamespace(
+            name="posix",
+            environ={"XDG_CONFIG_HOME": "/home/jelly/.config-custom"},
+            path=posixpath,
+        )
+        with patch.object(settings, "os", fake_os), patch.object(settings.sys, "platform", "linux"):
+            path = settings._default_config_dir()
+
+        self.assertEqual(path, "/home/jelly/.config-custom/toyoko-tracker")
+
+
 class EventAndAnalyticsTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -105,6 +148,16 @@ class EventAndAnalyticsTests(unittest.TestCase):
         event_center.finish_delivery(first.event_id, "local", "success")
         self.assertFalse(event_center.begin_delivery(first.event_id, "local"))
         self.assertEqual(event_center.list_events()[0]["deliveries"][0]["state"], "success")
+
+    def test_future_event_does_not_suppress_notification_after_clock_rollback(self):
+        with patch.object(event_center.time, "time", return_value=5_000.0):
+            future = event_center.publish_event("availability.available", "hotel-1")
+        with patch.object(event_center.time, "time", return_value=1_000.0):
+            current = event_center.publish_event("availability.available", "hotel-1")
+
+        self.assertTrue(future.created)
+        self.assertTrue(current.created)
+        self.assertNotEqual(future.event_id, current.event_id)
 
     def test_notification_dispatch_uses_event_channel_idempotency(self):
         cfg = AppConfig()
@@ -148,6 +201,20 @@ class EventAndAnalyticsTests(unittest.TestCase):
         )
         self.assertEqual(len(scoped["points"]), 2)
         self.assertTrue(scoped["scope_filtered"])
+
+    def test_future_observation_does_not_block_current_history(self):
+        cfg = AppConfig(hotel_codes=["00001"])
+        result = HotelResult(
+            code="00001", url="#", name="Test", available=False, provider="toyoko",
+        )
+        with patch.object(analytics.time, "time", return_value=5_000.0):
+            self.assertEqual(analytics.record_results(cfg, [result]), 1)
+        with patch.object(analytics.time, "time", return_value=1_000.0):
+            self.assertEqual(analytics.record_results(cfg, [result]), 1)
+            trends = analytics.trend_snapshot(["00001"])
+
+        self.assertEqual(len(trends["points"]), 1)
+        self.assertEqual(trends["points"][0]["ts"], 1_000.0)
 
 
 class SimulationAndPwaTests(unittest.TestCase):

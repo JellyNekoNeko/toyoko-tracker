@@ -64,6 +64,23 @@ class ScanCacheTests(unittest.TestCase):
         self.assertEqual(checkpoint["results"][0]["code"], "00001")
         self.assertGreaterEqual(checkpoint["checkpoint_age_sec"], 0)
 
+    def test_future_scan_entry_is_evicted_after_clock_rollback(self):
+        with patch.object(scan_cache.time, "time", return_value=5_000.0):
+            scan_cache.put("future", "toyoko", "00001", {"available": True}, 60)
+        with patch.object(scan_cache.time, "time", return_value=1_000.0):
+            entry = scan_cache.get("future", allow_expired=True)
+
+        self.assertIsNone(entry)
+        self.assertEqual(scan_cache.status_snapshot()["entries"], 0)
+
+    def test_future_checkpoint_is_not_restored_after_clock_rollback(self):
+        with patch.object(scan_cache.time, "time", return_value=5_000.0):
+            scan_cache.save_checkpoint("future", {"round": 99})
+        with patch.object(scan_cache.time, "time", return_value=1_000.0):
+            checkpoint = scan_cache.load_checkpoint("future")
+
+        self.assertIsNone(checkpoint)
+
 
 if __name__ == "__main__":
     unittest.main()
