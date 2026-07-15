@@ -2,6 +2,9 @@
 
 ## v0.7.0 - Development
 
+- Added an on-demand price calendar for every selected hotel, including daily
+  availability, regular/member prices, monthly summaries, persistent cache,
+  paced background refresh, and direct official-booking links.
 - Added PyPI Trusted Publishing through a dedicated OIDC release workflow.
 - Added pipx installation detection and pipx-aware in-app upgrades.
 - Added automatic frozen-desktop downloads with SHA-256 verification, safe

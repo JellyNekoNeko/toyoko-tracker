@@ -28,6 +28,7 @@ It supports:
 - 🕘 Search history
 - 🛏 Room type filtering: Single / Double / Twin
 - 💳 Member / non-member price display
+- 📅 On-demand monthly price calendar for every selected hotel
 - 🔔 Local desktop notifications
 - 🤖 Telegram Bot push
 - 📱 Bark push for iPhone/iPad

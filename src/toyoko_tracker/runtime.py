@@ -29,7 +29,7 @@ from urllib.parse import quote, unquote
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, as_completed, wait
 from copy import deepcopy
 from dataclasses import asdict, fields
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import List, Optional, Tuple, Dict, Any
 
@@ -65,6 +65,12 @@ from .analytics import (
     record_results as _record_analytics_results,
     scope_key_for_config as _analytics_scope_key,
     trend_snapshot as _trend_snapshot,
+)
+from .price_calendar import (
+    calendar_snapshot as _price_calendar_data_snapshot,
+    condition_key as _price_calendar_condition_key,
+    month_dates as _price_calendar_month_dates,
+    record_day as _record_price_calendar_day,
 )
 from .simulation import run_stress_test as _run_simulation_stress_test
 from .traffic_meter import traffic_snapshot as _traffic_snapshot
@@ -228,6 +234,9 @@ _PROVIDER_HEALTH_LOCK = threading.Lock()
 _HOTEL_RUNTIME_STATE: Dict[str, Dict[str, Any]] = {}
 _HOTEL_RUNTIME_LOCK = threading.Lock()
 _CHECKPOINT_RESTORED_SCOPE = ""
+_PRICE_CALENDAR_JOB_LOCK = threading.Lock()
+_PRICE_CALENDAR_JOB: Dict[str, Any] = {}
+_PRICE_CALENDAR_THREAD: Optional[threading.Thread] = None
 
 _HOTEL_RESULT_FIELDS = {field.name for field in fields(HotelResult)}
 
@@ -2476,6 +2485,7 @@ def home() -> Response:
 	              <nav class="sidebar-nav">
 	                <button class="sidebar-nav-item active" data-app-view="home" aria-current="page"><span class="nav-icon">⌂</span><span class="nav-label">首页 / Home</span></button>
 	                <button class="sidebar-nav-item" data-app-view="search"><span class="nav-icon">⌕</span><span class="nav-label">空房检索 / Vacancy Search</span></button>
+	                <button class="sidebar-nav-item" data-app-view="price"><span class="nav-icon">¥</span><span class="nav-label">价格 / Price Calendar</span></button>
 	                <button class="sidebar-nav-item" data-app-view="monitor"><span class="nav-icon">◉</span><span class="nav-label">空房监控 / Vacancy Monitor</span><span class="nav-live-dot" aria-hidden="true"></span></button>
 	                <button class="sidebar-nav-item" data-app-view="search-settings"><span class="nav-icon">≡</span><span class="nav-label">搜索设定 / Search Settings</span></button>
 	                <button class="sidebar-nav-item" data-app-view="push-settings"><span class="nav-icon">✉</span><span class="nav-label">推送设定 / Push Settings</span></button>
@@ -2821,6 +2831,67 @@ def home() -> Response:
                </div>
              </details>
 	           </details>
+	          </section>
+
+	          <section class="app-view" id="view-price" data-view="price" aria-label="Price Calendar" hidden>
+	            <div class="price-calendar-page">
+	              <header class="price-calendar-hero">
+	                <div>
+	                  <span class="price-calendar-eyebrow" id="price-calendar-eyebrow">住宿价格视图</span>
+	                  <h1 id="price-calendar-title">价格日历</h1>
+	                  <p id="price-calendar-subtitle">按天查看已选酒店的一晚最低价、会员价与空房状态。</p>
+	                </div>
+	                <div class="price-hotel-switcher">
+	                  <button id="price-hotel-prev" type="button" aria-label="Previous hotel">‹</button>
+	                  <label for="price-hotel-select"><span id="price-hotel-label">酒店</span><select id="price-hotel-select"></select></label>
+	                  <button id="price-hotel-next" type="button" aria-label="Next hotel">›</button>
+	                </div>
+	              </header>
+
+	              <div class="price-condition-strip" id="price-condition-strip" aria-label="Price conditions"></div>
+
+	              <section class="price-summary-grid" aria-label="Price calendar summary">
+	                <article class="price-summary-card lowest"><span id="price-summary-lowest-label">本月最低价</span><strong id="price-summary-lowest">—</strong><small id="price-summary-member">—</small></article>
+	                <article class="price-summary-card available"><span id="price-summary-available-label">有房日期</span><strong id="price-summary-available">0</strong><small id="price-summary-available-note">等待查询</small></article>
+	                <article class="price-summary-card coverage"><span id="price-summary-coverage-label">日历覆盖</span><strong id="price-summary-coverage">0 / 0</strong><small id="price-summary-coverage-note">按需载入</small></article>
+	                <article class="price-summary-card updated"><span id="price-summary-updated-label">最近更新</span><strong id="price-summary-updated">—</strong><small id="price-summary-updated-note">尚未查询</small></article>
+	              </section>
+
+	              <section class="price-calendar-card">
+	                <header class="price-calendar-toolbar">
+	                  <div class="price-month-navigation">
+	                    <button id="price-month-prev" type="button" aria-label="Previous month">‹</button>
+	                    <button id="price-month-today" type="button">本月</button>
+	                    <button id="price-month-next" type="button" aria-label="Next month">›</button>
+	                  </div>
+	                  <div class="price-month-heading">
+	                    <strong id="price-month-title">—</strong>
+	                    <span id="price-month-hotel">—</span>
+	                  </div>
+	                  <button class="primary" id="price-calendar-refresh" type="button"><span aria-hidden="true">↻</span> <span id="price-calendar-refresh-label">刷新本月</span></button>
+	                </header>
+	                <div class="price-refresh-status" id="price-refresh-status" role="status" aria-live="polite" hidden>
+	                  <div><strong id="price-refresh-title">正在读取价格</strong><span id="price-refresh-detail"></span></div>
+	                  <div class="price-refresh-progress" aria-hidden="true"><i id="price-refresh-progress-bar"></i></div>
+	                </div>
+	                <div class="price-calendar-scroll">
+	                  <div class="price-weekdays" id="price-weekdays" aria-hidden="true"></div>
+	                  <div class="price-calendar-grid" id="price-calendar-grid" role="grid" aria-label="Monthly prices"></div>
+	                </div>
+	                <footer class="price-calendar-legend" id="price-calendar-legend">
+	                  <span class="available"><i></i><b id="price-legend-available">有房</b></span>
+	                  <span class="unavailable"><i></i><b id="price-legend-unavailable">满房</b></span>
+	                  <span class="unknown"><i></i><b id="price-legend-unknown">待确认</b></span>
+	                  <span class="unloaded"><i></i><b id="price-legend-unloaded">未查询</b></span>
+	                  <small id="price-calendar-note">点击有报价的日期可打开官网预订页</small>
+	                </footer>
+	              </section>
+
+	              <section class="price-empty-state" id="price-empty-state" hidden>
+	                <img src="/static/toyoko-chan-mascot.png?v=3" alt="">
+	                <div><h2 id="price-empty-title">先选择酒店</h2><p id="price-empty-copy">在空房检索中勾选酒店后，即可查看价格日历。</p><button id="price-empty-action" class="primary" type="button">前往空房检索</button></div>
+	              </section>
+	            </div>
 	          </section>
 
 	          <section class="app-view" id="view-monitor" data-view="monitor" aria-label="Vacancy Monitor" hidden>
@@ -4718,6 +4789,361 @@ def provider_capabilities_status() -> Response:
     with _CONFIG_LOCK:
         enabled = list(_CONFIG.enabled_providers)
     return jsonify({"ok": True, "matrix": _provider_capability_matrix(enabled)})
+
+
+def _month_offset(month: str, offset: int) -> str:
+    year, month_number = (int(part) for part in month.split("-"))
+    absolute = year * 12 + month_number - 1 + int(offset)
+    return f"{absolute // 12:04d}-{absolute % 12 + 1:02d}"
+
+
+def _price_calendar_hotels(cfg: AppConfig) -> List[Dict[str, str]]:
+    selected_by_code = {
+        str(item.get("code") or ""): item
+        for item in (getattr(cfg, "selected_hotels", []) or [])
+        if isinstance(item, dict) and item.get("code")
+    }
+    hotels: List[Dict[str, str]] = []
+    for code in dict.fromkeys(str(value) for value in (cfg.hotel_codes or []) if str(value)):
+        item = selected_by_code.get(code, {})
+        provider = str(
+            item.get("provider")
+            or (code.split(":", 1)[0] if ":" in code else "toyoko")
+        )
+        hotels.append({
+            "code": code,
+            "display_code": str(item.get("display_code") or code),
+            "provider": provider,
+            "name": str(
+                item.get("name_primary")
+                or item.get("name")
+                or item.get("name_en")
+                or item.get("name_zh_cn")
+                or code
+            ),
+        })
+    return hotels
+
+
+def _price_calendar_context(
+    cfg: AppConfig,
+    hotel_code: str = "",
+    month: str = "",
+) -> Tuple[str, str, List[Dict[str, str]]]:
+    hotels = _price_calendar_hotels(cfg)
+    if not hotels:
+        raise ValueError("select at least one hotel before opening the price calendar")
+    code = str(hotel_code or hotels[0]["code"])
+    if code not in {hotel["code"] for hotel in hotels}:
+        raise ValueError("hotel is not part of the current selection")
+    current_month = date.today().strftime("%Y-%m")
+    requested_month = str(month or current_month)
+    _price_calendar_month_dates(requested_month)
+    maximum_month = _month_offset(current_month, 12)
+    if requested_month < current_month or requested_month > maximum_month:
+        raise ValueError(f"month must be between {current_month} and {maximum_month}")
+    return code, requested_month, hotels
+
+
+def _price_calendar_job_key(cfg: AppConfig, hotel_code: str, month: str) -> str:
+    return f"{_price_calendar_condition_key(cfg)}:{hotel_code}:{month}"
+
+
+def _price_calendar_job_snapshot(key: str) -> Dict[str, Any]:
+    with _PRICE_CALENDAR_JOB_LOCK:
+        job = deepcopy(_PRICE_CALENDAR_JOB)
+    if not job:
+        return {"state": "idle", "running": False}
+    if job.get("key") == key:
+        return job
+    if job.get("running"):
+        return {
+            "state": "busy",
+            "running": True,
+            "hotel_code": job.get("hotel_code"),
+            "month": job.get("month"),
+            "done": job.get("done", 0),
+            "total": job.get("total", 0),
+        }
+    return {"state": "idle", "running": False}
+
+
+def _price_calendar_response_payload(
+    cfg: AppConfig,
+    hotel_code: str,
+    month: str,
+    hotels: Optional[List[Dict[str, str]]] = None,
+) -> Dict[str, Any]:
+    hotels = hotels if hotels is not None else _price_calendar_hotels(cfg)
+    calendar_data = _price_calendar_data_snapshot(cfg, hotel_code, month)
+    current_month = date.today().strftime("%Y-%m")
+    selected = next((hotel for hotel in hotels if hotel["code"] == hotel_code), None)
+    return {
+        "ok": True,
+        "hotel": selected,
+        "hotels": hotels,
+        "month": month,
+        "days": calendar_data["days"],
+        "summary": calendar_data["summary"],
+        "job": _price_calendar_job_snapshot(_price_calendar_job_key(cfg, hotel_code, month)),
+        "limits": {"min_month": current_month, "max_month": _month_offset(current_month, 12)},
+        "conditions": {
+            "people": cfg.people,
+            "rooms": cfg.rooms,
+            "smoking": cfg.smoking,
+            "room_requirement": str(
+                getattr(cfg, "room_requirement", None)
+                or getattr(cfg, "om_requirement", "any")
+                or "any"
+            ),
+            "membership_status": cfg.membership_status,
+        },
+    }
+
+
+def _update_price_calendar_job(job_id: str, **updates: Any) -> bool:
+    with _PRICE_CALENDAR_JOB_LOCK:
+        if _PRICE_CALENDAR_JOB.get("id") != job_id:
+            return False
+        _PRICE_CALENDAR_JOB.update(updates)
+    return True
+
+
+def _increment_price_calendar_job(job_id: str, **increments: int) -> bool:
+    with _PRICE_CALENDAR_JOB_LOCK:
+        if _PRICE_CALENDAR_JOB.get("id") != job_id:
+            return False
+        for key, amount in increments.items():
+            _PRICE_CALENDAR_JOB[key] = int(_PRICE_CALENDAR_JOB.get(key) or 0) + int(amount)
+    return True
+
+
+def _run_price_calendar_job(
+    job_id: str,
+    cfg: AppConfig,
+    hotel_code: str,
+    month: str,
+    force: bool,
+) -> None:
+    dates = [value for value in _price_calendar_month_dates(month) if value >= date.today().isoformat()]
+    provider = _provider_for_code(cfg, hotel_code)
+    existing = _price_calendar_data_snapshot(cfg, hotel_code, month)
+    fresh_dates = {day["date"] for day in existing["days"] if not day["stale"]}
+    _update_price_calendar_job(
+        job_id,
+        state="running",
+        running=True,
+        total=len(dates),
+        started_at=_now_wall(),
+        message="refreshing daily prices",
+    )
+    consecutive_errors = 0
+    live_checks = 0
+    try:
+        for index, stay_date in enumerate(dates):
+            if not force and stay_date in fresh_dates:
+                _update_price_calendar_job(
+                    job_id,
+                    done=index + 1,
+                    current_date=stay_date,
+                )
+                _increment_price_calendar_job(job_id, cached=1)
+                continue
+
+            cooldown = max(0, int(math.ceil(_provider_cooldown_until(provider) - _now_mono())))
+            if cooldown:
+                _update_price_calendar_job(
+                    job_id,
+                    state="rate_limited",
+                    running=False,
+                    retry_after_sec=cooldown,
+                    message="provider cooldown is active",
+                    completed_at=_now_wall(),
+                )
+                return
+
+            checkout_date = (date.fromisoformat(stay_date) + timedelta(days=1)).isoformat()
+            cfg.start_date = stay_date
+            cfg.end_date = checkout_date
+            try:
+                result = _check_hotel_cached(
+                    cfg,
+                    None,
+                    hotel_code,
+                    stay_date,
+                    checkout_date,
+                    allow_cache=not force,
+                    force_refresh=force,
+                )
+                result.provider = provider
+                _record_provider_result(provider, result)
+                _record_price_calendar_day(
+                    cfg, hotel_code, provider, stay_date, checkout_date, result
+                )
+                live_checks += 0 if result.from_cache and not result.cache_validated else 1
+                if result.available is None:
+                    consecutive_errors += 1
+                else:
+                    consecutive_errors = 0
+                _update_price_calendar_job(
+                    job_id,
+                    done=index + 1,
+                    current_date=stay_date,
+                    live_checks=live_checks,
+                )
+                _increment_price_calendar_job(
+                    job_id,
+                    successful=int(result.available is not None),
+                    errors=int(result.available is None),
+                )
+                if result.http_status in {429, 503}:
+                    _update_price_calendar_job(
+                        job_id,
+                        state="rate_limited",
+                        running=False,
+                        retry_after_sec=int(result.retry_after_sec or 30),
+                        message=f"provider returned HTTP {result.http_status}",
+                        completed_at=_now_wall(),
+                    )
+                    return
+                if consecutive_errors >= 3:
+                    _update_price_calendar_job(
+                        job_id,
+                        state="partial",
+                        running=False,
+                        message="stopped after repeated provider errors",
+                        completed_at=_now_wall(),
+                    )
+                    return
+            except Exception as exc:
+                consecutive_errors += 1
+                _log(f"[price-calendar] {hotel_code}/{stay_date}: {exc}")
+                _update_price_calendar_job(
+                    job_id,
+                    done=index + 1,
+                    current_date=stay_date,
+                    last_error=" ".join(str(exc).split())[:180],
+                )
+                _increment_price_calendar_job(job_id, errors=1)
+                if consecutive_errors >= 3:
+                    _update_price_calendar_job(
+                        job_id,
+                        state="partial",
+                        running=False,
+                        message="stopped after repeated provider errors",
+                        completed_at=_now_wall(),
+                    )
+                    return
+
+            if index < len(dates) - 1:
+                base_delay = max(0.75, min(5.0, float(cfg.per_hotel_delay_seconds or 1)))
+                if _RUN_REQUESTED:
+                    base_delay = max(2.0, base_delay)
+                time.sleep(_jittered_spacing(base_delay, min(25, cfg.request_jitter_percent)))
+
+        with _PRICE_CALENDAR_JOB_LOCK:
+            error_count = int(_PRICE_CALENDAR_JOB.get("errors") or 0)
+        state = "complete" if error_count == 0 else "partial"
+        _update_price_calendar_job(
+            job_id,
+            state=state,
+            running=False,
+            current_date=None,
+            message="price calendar refresh complete",
+            completed_at=_now_wall(),
+        )
+    except Exception as exc:
+        _log(f"[price-calendar] job failed: {exc}")
+        _update_price_calendar_job(
+            job_id,
+            state="failed",
+            running=False,
+            message=" ".join(str(exc).split())[:180],
+            completed_at=_now_wall(),
+        )
+
+
+def _start_price_calendar_job(
+    cfg: AppConfig,
+    hotel_code: str,
+    month: str,
+    force: bool = False,
+) -> Tuple[Dict[str, Any], bool]:
+    global _PRICE_CALENDAR_JOB, _PRICE_CALENDAR_THREAD
+    key = _price_calendar_job_key(cfg, hotel_code, month)
+    with _PRICE_CALENDAR_JOB_LOCK:
+        if _PRICE_CALENDAR_JOB.get("running"):
+            same = _PRICE_CALENDAR_JOB.get("key") == key
+            return deepcopy(_PRICE_CALENDAR_JOB), same
+        job_id = hashlib.sha256(f"{key}:{time.time_ns()}".encode("utf-8")).hexdigest()[:16]
+        _PRICE_CALENDAR_JOB = {
+            "id": job_id,
+            "key": key,
+            "hotel_code": hotel_code,
+            "month": month,
+            "state": "queued",
+            "running": True,
+            "force": bool(force),
+            "total": 0,
+            "done": 0,
+            "successful": 0,
+            "errors": 0,
+            "cached": 0,
+            "live_checks": 0,
+            "created_at": _now_wall(),
+        }
+        _PRICE_CALENDAR_THREAD = threading.Thread(
+            target=_run_price_calendar_job,
+            args=(job_id, deepcopy(cfg), hotel_code, month, bool(force)),
+            name="price-calendar-refresh",
+            daemon=True,
+        )
+        _PRICE_CALENDAR_THREAD.start()
+        return deepcopy(_PRICE_CALENDAR_JOB), True
+
+
+def price_calendar_status() -> Response:
+    with _CONFIG_LOCK:
+        cfg = deepcopy(_CONFIG)
+    try:
+        hotel_code, month, hotels = _price_calendar_context(
+            cfg,
+            request.args.get("hotel_code", ""),
+            request.args.get("month", ""),
+        )
+    except ValueError as exc:
+        return jsonify({"ok": False, "message": str(exc)}), 400
+    return jsonify(_price_calendar_response_payload(cfg, hotel_code, month, hotels))
+
+
+def price_calendar_refresh() -> Response:
+    payload = request.get_json(force=True, silent=True) or {}
+    with _CONFIG_LOCK:
+        cfg = deepcopy(_CONFIG)
+    try:
+        hotel_code, month, hotels = _price_calendar_context(
+            cfg,
+            payload.get("hotel_code", ""),
+            payload.get("month", ""),
+        )
+    except ValueError as exc:
+        return jsonify({"ok": False, "message": str(exc)}), 400
+    cfg.engine = "http"
+    job, accepted = _start_price_calendar_job(
+        cfg,
+        hotel_code,
+        month,
+        bool(payload.get("force", False)),
+    )
+    if not accepted:
+        return jsonify({
+            "ok": False,
+            "message": "another price calendar refresh is already running",
+            "job": job,
+        }), 409
+    response = _price_calendar_response_payload(cfg, hotel_code, month, hotels)
+    response["job"] = job
+    return jsonify(response), 202
 
 
 def events_status() -> Response:

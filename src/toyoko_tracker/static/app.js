@@ -38,6 +38,12 @@
             let PWA_INSTALL_PROMPT = null;
             let LAST_TREND_REFRESH = 0;
             let LAST_TREND_DATA = null;
+            let PRICE_CALENDAR_DATA = null;
+            let PRICE_CALENDAR_MONTH = '';
+            let PRICE_CALENDAR_HOTEL = '';
+            let PRICE_CALENDAR_REQUEST = 0;
+            let PRICE_CALENDAR_POLL_TIMER = null;
+            let PRICE_CALENDAR_AUTO_KEY = '';
             let LAST_HOME_REFRESH = 0;
             let LAST_HOME_PAYLOAD = null;
             let LAST_CONFIG = {};
@@ -51,7 +57,7 @@
             const THEME_KEY = 'toyoko-chan-theme-v1';
             const LANGUAGE_KEY = 'toyoko-chan-language-v1';
             const GUIDE_SEEN_KEY = 'toyoko-chan-guide-seen-version';
-            const APP_VIEWS = ['home', 'search', 'monitor', 'search-settings', 'push-settings', 'interface'];
+            const APP_VIEWS = ['home', 'search', 'price', 'monitor', 'search-settings', 'push-settings', 'interface'];
             let ACTIVE_APP_VIEW = 'home';
             let THEME_PREFERENCE = 'system';
             let GUIDE_STEP = 0;
@@ -1051,6 +1057,58 @@
               homeQuickKicker:'Quick Actions', homeQuickTitle:'Start something new', homeQuickArea:'Area search', homeQuickRadius:'Radius search', homeQuickHistory:'Search history', homeQuickPush:'Push settings', homeHealthKicker:'System Status', homeHealthTitle:'Service health', homeChecking:'Checking', homeHealthy:'All systems normal', homeAttention:'Needs attention', homeConnection:'WebUI connection', homeProviders:'Hotel providers', homeNotifications:'Notification channels', homeHistoryData:'Historical data', homeNormal:'Normal', homeWaiting:'Waiting', homeEnabledChannels:'{count} enabled', homeHistoryRecords:'{count} records', homeProviderReady:'{healthy}/{total} healthy', homeNoProviderChecks:'Waiting for first scan',
               homeRunningSummary:'Monitoring {count} hotels and watching for new vacancy changes.', homeStoppedSummary:'Loaded {count} hotels. Review the conditions and start monitoring when ready.', homeEmptySummary:'Choose dates and hotels, then Toyoko Chan will watch for vacancy changes.', homeGuestRoom:'{people} guests · {rooms} rooms', homeProviderCount:'{count} brands', eventAvailable:'Room available', eventUnavailable:'No longer available', eventCountChanged:'Room count changed', eventReminder:'Availability reminder', eventSearchError:'Search needs review', eventStarted:'Search started', eventStopped:'Search stopped', eventGeneric:'Monitoring event', homeJustNow:'Just now', homeMinutesAgo:'{count}m ago', homeHoursAgo:'{count}h ago', homeAvailabilityPrediction:'Availability {probability}% · confidence {confidence}%', homeNoPrediction:'Collecting samples'
             });
+            const PRICE_CALENDAR_UI = {
+              zh_cn: {
+                navPrice:'价格', priceEyebrow:'住宿价格视图', priceTitle:'价格日历', priceSubtitle:'按天查看已选酒店的一晚最低价、会员价与空房状态。', priceHotel:'酒店',
+                priceLowest:'本月最低价', priceMemberLowest:'会员最低 {price}', priceAvailableDays:'有房日期', priceCoverage:'日历覆盖', priceRecentUpdate:'最近更新', priceWaitingQuery:'等待查询', priceOnDemand:'按需载入', priceNeverQueried:'尚未查询',
+                priceThisMonth:'本月', priceRefreshMonth:'刷新本月', priceLoading:'正在读取价格', priceProgress:'{done} / {total} 天 · {date}', priceAvailable:'有房', priceSoldOut:'满房', priceCheck:'待确认', priceNotLoaded:'未查询', pricePast:'已过期', priceMember:'会员 {price}',
+                priceBookingNote:'点击有报价的日期可打开官网预订页', priceSelectHotel:'先选择酒店', priceSelectHotelCopy:'在空房检索中勾选酒店后，即可查看价格日历。', priceGoSearch:'前往空房检索',
+                priceGuestRoom:'{people} 人 · {rooms} 房', priceFreshCoverage:'{fresh} 天为最新数据', priceAvailabilityNote:'{full} 天满房 · {unknown} 天待确认', priceStaleNote:'{count} 天数据待刷新', priceNoStale:'当前数据有效',
+                priceRefreshComplete:'本月价格已更新', priceRefreshPartial:'已取得部分日期，稍后可继续刷新', priceRefreshLimited:'访问节奏已放缓，请稍后继续', priceRefreshBusy:'正在刷新另一家酒店', priceRefreshFailed:'价格读取出现错误', priceQueued:'价格查询已排队', priceNoQuote:'暂无报价', priceOpenBooking:'打开 {date} 官网预订页',
+                priceSmokingAll:'不限吸烟条件', priceSmokingNon:'无烟房', priceSmokingYes:'吸烟房', priceRoomAny:'不限房型', priceRoomSingle:'单人房', priceRoomDouble:'大床房', priceRoomTwin:'双床房', priceMembershipMember:'会员价格优先', priceMembershipNon:'非会员价格', priceMembershipUnknown:'同时显示价格'
+              },
+              zh_tw: {
+                navPrice:'價格', priceEyebrow:'住宿價格檢視', priceTitle:'價格日曆', priceSubtitle:'按日查看已選飯店的一晚最低價、會員價與空房狀態。', priceHotel:'飯店',
+                priceLowest:'本月最低價', priceMemberLowest:'會員最低 {price}', priceAvailableDays:'有房日期', priceCoverage:'日曆覆蓋', priceRecentUpdate:'最近更新', priceWaitingQuery:'等待查詢', priceOnDemand:'按需載入', priceNeverQueried:'尚未查詢',
+                priceThisMonth:'本月', priceRefreshMonth:'重新整理本月', priceLoading:'正在讀取價格', priceProgress:'{done} / {total} 天 · {date}', priceAvailable:'有房', priceSoldOut:'客滿', priceCheck:'待確認', priceNotLoaded:'未查詢', pricePast:'已過期', priceMember:'會員 {price}',
+                priceBookingNote:'點擊有報價的日期可開啟官網預訂頁', priceSelectHotel:'先選擇飯店', priceSelectHotelCopy:'在空房搜尋中勾選飯店後，即可查看價格日曆。', priceGoSearch:'前往空房搜尋',
+                priceGuestRoom:'{people} 人 · {rooms} 房', priceFreshCoverage:'{fresh} 天為最新資料', priceAvailabilityNote:'{full} 天客滿 · {unknown} 天待確認', priceStaleNote:'{count} 天資料待重新整理', priceNoStale:'目前資料有效',
+                priceRefreshComplete:'本月價格已更新', priceRefreshPartial:'已取得部分日期，稍後可繼續重新整理', priceRefreshLimited:'存取節奏已放緩，請稍後繼續', priceRefreshBusy:'正在重新整理另一家飯店', priceRefreshFailed:'價格讀取發生錯誤', priceQueued:'價格查詢已排隊', priceNoQuote:'暫無報價', priceOpenBooking:'開啟 {date} 官網預訂頁',
+                priceSmokingAll:'不限吸菸條件', priceSmokingNon:'禁菸房', priceSmokingYes:'吸菸房', priceRoomAny:'不限房型', priceRoomSingle:'單人房', priceRoomDouble:'雙人床房', priceRoomTwin:'雙床房', priceMembershipMember:'會員價格優先', priceMembershipNon:'非會員價格', priceMembershipUnknown:'同時顯示價格'
+              },
+              ja: {
+                navPrice:'料金', priceEyebrow:'宿泊料金ビュー', priceTitle:'料金カレンダー', priceSubtitle:'選択したホテルの1泊最低料金、会員料金、空室状況を日別に確認できます。', priceHotel:'ホテル',
+                priceLowest:'今月の最低料金', priceMemberLowest:'会員最安 {price}', priceAvailableDays:'空室ありの日', priceCoverage:'カレンダー取得状況', priceRecentUpdate:'最終更新', priceWaitingQuery:'検索待ち', priceOnDemand:'必要時に取得', priceNeverQueried:'未検索',
+                priceThisMonth:'今月', priceRefreshMonth:'今月を更新', priceLoading:'料金を取得中', priceProgress:'{done} / {total} 日 · {date}', priceAvailable:'空室あり', priceSoldOut:'満室', priceCheck:'要確認', priceNotLoaded:'未検索', pricePast:'終了', priceMember:'会員 {price}',
+                priceBookingNote:'料金のある日をクリックすると公式予約ページを開きます', priceSelectHotel:'ホテルを選択してください', priceSelectHotelCopy:'空室検索でホテルを選択すると料金カレンダーを表示できます。', priceGoSearch:'空室検索へ',
+                priceGuestRoom:'{people} 名 · {rooms} 室', priceFreshCoverage:'最新データ {fresh} 日', priceAvailabilityNote:'満室 {full} 日 · 要確認 {unknown} 日', priceStaleNote:'{count} 日分を更新予定', priceNoStale:'データは最新です',
+                priceRefreshComplete:'今月の料金を更新しました', priceRefreshPartial:'一部の日付を取得しました。後で続きを更新できます', priceRefreshLimited:'取得間隔を調整しました。後でもう一度お試しください', priceRefreshBusy:'別のホテルを更新中です', priceRefreshFailed:'料金の取得でエラーが発生しました', priceQueued:'料金検索を開始します', priceNoQuote:'料金なし', priceOpenBooking:'{date} の公式予約ページを開く',
+                priceSmokingAll:'喫煙条件なし', priceSmokingNon:'禁煙室', priceSmokingYes:'喫煙室', priceRoomAny:'部屋タイプ指定なし', priceRoomSingle:'シングル', priceRoomDouble:'ダブル', priceRoomTwin:'ツイン', priceMembershipMember:'会員料金を優先', priceMembershipNon:'一般料金', priceMembershipUnknown:'両方の料金を表示'
+              },
+              ko: {
+                navPrice:'가격', priceEyebrow:'숙박 가격 보기', priceTitle:'가격 달력', priceSubtitle:'선택한 호텔의 1박 최저가, 회원가와 객실 상태를 날짜별로 확인합니다.', priceHotel:'호텔',
+                priceLowest:'이번 달 최저가', priceMemberLowest:'회원 최저 {price}', priceAvailableDays:'객실 있는 날짜', priceCoverage:'달력 조회 범위', priceRecentUpdate:'최근 업데이트', priceWaitingQuery:'조회 대기', priceOnDemand:'필요할 때 불러오기', priceNeverQueried:'조회 전',
+                priceThisMonth:'이번 달', priceRefreshMonth:'이번 달 새로고침', priceLoading:'가격 불러오는 중', priceProgress:'{done} / {total}일 · {date}', priceAvailable:'객실 있음', priceSoldOut:'만실', priceCheck:'확인 필요', priceNotLoaded:'조회 전', pricePast:'지난 날짜', priceMember:'회원 {price}',
+                priceBookingNote:'가격이 있는 날짜를 누르면 공식 예약 페이지를 엽니다', priceSelectHotel:'호텔을 먼저 선택하세요', priceSelectHotelCopy:'빈 객실 검색에서 호텔을 선택하면 가격 달력을 볼 수 있습니다.', priceGoSearch:'빈 객실 검색으로',
+                priceGuestRoom:'{people}명 · {rooms}실', priceFreshCoverage:'최신 데이터 {fresh}일', priceAvailabilityNote:'만실 {full}일 · 확인 필요 {unknown}일', priceStaleNote:'{count}일 데이터 새로고침 필요', priceNoStale:'현재 데이터가 최신입니다',
+                priceRefreshComplete:'이번 달 가격을 업데이트했습니다', priceRefreshPartial:'일부 날짜를 불러왔습니다. 나중에 이어서 새로고침할 수 있습니다', priceRefreshLimited:'조회 속도를 조절했습니다. 잠시 후 다시 시도하세요', priceRefreshBusy:'다른 호텔을 새로고침 중입니다', priceRefreshFailed:'가격을 불러오는 중 오류가 발생했습니다', priceQueued:'가격 조회를 시작합니다', priceNoQuote:'가격 정보 없음', priceOpenBooking:'{date} 공식 예약 페이지 열기',
+                priceSmokingAll:'흡연 조건 무관', priceSmokingNon:'금연 객실', priceSmokingYes:'흡연 객실', priceRoomAny:'객실 유형 무관', priceRoomSingle:'싱글', priceRoomDouble:'더블', priceRoomTwin:'트윈', priceMembershipMember:'회원가 우선', priceMembershipNon:'일반 가격', priceMembershipUnknown:'두 가격 모두 표시'
+              },
+              en: {
+                navPrice:'Price Calendar', priceEyebrow:'Stay price view', priceTitle:'Price Calendar', priceSubtitle:'Review nightly lowest prices, member rates, and availability for every selected hotel.', priceHotel:'Hotel',
+                priceLowest:'Lowest this month', priceMemberLowest:'Member low {price}', priceAvailableDays:'Available dates', priceCoverage:'Calendar coverage', priceRecentUpdate:'Last updated', priceWaitingQuery:'Waiting to check', priceOnDemand:'Loaded on demand', priceNeverQueried:'Not checked yet',
+                priceThisMonth:'This month', priceRefreshMonth:'Refresh month', priceLoading:'Loading prices', priceProgress:'{done} / {total} days · {date}', priceAvailable:'Available', priceSoldOut:'Sold out', priceCheck:'Check', priceNotLoaded:'Not checked', pricePast:'Past', priceMember:'Member {price}',
+                priceBookingNote:'Select a quoted date to open the official booking page', priceSelectHotel:'Select a hotel first', priceSelectHotelCopy:'Choose hotels in Vacancy Search to view their price calendars.', priceGoSearch:'Go to Vacancy Search',
+                priceGuestRoom:'{people} guests · {rooms} rooms', priceFreshCoverage:'{fresh} days are fresh', priceAvailabilityNote:'{full} sold out · {unknown} need review', priceStaleNote:'{count} days need refresh', priceNoStale:'Current data is fresh',
+                priceRefreshComplete:'Monthly prices are up to date', priceRefreshPartial:'Some dates loaded; refresh again later to continue', priceRefreshLimited:'Request pacing was slowed; continue later', priceRefreshBusy:'Another hotel is being refreshed', priceRefreshFailed:'Price loading encountered an error', priceQueued:'Price check queued', priceNoQuote:'No quote', priceOpenBooking:'Open the official booking page for {date}',
+                priceSmokingAll:'Any smoking preference', priceSmokingNon:'Non-smoking', priceSmokingYes:'Smoking', priceRoomAny:'Any room type', priceRoomSingle:'Single', priceRoomDouble:'Double', priceRoomTwin:'Twin', priceMembershipMember:'Prefer member prices', priceMembershipNon:'Non-member prices', priceMembershipUnknown:'Show both prices'
+              }
+            };
+            Object.assign(SINGLE_UI_OVERRIDES.zh_cn, PRICE_CALENDAR_UI.zh_cn);
+            Object.assign(SINGLE_UI_OVERRIDES.zh_tw, PRICE_CALENDAR_UI.zh_tw);
+            Object.assign(SINGLE_UI_OVERRIDES.ja, PRICE_CALENDAR_UI.ja);
+            Object.assign(SINGLE_UI_OVERRIDES.ko, PRICE_CALENDAR_UI.ko);
+            Object.assign(EN_UI, PRICE_CALENDAR_UI.en);
             const TREND_READABLE_UI = {
               zh_cn: {
                 trendScopeCurrent:'仅显示当前入住日期、人数、房型等条件下的记录', trendHotel:'酒店', trendRange:'时间范围', trendDays:'{count} 天',
@@ -1234,6 +1292,12 @@
               if (next === 'home') {
                 if (LAST_HOME_PAYLOAD) renderHomeDashboard(LAST_HOME_PAYLOAD);
                 refreshHomeInsights(true);
+              }
+              if (next === 'price') {
+                preparePriceCalendar();
+              } else if (PRICE_CALENDAR_POLL_TIMER) {
+                clearTimeout(PRICE_CALENDAR_POLL_TIMER);
+                PRICE_CALENDAR_POLL_TIMER = null;
               }
               setTimeout(() => {
                 try { AREA_SELECTED_MAP?.invalidateSize(); } catch(e) {}
@@ -1424,6 +1488,30 @@
                 if (panel) setDetailsOpen(panel, true);
                 refreshTrends(true);
               });
+              document.getElementById('price-hotel-select')?.addEventListener('change', event => {
+                PRICE_CALENDAR_HOTEL = String(event.target?.value || '');
+                PRICE_CALENDAR_DATA = null;
+                loadPriceCalendar(false);
+              });
+              document.getElementById('price-hotel-prev')?.addEventListener('click', () => cyclePriceHotel(-1));
+              document.getElementById('price-hotel-next')?.addEventListener('click', () => cyclePriceHotel(1));
+              document.getElementById('price-month-prev')?.addEventListener('click', () => {
+                PRICE_CALENDAR_MONTH = shiftPriceMonth(PRICE_CALENDAR_MONTH, -1);
+                PRICE_CALENDAR_DATA = null;
+                loadPriceCalendar(false);
+              });
+              document.getElementById('price-month-next')?.addEventListener('click', () => {
+                PRICE_CALENDAR_MONTH = shiftPriceMonth(PRICE_CALENDAR_MONTH, 1);
+                PRICE_CALENDAR_DATA = null;
+                loadPriceCalendar(false);
+              });
+              document.getElementById('price-month-today')?.addEventListener('click', () => {
+                PRICE_CALENDAR_MONTH = priceCurrentMonth();
+                PRICE_CALENDAR_DATA = null;
+                loadPriceCalendar(false);
+              });
+              document.getElementById('price-calendar-refresh')?.addEventListener('click', () => startPriceCalendarRefresh(true));
+              document.getElementById('price-empty-action')?.addEventListener('click', () => switchAppView('search'));
               document.querySelectorAll('[data-home-quick]').forEach(button => {
                 button.addEventListener('click', () => openHomeQuickAction(button.dataset.homeQuick || 'area'));
               });
@@ -1509,6 +1597,302 @@
               setTimeout(() => {
                 if (storageGet(GUIDE_SEEN_KEY, '') !== guideAppVersion()) openGuide(true);
               }, 450);
+            }
+            function priceCalendarHotels(){
+              const selected = Array.isArray(LAST_CONFIG?.selected_hotels) ? LAST_CONFIG.selected_hotels : [];
+              const selectedByCode = new Map(selected.map(item => [String(item.code || ''), item]));
+              return (Array.isArray(LAST_CONFIG?.hotel_codes) ? LAST_CONFIG.hotel_codes : []).map(rawCode => {
+                const code = String(rawCode || '');
+                const item = selectedByCode.get(code) || {};
+                return {
+                  code,
+                  display_code:String(item.display_code || code),
+                  provider:String(item.provider || (code.includes(':') ? code.split(':')[0] : 'toyoko')),
+                  name:String(item.name_primary || item.name || item.name_en || item.name_zh_cn || code)
+                };
+              }).filter(item => item.code);
+            }
+            function priceCurrentMonth(){
+              const now = new Date();
+              return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+            }
+            function shiftPriceMonth(month, offset){
+              const [year, monthNumber] = String(month || priceCurrentMonth()).split('-').map(Number);
+              const shifted = new Date(year, monthNumber - 1 + Number(offset || 0), 1);
+              return `${shifted.getFullYear()}-${String(shifted.getMonth() + 1).padStart(2, '0')}`;
+            }
+            function priceLocale(){
+              return ({zh_cn:'zh-CN', zh_tw:'zh-TW', ja:'ja-JP', ko:'ko-KR', en:'en-US'})[currentLang()] || 'en-US';
+            }
+            function priceSafe(value){
+              return String(value == null ? '' : value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+            }
+            function priceYen(value, fallback=''){
+              if (value == null || value === '') return String(fallback || '—');
+              const amount = Number(value);
+              if (Number.isFinite(amount)) return `¥${new Intl.NumberFormat(priceLocale()).format(amount)}`;
+              return String(fallback || '—');
+            }
+            function priceDate(dateText){
+              const [year, month, day] = String(dateText || '').split('-').map(Number);
+              return new Date(year, month - 1, day);
+            }
+            function priceMonthLabel(month){
+              const [year, monthNumber] = String(month || priceCurrentMonth()).split('-').map(Number);
+              return new Intl.DateTimeFormat(priceLocale(), {year:'numeric', month:'long'}).format(new Date(year, monthNumber - 1, 1));
+            }
+            function setPriceCalendarEmpty(empty){
+              const emptyState = document.getElementById('price-empty-state');
+              const conditionStrip = document.getElementById('price-condition-strip');
+              const summary = document.querySelector('.price-summary-grid');
+              const card = document.querySelector('.price-calendar-card');
+              if (emptyState) emptyState.hidden = !empty;
+              if (conditionStrip) conditionStrip.hidden = empty;
+              if (summary) summary.hidden = empty;
+              if (card) card.hidden = empty;
+            }
+            function renderPriceHotelOptions(hotels){
+              const select = document.getElementById('price-hotel-select');
+              if (!select) return;
+              const list = Array.isArray(hotels) ? hotels : [];
+              if (!list.some(item => item.code === PRICE_CALENDAR_HOTEL)) PRICE_CALENDAR_HOTEL = list[0]?.code || '';
+              select.innerHTML = list.map(item => `<option value="${priceSafe(item.code)}">${priceSafe(item.display_code)} · ${priceSafe(item.name)}</option>`).join('');
+              select.value = PRICE_CALENDAR_HOTEL;
+              const disabled = list.length < 2;
+              const previous = document.getElementById('price-hotel-prev');
+              const next = document.getElementById('price-hotel-next');
+              if (previous) previous.disabled = disabled;
+              if (next) next.disabled = disabled;
+            }
+            function renderPriceConditions(conditions){
+              const strip = document.getElementById('price-condition-strip');
+              if (!strip) return;
+              const data = conditions || {};
+              const smokingKey = data.smoking === 'noSmoking' ? 'priceSmokingNon' : data.smoking === 'Smoking' ? 'priceSmokingYes' : 'priceSmokingAll';
+              const roomKey = ({single:'priceRoomSingle',double:'priceRoomDouble',twin:'priceRoomTwin'})[data.room_requirement] || 'priceRoomAny';
+              const membershipKey = data.membership_status === 'member' ? 'priceMembershipMember' : data.membership_status === 'non_member' ? 'priceMembershipNon' : 'priceMembershipUnknown';
+              strip.innerHTML = [
+                ['●', fmt('priceGuestRoom', {people:data.people || 1, rooms:data.rooms || 1})],
+                ['◐', tx(smokingKey)], ['▣', tx(roomKey)], ['¥', tx(membershipKey)]
+              ].map(([icon,label]) => `<span class="price-condition-chip"><i>${icon}</i>${priceSafe(label)}</span>`).join('');
+            }
+            function priceRelativeTime(timestamp){
+              const seconds = Math.max(0, Math.round(Date.now() / 1000 - Number(timestamp || 0)));
+              if (seconds < 60) return tx('homeJustNow');
+              if (seconds < 3600) return fmt('homeMinutesAgo', {count:Math.floor(seconds / 60)});
+              if (seconds < 86400) return fmt('homeHoursAgo', {count:Math.floor(seconds / 3600)});
+              return new Intl.DateTimeFormat(priceLocale(), {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'}).format(new Date(Number(timestamp) * 1000));
+            }
+            function priceQueryableDays(month){
+              const [year, monthNumber] = month.split('-').map(Number);
+              const days = new Date(year, monthNumber, 0).getDate();
+              const today = todayStr();
+              let count = 0;
+              for (let day = 1; day <= days; day += 1) {
+                const value = `${month}-${String(day).padStart(2, '0')}`;
+                if (value >= today) count += 1;
+              }
+              return count;
+            }
+            function renderPriceSummary(payload){
+              const summary = payload.summary || {};
+              const total = priceQueryableDays(payload.month);
+              const freshFuture = (payload.days || []).filter(day => day.date >= todayStr() && !day.stale).length;
+              setNodeText('#price-summary-lowest', priceYen(summary.lowest_price));
+              setNodeText('#price-summary-member', summary.lowest_member_price != null ? fmt('priceMemberLowest', {price:priceYen(summary.lowest_member_price)}) : tx('priceNoQuote'));
+              setNodeText('#price-summary-available', String(summary.available_days || 0));
+              setNodeText('#price-summary-available-note', fmt('priceAvailabilityNote', {full:summary.unavailable_days || 0, unknown:summary.unknown_days || 0}));
+              setNodeText('#price-summary-coverage', `${freshFuture} / ${total}`);
+              setNodeText('#price-summary-coverage-note', fmt('priceFreshCoverage', {fresh:freshFuture}));
+              setNodeText('#price-summary-updated', summary.last_updated_at ? priceRelativeTime(summary.last_updated_at) : '—');
+              setNodeText('#price-summary-updated-note', summary.stale_days ? fmt('priceStaleNote', {count:summary.stale_days}) : (summary.loaded_days ? tx('priceNoStale') : tx('priceNeverQueried')));
+            }
+            function renderPriceJob(job){
+              const status = document.getElementById('price-refresh-status');
+              const refresh = document.getElementById('price-calendar-refresh');
+              const state = job?.state || 'idle';
+              const active = Boolean(job?.running || state === 'busy');
+              if (refresh) refresh.disabled = active;
+              if (!status) return;
+              if (state === 'idle') {
+                status.hidden = true;
+                return;
+              }
+              const titles = {
+                queued:'priceQueued', running:'priceLoading', complete:'priceRefreshComplete', partial:'priceRefreshPartial',
+                rate_limited:'priceRefreshLimited', busy:'priceRefreshBusy', failed:'priceRefreshFailed'
+              };
+              status.hidden = false;
+              setNodeText('#price-refresh-title', tx(titles[state] || 'priceLoading'));
+              const done = Number(job.done || 0);
+              const total = Number(job.total || 0);
+              setNodeText('#price-refresh-detail', total ? fmt('priceProgress', {done, total, date:job.current_date || ''}) : '');
+              const progress = document.getElementById('price-refresh-progress-bar');
+              if (progress) progress.style.width = `${total ? Math.min(100, done * 100 / total) : (active ? 8 : 100)}%`;
+            }
+            function renderPriceWeekdays(){
+              const weekdays = document.getElementById('price-weekdays');
+              if (!weekdays) return;
+              const base = new Date(2026, 6, 12);
+              weekdays.innerHTML = Array.from({length:7}, (_, index) => {
+                const day = new Date(base.getFullYear(), base.getMonth(), base.getDate() + index);
+                const label = new Intl.DateTimeFormat(priceLocale(), {weekday:'short'}).format(day);
+                return `<span class="${index === 0 || index === 6 ? 'weekend' : ''}">${priceSafe(label)}</span>`;
+              }).join('');
+            }
+            function renderPriceCalendar(payload){
+              const grid = document.getElementById('price-calendar-grid');
+              if (!grid) return;
+              const month = payload.month;
+              const [year, monthNumber] = month.split('-').map(Number);
+              const firstWeekday = new Date(year, monthNumber - 1, 1).getDay();
+              const count = new Date(year, monthNumber, 0).getDate();
+              const trailing = (7 - ((firstWeekday + count) % 7)) % 7;
+              const dataByDate = new Map((payload.days || []).map(day => [day.date, day]));
+              const running = Boolean(payload.job?.running && payload.job?.state !== 'busy');
+              const cells = [];
+              for (let index = 0; index < firstWeekday; index += 1) cells.push('<div class="price-day-cell outside" aria-hidden="true"></div>');
+              for (let dayNumber = 1; dayNumber <= count; dayNumber += 1) {
+                const dateText = `${month}-${String(dayNumber).padStart(2, '0')}`;
+                const data = dataByDate.get(dateText);
+                const isPast = dateText < todayStr();
+                const isToday = dateText === todayStr();
+                const dateValue = priceDate(dateText);
+                const weekday = new Intl.DateTimeFormat(priceLocale(), {weekday:'short'}).format(dateValue);
+                let state = 'unloaded';
+                if (data?.available === true) state = 'available';
+                else if (data?.available === false) state = 'unavailable';
+                else if (data) state = 'unknown';
+                const loading = running && !data && !isPast;
+                let statusLabel = isPast && !data ? tx('pricePast') : tx(state === 'available' ? 'priceAvailable' : state === 'unavailable' ? 'priceSoldOut' : state === 'unknown' ? 'priceCheck' : 'priceNotLoaded');
+                let primaryPrice = '—';
+                let memberLine = '';
+                const membership = payload.conditions?.membership_status || 'member';
+                if (data?.available) {
+                  const useMember = membership === 'member' && data.min_member_price != null;
+                  primaryPrice = priceYen(useMember ? data.min_member_price : data.min_price, useMember ? data.min_member_price_text : data.min_price_text);
+                  if (data.min_member_price != null && !useMember) memberLine = fmt('priceMember', {price:priceYen(data.min_member_price, data.min_member_price_text)});
+                  else if (useMember && data.min_price != null) memberLine = `${tx('nonMemberPrice')} ${priceYen(data.min_price, data.min_price_text)}`;
+                } else if (data?.available === false) primaryPrice = tx('priceSoldOut');
+                else if (data) primaryPrice = tx('priceNoQuote');
+                const classes = ['price-day-cell', state, isPast ? 'past' : '', isToday ? 'today' : '', data?.stale ? 'stale' : '', loading ? 'price-day-loading' : ''].filter(Boolean).join(' ');
+                const content = `<span class="price-day-top"><span><b class="price-day-number">${dayNumber}</b><small class="price-day-week">${priceSafe(weekday)}</small></span><span class="price-day-status"><i></i>${priceSafe(statusLabel)}</span></span><strong class="price-day-price">${priceSafe(primaryPrice)}</strong><small class="price-day-member">${priceSafe(memberLine || ' ')}</small><small class="price-day-room ${data?.error_summary ? 'price-day-error' : ''}" title="${priceSafe(data?.error_summary || data?.room_type || '')}">${priceSafe(data?.room_type || data?.error_summary || '')}</small>`;
+                if (data?.url && data?.min_price != null) {
+                  cells.push(`<a class="${classes}" role="gridcell" href="${priceSafe(data.url)}" target="_blank" rel="noreferrer noopener" aria-label="${priceSafe(fmt('priceOpenBooking', {date:dateText}))}">${content}</a>`);
+                } else {
+                  cells.push(`<div class="${classes}" role="gridcell" aria-label="${priceSafe(`${dateText} ${statusLabel}`)}">${content}</div>`);
+                }
+              }
+              for (let index = 0; index < trailing; index += 1) cells.push('<div class="price-day-cell outside" aria-hidden="true"></div>');
+              grid.innerHTML = cells.join('');
+              renderPriceWeekdays();
+            }
+            function renderPriceCalendarPayload(payload){
+              PRICE_CALENDAR_DATA = payload;
+              PRICE_CALENDAR_MONTH = payload.month || PRICE_CALENDAR_MONTH || priceCurrentMonth();
+              PRICE_CALENDAR_HOTEL = payload.hotel?.code || PRICE_CALENDAR_HOTEL;
+              setPriceCalendarEmpty(false);
+              renderPriceHotelOptions(payload.hotels || []);
+              renderPriceConditions(payload.conditions || {});
+              renderPriceSummary(payload);
+              renderPriceJob(payload.job || {});
+              renderPriceCalendar(payload);
+              setNodeText('#price-month-title', priceMonthLabel(PRICE_CALENDAR_MONTH));
+              setNodeText('#price-month-hotel', payload.hotel ? `${payload.hotel.display_code} · ${payload.hotel.name}` : '—');
+              const previous = document.getElementById('price-month-prev');
+              const next = document.getElementById('price-month-next');
+              if (previous) previous.disabled = PRICE_CALENDAR_MONTH <= (payload.limits?.min_month || priceCurrentMonth());
+              if (next) next.disabled = PRICE_CALENDAR_MONTH >= (payload.limits?.max_month || shiftPriceMonth(priceCurrentMonth(), 12));
+            }
+            function schedulePriceCalendarPoll(){
+              if (PRICE_CALENDAR_POLL_TIMER) clearTimeout(PRICE_CALENDAR_POLL_TIMER);
+              if (ACTIVE_APP_VIEW !== 'price') return;
+              PRICE_CALENDAR_POLL_TIMER = setTimeout(() => loadPriceCalendar(true), 1400);
+            }
+            async function startPriceCalendarRefresh(force=false){
+              if (!PRICE_CALENDAR_HOTEL) return;
+              const refresh = document.getElementById('price-calendar-refresh');
+              if (refresh) refresh.disabled = true;
+              try {
+                const response = await fetch('/api/v1/price-calendar/refresh', {
+                  method:'POST', headers:{'Content-Type':'application/json'},
+                  body:JSON.stringify({hotel_code:PRICE_CALENDAR_HOTEL, month:PRICE_CALENDAR_MONTH, force:Boolean(force)})
+                });
+                const payload = await response.json();
+                if (response.status === 409 && payload.job) {
+                  PRICE_CALENDAR_AUTO_KEY = '';
+                  renderPriceJob({...payload.job, state:'busy', running:true});
+                  schedulePriceCalendarPoll();
+                  return;
+                }
+                if (!response.ok || !payload.ok) throw new Error(payload.message || `HTTP ${response.status}`);
+                renderPriceCalendarPayload(payload);
+                schedulePriceCalendarPoll();
+              } catch (error) {
+                renderPriceJob({state:'failed', running:false});
+              }
+            }
+            async function loadPriceCalendar(autoStart=true){
+              const requestId = ++PRICE_CALENDAR_REQUEST;
+              if (!PRICE_CALENDAR_HOTEL) return;
+              try {
+                const query = new URLSearchParams({hotel_code:PRICE_CALENDAR_HOTEL, month:PRICE_CALENDAR_MONTH || priceCurrentMonth()});
+                const response = await fetch(`/api/v1/price-calendar?${query}`);
+                const payload = await response.json();
+                if (requestId !== PRICE_CALENDAR_REQUEST) return;
+                if (!response.ok || !payload.ok) throw new Error(payload.message || `HTTP ${response.status}`);
+                renderPriceCalendarPayload(payload);
+                const job = payload.job || {};
+                if (job.running || job.state === 'busy') {
+                  schedulePriceCalendarPoll();
+                  return;
+                }
+                if (autoStart) {
+                  const total = priceQueryableDays(payload.month);
+                  const fresh = (payload.days || []).filter(day => day.date >= todayStr() && !day.stale).length;
+                  const autoKey = `${payload.hotel?.code || ''}:${payload.month}:${JSON.stringify(payload.conditions || {})}`;
+                  if (fresh < total && PRICE_CALENDAR_AUTO_KEY !== autoKey) {
+                    PRICE_CALENDAR_AUTO_KEY = autoKey;
+                    startPriceCalendarRefresh(false);
+                  }
+                }
+              } catch (error) {
+                if (requestId !== PRICE_CALENDAR_REQUEST) return;
+                const hotels = priceCalendarHotels();
+                if (!hotels.length) setPriceCalendarEmpty(true);
+                else renderPriceJob({state:'failed', running:false});
+              }
+            }
+            function preparePriceCalendar(autoStart=true){
+              const hotels = priceCalendarHotels();
+              if (!hotels.length) {
+                PRICE_CALENDAR_HOTEL = '';
+                setPriceCalendarEmpty(true);
+                renderPriceHotelOptions([]);
+                return;
+              }
+              setPriceCalendarEmpty(false);
+              if (!PRICE_CALENDAR_HOTEL || !hotels.some(item => item.code === PRICE_CALENDAR_HOTEL)) PRICE_CALENDAR_HOTEL = hotels[0].code;
+              if (!PRICE_CALENDAR_MONTH) PRICE_CALENDAR_MONTH = priceCurrentMonth();
+              renderPriceHotelOptions(hotels);
+              loadPriceCalendar(autoStart);
+            }
+            function cyclePriceHotel(direction){
+              const hotels = PRICE_CALENDAR_DATA?.hotels || priceCalendarHotels();
+              if (!hotels.length) return;
+              const current = Math.max(0, hotels.findIndex(item => item.code === PRICE_CALENDAR_HOTEL));
+              PRICE_CALENDAR_HOTEL = hotels[(current + direction + hotels.length) % hotels.length].code;
+              PRICE_CALENDAR_DATA = null;
+              preparePriceCalendar(false);
+            }
+            function localizePriceCalendar(){
+              [
+                ['#price-calendar-eyebrow','priceEyebrow'],['#price-calendar-title','priceTitle'],['#price-calendar-subtitle','priceSubtitle'],['#price-hotel-label','priceHotel'],
+                ['#price-summary-lowest-label','priceLowest'],['#price-summary-available-label','priceAvailableDays'],['#price-summary-coverage-label','priceCoverage'],['#price-summary-updated-label','priceRecentUpdate'],
+                ['#price-month-today','priceThisMonth'],['#price-calendar-refresh-label','priceRefreshMonth'],['#price-legend-available','priceAvailable'],['#price-legend-unavailable','priceSoldOut'],['#price-legend-unknown','priceCheck'],['#price-legend-unloaded','priceNotLoaded'],
+                ['#price-calendar-note','priceBookingNote'],['#price-empty-title','priceSelectHotel'],['#price-empty-copy','priceSelectHotelCopy'],['#price-empty-action','priceGoSearch']
+              ].forEach(([selector,key]) => setNodeText(selector, tx(key)));
+              if (PRICE_CALENDAR_DATA) renderPriceCalendarPayload(PRICE_CALENDAR_DATA);
             }
             const AREA_PRIMARY_NAME_BY_LANG = {
               ja: {
@@ -1597,7 +1981,7 @@
               setNodeText('.sidebar-brand div > span', tx('workspace'));
               setLabelFor('primary_language', tx('language'));
               const navLabels = document.querySelectorAll('.sidebar-nav .nav-label');
-              [tx('navHome'), tx('navSearch'), tx('navMonitor'), tx('searchSettings'), tx('pushSettings')]
+              [tx('navHome'), tx('navSearch'), tx('navPrice'), tx('navMonitor'), tx('searchSettings'), tx('pushSettings')]
                 .forEach((text, idx) => {
                   if (navLabels[idx]) navLabels[idx].textContent = text;
                   const button = navLabels[idx]?.closest('.sidebar-nav-item');
@@ -1624,9 +2008,10 @@
                 ['#home-health-notifications-label','homeNotifications'], ['#home-health-data-label','homeHistoryData']
               ].forEach(([selector,key]) => setNodeText(selector, tx(key)));
               if (LAST_HOME_PAYLOAD) renderHomeDashboard(LAST_HOME_PAYLOAD);
+              localizePriceCalendar();
               const viewHeaders = document.querySelectorAll('.app-view > .view-header');
-              const viewTitles = [tx('navHome'), tx('navSearch'), tx('navMonitor'), tx('searchSettings'), tx('pushSettings'), tx('interfaceSettings')];
-              const viewHelp = ['', tx('searchViewHelp'), tx('monitorViewHelp'), tx('searchSettingsViewHelp'), tx('pushSettingsViewHelp'), tx('interfaceViewHelp')];
+              const viewTitles = [tx('navHome'), tx('navSearch'), tx('navPrice'), tx('navMonitor'), tx('searchSettings'), tx('pushSettings'), tx('interfaceSettings')];
+              const viewHelp = ['', tx('searchViewHelp'), tx('priceSubtitle'), tx('monitorViewHelp'), tx('searchSettingsViewHelp'), tx('pushSettingsViewHelp'), tx('interfaceViewHelp')];
               viewHeaders.forEach((header, idx) => {
                 const title = header.querySelector('h1');
                 const help = header.querySelector('p');
@@ -4884,6 +5269,7 @@
                 renderProgress(j.progress);
                 if (j && j.config){
                   LAST_CONFIG = j.config;
+                  if (ACTIVE_APP_VIEW === 'price' && !PRICE_CALENDAR_HOTEL) setTimeout(preparePriceCalendar, 0);
                   setIfNotFocused('start_date', j.config.start_date);
                   setIfNotFocused('end_date', j.config.end_date);
                   setIfNotFocused('people', j.config.people);

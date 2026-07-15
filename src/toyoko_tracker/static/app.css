@@ -573,6 +573,65 @@
           }
           @media (max-width:420px){.home-metric-grid{grid-template-columns:1fr 1fr;}.home-metric-card{grid-template-columns:28px minmax(0,1fr);padding:9px;}.home-metric-icon{width:28px;height:28px;}.home-live-state{grid-template-columns:10px 1fr;}.home-next-scan{grid-column:2;margin-top:6px;padding:7px 0 0;border-top:1px solid #e3e9f0;border-left:0;}}
 
+          /* Price calendar */
+          .price-calendar-page{display:grid;gap:12px;min-width:0;}
+          .price-calendar-page [hidden]{display:none!important;}
+          .price-calendar-hero{position:relative;display:flex;align-items:center;justify-content:space-between;gap:20px;overflow:hidden;padding:18px 20px;border:1px solid #cbdcf0;border-radius:12px;background:linear-gradient(125deg,#f8fbff 0%,#edf5ff 62%,#f8fbff 100%);box-shadow:0 5px 18px rgba(30,77,130,.06);}
+          .price-calendar-hero::after{content:"¥";position:absolute;right:36%;top:-34px;color:rgba(21,94,194,.055);font-size:144px;font-weight:900;line-height:1;pointer-events:none;transform:rotate(8deg);}
+          .price-calendar-hero > div{position:relative;z-index:1;min-width:0;}
+          .price-calendar-eyebrow{display:block;margin-bottom:4px;color:#155ec2;font-size:9px;font-weight:900;letter-spacing:.13em;text-transform:uppercase;}
+          .price-calendar-hero h1{margin:0;color:#20344d;font-size:22px;letter-spacing:-.02em;}
+          .price-calendar-hero p{margin:5px 0 0;color:#69788b;font-size:11px;}
+          .price-hotel-switcher{display:flex;align-items:end;gap:6px;width:min(470px,48%);}
+          .price-hotel-switcher > button,.price-month-navigation button{display:grid;place-items:center;flex:0 0 34px;min-width:34px;height:34px;padding:0;border-color:#c9d5e3;background:#fff;color:#31506f;font-size:20px;box-shadow:0 2px 6px rgba(15,23,42,.04);}
+          .price-hotel-switcher label{display:grid;flex:1;gap:4px;margin:0;color:#68778a;font-size:9px;font-weight:800;}
+          .price-hotel-switcher select{width:100%;min-width:0;height:34px;padding-top:5px;padding-bottom:5px;border-color:#c9d5e3;background:#fff;font-size:11px;font-weight:700;}
+          .price-condition-strip{display:flex;align-items:center;gap:6px;min-height:31px;overflow-x:auto;padding:5px 7px;border:1px solid #e0e7ef;border-radius:9px;background:#fff;scrollbar-width:thin;}
+          .price-condition-chip{display:inline-flex;align-items:center;gap:5px;flex:0 0 auto;padding:4px 8px;border:1px solid #e2e8f0;border-radius:999px;background:#f8fafc;color:#536176;font-size:9px;font-weight:700;white-space:nowrap;}
+          .price-condition-chip i{color:#155ec2;font-style:normal;font-size:10px;}
+          .price-summary-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;}
+          .price-summary-card{position:relative;min-width:0;overflow:hidden;padding:11px 13px;border:1px solid #dde5ee;border-radius:10px;background:#fff;box-shadow:0 2px 8px rgba(15,23,42,.025);}
+          .price-summary-card::before{content:"";position:absolute;inset:0 auto 0 0;width:3px;background:#95a5b7;}
+          .price-summary-card.lowest::before{background:#3677d5;}.price-summary-card.available::before{background:#45a263;}.price-summary-card.coverage::before{background:#8b69c8;}.price-summary-card.updated::before{background:#d89c37;}
+          .price-summary-card span,.price-summary-card strong,.price-summary-card small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+          .price-summary-card span{color:#788598;font-size:9px;font-weight:800;}.price-summary-card strong{margin-top:4px;color:#24364d;font-size:17px;}.price-summary-card small{margin-top:2px;color:#7b8796;font-size:9px;}
+          .price-calendar-card{overflow:hidden;border:1px solid #d9e2ec;border-radius:12px;background:#fff;box-shadow:0 5px 18px rgba(15,23,42,.045);}
+          .price-calendar-toolbar{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:12px;padding:11px 13px;border-bottom:1px solid #e7ecf2;background:#fbfcfe;}
+          .price-month-navigation{display:flex;gap:5px;}
+          .price-month-navigation #price-month-today{flex-basis:auto;min-width:50px;padding:0 9px;font-size:10px;font-weight:800;}
+          .price-month-heading{min-width:0;text-align:center;}.price-month-heading strong,.price-month-heading span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}.price-month-heading strong{color:#24364d;font-size:15px;}.price-month-heading span{margin-top:2px;color:#788598;font-size:9px;}
+          #price-calendar-refresh{min-height:34px;padding:6px 11px;font-size:10px;white-space:nowrap;}
+          .price-refresh-status{display:grid;grid-template-columns:minmax(180px,1fr) minmax(180px,32%);align-items:center;gap:14px;padding:8px 13px;border-bottom:1px solid #d9e7f7;background:#f3f8fe;color:#31506f;}
+          .price-refresh-status > div:first-child{display:flex;align-items:center;gap:8px;min-width:0;}.price-refresh-status strong{font-size:10px;white-space:nowrap;}.price-refresh-status span{overflow:hidden;color:#6c7d90;font-size:9px;text-overflow:ellipsis;white-space:nowrap;}
+          .price-refresh-progress{height:5px;overflow:hidden;border-radius:999px;background:#dce8f5;}.price-refresh-progress i{display:block;width:0;height:100%;border-radius:inherit;background:linear-gradient(90deg,#63a2ed,#155ec2);transition:width .25s ease;}
+          .price-calendar-scroll{min-width:0;padding:10px 12px 12px;}
+          .price-weekdays,.price-calendar-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:5px;}
+          .price-weekdays{margin-bottom:5px;}.price-weekdays span{padding:4px;color:#7b8796;font-size:9px;font-weight:800;text-align:center;}.price-weekdays span.weekend{color:#b56666;}
+          .price-calendar-grid{grid-auto-rows:minmax(103px,auto);}
+          .price-day-cell{position:relative;display:flex;flex-direction:column;min-width:0;padding:8px;border:1px solid #e1e7ee;border-radius:9px;background:#fff;color:#344054;text-decoration:none;transition:border-color .15s ease,box-shadow .15s ease,transform .15s ease;}
+          a.price-day-cell:hover{border-color:#9bbce5;box-shadow:0 4px 12px rgba(28,75,130,.1);color:#344054;transform:translateY(-1px);}
+          .price-day-cell.outside{border-color:transparent;background:#fafbfc;opacity:.4;}
+          .price-day-cell.past{background:#fafbfc;opacity:.62;}
+          .price-day-cell.today{border-color:#4d8fe2;box-shadow:inset 0 0 0 1px rgba(21,94,194,.13);}
+          .price-day-cell.available{border-color:#cce5d3;background:linear-gradient(180deg,#fbfefc,#f5fbf6);}.price-day-cell.unavailable{border-color:#ead7d7;background:#fffafa;}.price-day-cell.unknown{border-color:#eadfbe;background:#fffcf5;}.price-day-cell.stale::after{content:"";position:absolute;right:7px;bottom:7px;width:5px;height:5px;border-radius:50%;background:#d39b35;box-shadow:0 0 0 2px #fff;}
+          .price-day-top{display:flex;align-items:center;justify-content:space-between;gap:5px;}.price-day-number{display:grid;place-items:center;width:23px;height:23px;border-radius:7px;color:#33475f;font-size:11px;font-weight:900;}.today .price-day-number{background:#155ec2;color:#fff;}.price-day-week{display:none;color:#8994a2;font-size:8px;font-weight:700;}
+          .price-day-status{display:inline-flex;align-items:center;gap:4px;color:#7b8796;font-size:8px;font-weight:800;}.price-day-status i,.price-calendar-legend i{display:inline-block;width:7px;height:7px;border-radius:50%;background:#aeb7c3;}.available .price-day-status i,.price-calendar-legend .available i{background:#42a45e;}.unavailable .price-day-status i,.price-calendar-legend .unavailable i{background:#cf6262;}.unknown .price-day-status i,.price-calendar-legend .unknown i{background:#d4a13b;}.price-calendar-legend .unloaded i{background:#aeb7c3;}
+          .price-day-price{display:block;margin-top:9px;color:#253b55;font-size:14px;font-weight:900;letter-spacing:-.02em;}.available .price-day-price{color:#267440;}.price-day-member{display:block;min-height:13px;margin-top:2px;color:#517096;font-size:8px;font-weight:700;}.price-day-room{display:block;margin-top:auto;overflow:hidden;padding-top:6px;color:#7a8697;font-size:8px;text-overflow:ellipsis;white-space:nowrap;}.price-day-error{color:#a86f19;}
+          .price-day-loading{overflow:hidden;}.price-day-loading::before{content:"";position:absolute;inset:0;background:linear-gradient(105deg,transparent 20%,rgba(255,255,255,.7) 40%,transparent 60%);animation:priceShimmer 1.5s linear infinite;transform:translateX(-100%);}.price-day-loading .price-day-price{width:65%;height:12px;border-radius:4px;background:#e8edf3;color:transparent;}.price-day-loading .price-day-member{width:48%;height:8px;border-radius:4px;background:#eef2f6;color:transparent;}
+          @keyframes priceShimmer{to{transform:translateX(100%);}}
+          .price-calendar-legend{display:flex;align-items:center;gap:13px;flex-wrap:wrap;padding:9px 13px;border-top:1px solid #e7ecf2;background:#fbfcfd;color:#667085;font-size:8.5px;}.price-calendar-legend span{display:inline-flex;align-items:center;gap:5px;}.price-calendar-legend b{font-size:inherit;}.price-calendar-legend small{margin-left:auto;color:#8591a0;}
+          .price-empty-state{display:flex;align-items:center;justify-content:center;gap:20px;min-height:300px;padding:36px;border:1px dashed #cbd8e7;border-radius:12px;background:#fbfdff;text-align:left;}.price-empty-state img{width:90px;height:90px;object-fit:contain;}.price-empty-state h2{margin:0;color:#2b3e56;font-size:18px;}.price-empty-state p{margin:6px 0 14px;color:#738195;font-size:11px;}
+          body[data-theme="dark"] .price-calendar-hero{border-color:#3a506a;background:linear-gradient(125deg,#202833,#233246 62%,#202832);}body[data-theme="dark"] .price-calendar-hero h1,body[data-theme="dark"] .price-month-heading strong,body[data-theme="dark"] .price-summary-card strong,body[data-theme="dark"] .price-day-price,body[data-theme="dark"] .price-empty-state h2{color:#e8edf4;}
+          body[data-theme="dark"] .price-calendar-hero p,body[data-theme="dark"] .price-summary-card span,body[data-theme="dark"] .price-summary-card small,body[data-theme="dark"] .price-month-heading span,body[data-theme="dark"] .price-day-room{color:#a7b0bd;}
+          body[data-theme="dark"] .price-condition-strip,body[data-theme="dark"] .price-summary-card,body[data-theme="dark"] .price-calendar-card,body[data-theme="dark"] .price-day-cell,body[data-theme="dark"] .price-empty-state{border-color:#3a414b;background:#202329;}
+          body[data-theme="dark"] .price-condition-chip,body[data-theme="dark"] .price-calendar-toolbar,body[data-theme="dark"] .price-calendar-legend{border-color:#3a414b;background:#292d33;color:#b7c0cc;}
+          body[data-theme="dark"] .price-hotel-switcher select,body[data-theme="dark"] .price-hotel-switcher > button,body[data-theme="dark"] .price-month-navigation button{border-color:#46505d;background:#292d33;color:#d9e0e9;}
+          body[data-theme="dark"] .price-day-cell.available{border-color:#365f43;background:#23362a;}body[data-theme="dark"] .price-day-cell.unavailable{border-color:#623f3f;background:#352727;}body[data-theme="dark"] .price-day-cell.unknown{border-color:#645431;background:#373124;}body[data-theme="dark"] .price-day-cell.outside,body[data-theme="dark"] .price-day-cell.past{background:#24272c;}
+          body[data-theme="dark"] .available .price-day-price{color:#8bd39d;}body[data-theme="dark"] .price-day-number{color:#d8dee7;}body[data-theme="dark"] .price-refresh-status{border-color:#354b64;background:#243244;color:#c5d7ea;}
+          @media (max-width:900px){.price-calendar-hero{align-items:stretch;flex-direction:column;}.price-hotel-switcher{width:100%;}.price-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr));}.price-calendar-hero::after{right:4%;}.price-calendar-toolbar{grid-template-columns:auto minmax(0,1fr);}.price-calendar-toolbar #price-calendar-refresh{grid-column:1 / -1;}.price-refresh-status{grid-template-columns:1fr;gap:7px;}}
+          @media (max-width:700px){.price-calendar-scroll{padding:9px;}.price-weekdays{display:none;}.price-calendar-grid{grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:minmax(98px,auto);}.price-day-cell.outside{display:none;}.price-day-week{display:inline;}.price-calendar-legend small{flex-basis:100%;margin-left:0;}.price-calendar-hero{padding:15px;}.price-calendar-hero h1{font-size:19px;}}
+          @media (max-width:420px){.price-summary-grid{grid-template-columns:1fr 1fr;}.price-summary-card{padding:9px 10px;}.price-calendar-grid{grid-template-columns:1fr;}.price-month-heading{text-align:left;}.price-calendar-toolbar{gap:8px;}.price-empty-state{align-items:center;flex-direction:column;text-align:center;}}
+
           .app-view > .settings-panel{margin:0;background:#f8fafc;}
           .app-view > .settings-panel > summary{display:none;}
           .app-view > .settings-panel > .details-content{max-height:none!important;opacity:1!important;}

@@ -28,6 +28,7 @@
 - 🕘 搜索历史记录
 - 🛏 房型筛选：Single / Double / Twin
 - 💳 会员价 / 非会员价显示
+- 📅 为每家已选酒店提供按需刷新的月度价格日历
 - 🔔 本地桌面通知
 - 🤖 Telegram Bot 推送
 - 📱 Bark 推送，适合 iPhone / iPad

@@ -137,6 +137,16 @@ def provider_capabilities_status() -> Response:
     return _runtime.provider_capabilities_status()
 
 
+@app.route("/api/v1/price-calendar")
+def price_calendar_status() -> Response:
+    return _runtime.price_calendar_status()
+
+
+@app.route("/api/v1/price-calendar/refresh", methods=["POST"])
+def price_calendar_refresh() -> Response:
+    return _runtime.price_calendar_refresh()
+
+
 @app.route("/api/v1/events")
 def events_status() -> Response:
     return _runtime.events_status()
