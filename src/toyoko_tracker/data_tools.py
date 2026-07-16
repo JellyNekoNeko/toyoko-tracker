@@ -12,6 +12,7 @@ import tempfile
 import time
 import uuid
 import zipfile
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional, Sequence
@@ -203,13 +204,16 @@ def _read_json(path: Path, fallback: Any = None) -> Any:
 def _database_snapshot(source: Path, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     source.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(source, timeout=30) as source_connection:
+    with closing(sqlite3.connect(source, timeout=30)) as source_connection, source_connection:
         source_connection.execute("PRAGMA busy_timeout=30000")
         try:
             source_connection.execute("PRAGMA wal_checkpoint(PASSIVE)")
         except sqlite3.DatabaseError:
             pass
-        with sqlite3.connect(destination) as destination_connection:
+        with (
+            closing(sqlite3.connect(destination)) as destination_connection,
+            destination_connection,
+        ):
             source_connection.backup(destination_connection)
             destination_connection.execute("PRAGMA journal_mode=DELETE")
             result = destination_connection.execute("PRAGMA integrity_check").fetchone()
@@ -220,7 +224,7 @@ def _database_snapshot(source: Path, destination: Path) -> None:
 def _checkpoint_database(path: Path) -> None:
     if not path.exists():
         return
-    with sqlite3.connect(path, timeout=30) as connection:
+    with closing(sqlite3.connect(path, timeout=30)) as connection, connection:
         connection.execute("PRAGMA busy_timeout=30000")
         result = connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
         if result and int(result[0] or 0) != 0:
@@ -284,7 +288,7 @@ def _normalize_components(
 
 def _prune_snapshot(path: Path, exported_tables: Sequence[str]) -> dict[str, int]:
     keep = set(exported_tables)
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         connection.execute("PRAGMA foreign_keys=OFF")
         tables = _existing_tables(connection)
         for table in tables:
@@ -340,7 +344,7 @@ def create_export_archive(
         if purpose == "portable":
             table_counts = _prune_snapshot(snapshot, exported_tables)
         else:
-            with sqlite3.connect(snapshot) as connection:
+            with closing(sqlite3.connect(snapshot)) as connection, connection:
                 tables = _existing_tables(connection)
                 table_counts = {
                     table: _table_count(connection, table)
@@ -518,7 +522,7 @@ def preview_import_archive(
         temporary = Path(temporary_dir)
         manifest, _ = _read_validated_archive(archive, temporary)
         snapshot = temporary / "data" / "database.sqlite3"
-        with sqlite3.connect(snapshot) as source:
+        with closing(sqlite3.connect(snapshot)) as source, source:
             result = source.execute("PRAGMA integrity_check").fetchone()
             if not result or str(result[0]).lower() != "ok":
                 raise DataArchiveError("archive database failed its integrity check")
@@ -530,7 +534,7 @@ def preview_import_archive(
             }
         conflicts: dict[str, int] = {}
         if database.exists():
-            with sqlite3.connect(database) as current:
+            with closing(sqlite3.connect(database)) as current, current:
                 for table in manifest.get("exported_tables", []):
                     conflicts[table] = _conflict_count(current, snapshot, str(table))
         else:
@@ -635,7 +639,7 @@ def apply_import_archive(
         staged_database = temporary / "staged.sqlite3"
         _database_snapshot(database, staged_database)
         changed: dict[str, int] = {}
-        with sqlite3.connect(staged_database) as connection:
+        with closing(sqlite3.connect(staged_database)) as connection, connection:
             connection.execute("PRAGMA foreign_keys=OFF")
             connection.execute("ATTACH DATABASE ? AS import_source", (str(source_database),))
             current_tables = _existing_tables(connection)
@@ -812,7 +816,7 @@ def storage_status(
     tables: dict[str, int] = {}
     schema_version = 0
     if database.exists():
-        with sqlite3.connect(database) as connection:
+        with closing(sqlite3.connect(database)) as connection, connection:
             existing = _existing_tables(connection)
             tables = {
                 table: _table_count(connection, table)
@@ -890,7 +894,7 @@ def cleanup_storage(
     deleted: dict[str, int] = {}
     before = _directory_size(root)
     if database.exists():
-        with sqlite3.connect(database) as connection:
+        with closing(sqlite3.connect(database)) as connection, connection:
             connection.execute("PRAGMA foreign_keys=ON")
             if dry_run:
                 connection.execute("BEGIN")

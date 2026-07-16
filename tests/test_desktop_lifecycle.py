@@ -222,7 +222,6 @@ def test_linux_xdg_autostart(tmp_path):
     preferences = tmp_path / "desktop_preferences.json"
     with (
         patch.object(lifecycle.sys, "platform", "linux"),
-        patch.object(lifecycle.os, "name", "posix"),
         patch.object(lifecycle, "_linux_autostart_path", return_value=autostart),
         patch.object(lifecycle, "DESKTOP_PREFERENCES_PATH", str(preferences)),
     ):

@@ -4,6 +4,7 @@ import hashlib
 import json
 import sqlite3
 import zipfile
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -14,7 +15,7 @@ from toyoko_tracker.app import app
 
 def _database(path: Path, *, task_name: str = "Current", cache: bool = True) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         connection.executescript(
             """
             PRAGMA foreign_keys=ON;
@@ -63,7 +64,7 @@ def _database(path: Path, *, task_name: str = "Current", cache: bool = True) -> 
 
 
 def _task_name(path: Path) -> str:
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         return str(connection.execute(
             "SELECT name FROM monitor_tasks WHERE task_id='task-a'"
         ).fetchone()[0])
@@ -101,7 +102,7 @@ def test_portable_archive_has_manifest_hashes_and_omits_credentials(tmp_path: Pa
     assert "bot_token" not in settings
     assert "smtp_pass" not in settings
     assert settings["_configured_secrets"]["bot_token"] is True
-    with sqlite3.connect(exported_database) as connection:
+    with closing(sqlite3.connect(exported_database)) as connection, connection:
         assert connection.execute("SELECT COUNT(*) FROM scan_cache").fetchone()[0] == 0
         assert connection.execute("SELECT COUNT(*) FROM monitor_tasks").fetchone()[0] == 1
 
@@ -236,7 +237,7 @@ def test_cleanup_and_storage_status_only_remove_selected_history(tmp_path: Path)
     )
     assert preview["deleted"]["scan_cache"] == 1
     assert preview["deleted"]["scan_observations"] == 1
-    with sqlite3.connect(database) as connection:
+    with closing(sqlite3.connect(database)) as connection, connection:
         assert connection.execute("SELECT COUNT(*) FROM scan_cache").fetchone()[0] == 1
 
     data_tools.cleanup_storage(

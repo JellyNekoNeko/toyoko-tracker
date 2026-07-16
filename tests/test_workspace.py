@@ -2,6 +2,7 @@ import json
 import sqlite3
 import sys
 import tempfile
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
@@ -41,7 +42,7 @@ def test_workspace_schema_is_initialized_idempotently():
 
         assert first["schema_version"] == workspace.WORKSPACE_SCHEMA_VERSION
         assert second["schema_version"] == workspace.WORKSPACE_SCHEMA_VERSION
-        with sqlite3.connect(database) as connection:
+        with closing(sqlite3.connect(database)) as connection, connection:
             tables = {
                 row[0]
                 for row in connection.execute(
@@ -67,7 +68,7 @@ def test_workspace_v1_adds_runtime_revision_without_rewriting_tasks():
     cfg = _config()
     with tempfile.TemporaryDirectory() as tmp_dir:
         database = str(Path(tmp_dir) / "workspace.sqlite3")
-        with sqlite3.connect(database) as connection:
+        with closing(sqlite3.connect(database)) as connection, connection:
             connection.execute(
                 """
                 CREATE TABLE monitor_tasks (
@@ -351,7 +352,7 @@ def test_task_run_history_and_delete_cascade():
             )
             runs = workspace.list_task_runs(task["task_id"])
             workspace.delete_task(task["task_id"])
-            with sqlite3.connect(database) as connection:
+            with closing(sqlite3.connect(database)) as connection, connection:
                 remaining_runs = connection.execute(
                     "SELECT COUNT(*) FROM task_runs"
                 ).fetchone()[0]
@@ -494,7 +495,7 @@ def test_task_table_never_serializes_notification_fields_from_mapping():
         database = str(Path(tmp_dir) / "workspace.sqlite3")
         with patch.object(workspace, "HOTEL_DATABASE_PATH", database):
             workspace.create_task("Tokyo", config, task_id="tokyo")
-            with sqlite3.connect(database) as connection:
+            with closing(sqlite3.connect(database)) as connection, connection:
                 stored = connection.execute(
                     "SELECT config_json FROM monitor_tasks WHERE task_id='tokyo'"
                 ).fetchone()[0]

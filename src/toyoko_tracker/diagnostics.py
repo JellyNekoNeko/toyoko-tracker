@@ -11,6 +11,7 @@ import sqlite3
 import sys
 import tempfile
 import zipfile
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional, Sequence
@@ -83,7 +84,12 @@ def _database_health(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {"exists": False, "integrity": "missing", "quick_check": "missing"}
     try:
-        with sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=10) as connection:
+        with (
+            closing(
+                sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=10)
+            ) as connection,
+            connection,
+        ):
             quick = connection.execute("PRAGMA quick_check").fetchone()
             integrity = str(quick[0]) if quick else "unknown"
             return {

@@ -286,6 +286,9 @@ def autostart_status() -> Dict[str, Any]:
         if sys.platform == "darwin":
             enabled = _mac_launch_agent_path().exists()
             method = "launch-agent"
+        elif sys.platform.startswith("linux"):
+            enabled = _linux_autostart_path().exists()
+            method = "xdg-autostart"
         elif os.name == "nt":
             import winreg
 
@@ -296,9 +299,6 @@ def autostart_status() -> Dict[str, Any]:
             ) as key:
                 winreg.QueryValueEx(key, "ToyokoTracker")
             enabled = True
-        elif sys.platform.startswith("linux"):
-            enabled = _linux_autostart_path().exists()
-            method = "xdg-autostart"
     except (OSError, ImportError):
         enabled = False
     return {"enabled": enabled, "method": method}
@@ -324,6 +324,22 @@ def set_autostart(enabled: bool) -> Dict[str, Any]:
             )
         else:
             path.unlink(missing_ok=True)
+    elif sys.platform.startswith("linux"):
+        path = _linux_autostart_path()
+        if enabled:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            escaped = " ".join(shlex.quote(item) for item in command)
+            path.write_text(
+                "[Desktop Entry]\n"
+                "Type=Application\n"
+                f"Name={APP_NAME}\n"
+                f"Exec={escaped}\n"
+                "Terminal=false\n"
+                "X-GNOME-Autostart-enabled=true\n",
+                encoding="utf-8",
+            )
+        else:
+            path.unlink(missing_ok=True)
     elif os.name == "nt":
         import winreg
 
@@ -344,22 +360,6 @@ def set_autostart(enabled: bool) -> Dict[str, Any]:
                     winreg.DeleteValue(key, "ToyokoTracker")
                 except FileNotFoundError:
                     pass
-    elif sys.platform.startswith("linux"):
-        path = _linux_autostart_path()
-        if enabled:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            escaped = " ".join(shlex.quote(item) for item in command)
-            path.write_text(
-                "[Desktop Entry]\n"
-                "Type=Application\n"
-                f"Name={APP_NAME}\n"
-                f"Exec={escaped}\n"
-                "Terminal=false\n"
-                "X-GNOME-Autostart-enabled=true\n",
-                encoding="utf-8",
-            )
-        else:
-            path.unlink(missing_ok=True)
     else:
         raise OSError("desktop launch-at-login is unsupported on this platform")
     preferences = update_preferences({"launch_at_login": bool(enabled)})
@@ -386,21 +386,7 @@ def register_deep_link_scheme() -> Dict[str, Any]:
     )
     registered = sys.platform == "darwin" and bool(getattr(sys, "frozen", False))
     try:
-        if os.name == "nt":
-            import winreg
-
-            root = rf"Software\Classes\{DEEP_LINK_SCHEME}"
-            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, root) as key:
-                winreg.SetValueEx(key, "", 0, winreg.REG_SZ, f"URL:{APP_NAME}")
-                winreg.SetValueEx(key, "URL Protocol", 0, winreg.REG_SZ, "")
-            with winreg.CreateKey(
-                winreg.HKEY_CURRENT_USER, root + r"\shell\open\command"
-            ) as key:
-                command = subprocess.list2cmdline([*_deep_link_command(), "%1"])
-                winreg.SetValueEx(key, "", 0, winreg.REG_SZ, command)
-            method = "registry-url-protocol"
-            registered = True
-        elif sys.platform.startswith("linux"):
+        if sys.platform.startswith("linux"):
             command = _deep_link_command()
             applications = Path.home() / ".local" / "share" / "applications"
             desktop_file = applications / "toyoko-tracker.desktop"
@@ -431,6 +417,20 @@ def register_deep_link_scheme() -> Dict[str, Any]:
                     check=False,
                 )
             method = "xdg-mime"
+            registered = True
+        elif os.name == "nt":
+            import winreg
+
+            root = rf"Software\Classes\{DEEP_LINK_SCHEME}"
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, root) as key:
+                winreg.SetValueEx(key, "", 0, winreg.REG_SZ, f"URL:{APP_NAME}")
+                winreg.SetValueEx(key, "URL Protocol", 0, winreg.REG_SZ, "")
+            with winreg.CreateKey(
+                winreg.HKEY_CURRENT_USER, root + r"\shell\open\command"
+            ) as key:
+                command = subprocess.list2cmdline([*_deep_link_command(), "%1"])
+                winreg.SetValueEx(key, "", 0, winreg.REG_SZ, command)
+            method = "registry-url-protocol"
             registered = True
     except (OSError, ImportError, subprocess.SubprocessError):
         registered = False

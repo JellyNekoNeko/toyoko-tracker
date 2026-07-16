@@ -3,6 +3,7 @@ import sqlite3
 import sys
 import tempfile
 import time
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
@@ -62,7 +63,7 @@ def test_historical_statistics_merge_sources_dedupe_and_expose_method():
     now = time.time()
     with tempfile.TemporaryDirectory() as tmp_dir:
         database = str(Path(tmp_dir) / "history.sqlite3")
-        with sqlite3.connect(database) as connection:
+        with closing(sqlite3.connect(database)) as connection, connection:
             connection.executescript(
                 """
                 CREATE TABLE scan_observations(
@@ -226,7 +227,7 @@ def test_split_stay_optimizer_requires_nightly_evidence_and_ranks_reproducibly()
 def test_travel_list_crud_priorities_links_budget_and_secret_free_exports():
     with tempfile.TemporaryDirectory() as tmp_dir:
         database = str(Path(tmp_dir) / "travel.sqlite3")
-        with sqlite3.connect(database) as connection:
+        with closing(sqlite3.connect(database)) as connection, connection:
             connection.execute(
                 "CREATE TABLE external_resources(resource_id TEXT PRIMARY KEY)"
             )
@@ -299,7 +300,7 @@ def test_travel_list_crud_priorities_links_budget_and_secret_free_exports():
 
             travel_lists.delete_travel_list(created["list_id"])
             assert travel_lists.list_travel_lists() == []
-        with sqlite3.connect(database) as connection:
+        with closing(sqlite3.connect(database)) as connection, connection:
             assert connection.execute(
                 "SELECT resource_id FROM external_resources"
             ).fetchone()[0] == "job-a"

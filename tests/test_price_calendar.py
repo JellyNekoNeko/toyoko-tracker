@@ -2,7 +2,7 @@ import json
 import sqlite3
 import sys
 import tempfile
-from contextlib import nullcontext
+from contextlib import closing, nullcontext
 from copy import deepcopy
 from datetime import date, timedelta
 from pathlib import Path
@@ -92,7 +92,7 @@ def test_price_calendar_persists_member_price_and_marks_stale_rows():
             assert snapshot["days"][0]["room_type"] == "Non-Smoking Single"
             assert snapshot["days"][0]["stale"] is False
 
-            with sqlite3.connect(database) as connection:
+            with closing(sqlite3.connect(database)) as connection, connection:
                 connection.execute(
                     "UPDATE price_calendar_days SET observed_at=observed_at-7200"
                 )

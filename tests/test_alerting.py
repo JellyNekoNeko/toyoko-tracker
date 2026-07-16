@@ -1,6 +1,7 @@
 import sqlite3
 import tempfile
 import time
+from contextlib import closing
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -98,7 +99,7 @@ def test_rule_crud_policy_revision_and_schema():
         assert policy["digest_mode"] == "daily"
         assert "rule-secret" not in str(created)
         assert "policy-secret" not in str(policy)
-        with sqlite3.connect(database) as connection:
+        with closing(sqlite3.connect(database)) as connection, connection:
             tables = {
                 row[0]
                 for row in connection.execute(
@@ -384,7 +385,7 @@ def test_daily_digest_due_time_and_restart_requeues_sending_batch():
             2026, 7, 17, 9, 0, tzinfo=timezone.utc
         ).timestamp()
         batch_id = events[0]["batch_id"]
-        with sqlite3.connect(database) as connection:
+        with closing(sqlite3.connect(database)) as connection, connection:
             connection.execute(
                 "UPDATE alert_batches SET state='sending',due_at=? WHERE batch_id=?",
                 (morning + 86400, batch_id),
