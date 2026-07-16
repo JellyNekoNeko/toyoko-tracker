@@ -19,7 +19,7 @@ from .settings import (
 )
 
 
-WORKSPACE_SCHEMA_VERSION = 2
+WORKSPACE_SCHEMA_VERSION = 3
 DEFAULT_TASK_ID = "default"
 _LOCK = threading.RLock()
 
@@ -265,6 +265,66 @@ def _migrate(connection: sqlite3.Connection) -> None:
             PRIMARY KEY(list_id, hotel_code),
             FOREIGN KEY(list_id) REFERENCES travel_lists(list_id) ON DELETE CASCADE
         );
+
+        CREATE TABLE IF NOT EXISTS flexible_stay_jobs (
+            job_id TEXT PRIMARY KEY,
+            task_id TEXT NOT NULL DEFAULT '',
+            name TEXT NOT NULL DEFAULT '',
+            earliest_date TEXT NOT NULL,
+            latest_date TEXT NOT NULL,
+            nights INTEGER NOT NULL,
+            shortcut TEXT NOT NULL DEFAULT 'custom',
+            status TEXT NOT NULL DEFAULT 'queued',
+            hotel_codes_json TEXT NOT NULL DEFAULT '[]',
+            hotels_json TEXT NOT NULL DEFAULT '[]',
+            conditions_json TEXT NOT NULL DEFAULT '{}',
+            total_work INTEGER NOT NULL DEFAULT 0,
+            completed_work INTEGER NOT NULL DEFAULT 0,
+            error_count INTEGER NOT NULL DEFAULT 0,
+            current_hotel TEXT NOT NULL DEFAULT '',
+            current_date TEXT NOT NULL DEFAULT '',
+            last_error TEXT NOT NULL DEFAULT '',
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            started_at REAL,
+            completed_at REAL
+        );
+        CREATE INDEX IF NOT EXISTS idx_flexible_stay_jobs_task_time
+            ON flexible_stay_jobs(task_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_flexible_stay_jobs_status
+            ON flexible_stay_jobs(status, updated_at);
+
+        CREATE TABLE IF NOT EXISTS flexible_stay_nights (
+            job_id TEXT NOT NULL,
+            hotel_code TEXT NOT NULL,
+            provider TEXT NOT NULL DEFAULT 'toyoko',
+            stay_date TEXT NOT NULL,
+            checkout_date TEXT NOT NULL,
+            state TEXT NOT NULL,
+            observed_at REAL NOT NULL,
+            result_json TEXT NOT NULL,
+            PRIMARY KEY(job_id, hotel_code, stay_date),
+            FOREIGN KEY(job_id) REFERENCES flexible_stay_jobs(job_id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_flexible_stay_nights_job_date
+            ON flexible_stay_nights(job_id, stay_date, hotel_code);
+
+        CREATE TABLE IF NOT EXISTS flexible_stay_results (
+            job_id TEXT NOT NULL,
+            hotel_code TEXT NOT NULL,
+            checkin_date TEXT NOT NULL,
+            checkout_date TEXT NOT NULL,
+            nights INTEGER NOT NULL,
+            state TEXT NOT NULL,
+            total_price INTEGER,
+            member_total_price INTEGER,
+            result_json TEXT NOT NULL,
+            updated_at REAL NOT NULL,
+            PRIMARY KEY(job_id, hotel_code, checkin_date, checkout_date),
+            FOREIGN KEY(job_id) REFERENCES flexible_stay_jobs(job_id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_flexible_stay_results_job_dates
+            ON flexible_stay_results(job_id, checkin_date, hotel_code);
         """
     )
     columns = {

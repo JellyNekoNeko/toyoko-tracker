@@ -56,6 +56,9 @@ def test_workspace_schema_is_initialized_idempotently():
             "notification_policies",
             "travel_lists",
             "travel_list_hotels",
+            "flexible_stay_jobs",
+            "flexible_stay_nights",
+            "flexible_stay_results",
         }.issubset(tables)
 
 

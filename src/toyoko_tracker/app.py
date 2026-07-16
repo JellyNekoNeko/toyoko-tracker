@@ -232,6 +232,24 @@ def price_calendar_refresh() -> Response:
     return _runtime.price_calendar_refresh()
 
 
+@app.route("/api/v1/flexible-stays", methods=["GET", "POST"])
+def flexible_stays_collection() -> Response:
+    return _runtime.flexible_stays_collection()
+
+
+@app.route("/api/v1/flexible-stays/<job_id>", methods=["GET", "DELETE"])
+def flexible_stay_detail(job_id: str) -> Response:
+    return _runtime.flexible_stay_detail(job_id)
+
+
+@app.route(
+    "/api/v1/flexible-stays/<job_id>/<action>",
+    methods=["POST"],
+)
+def flexible_stay_control(job_id: str, action: str) -> Response:
+    return _runtime.flexible_stay_control(job_id, action)
+
+
 @app.route("/api/v1/events")
 def events_status() -> Response:
     return _runtime.events_status()

@@ -30,6 +30,8 @@
 - 🛏 房型筛选：Single / Double / Twin
 - 💳 会员价 / 非会员价显示
 - 📅 为每家已选酒店提供按需刷新的月度价格日历
+- 🔀 灵活日期与周末搜索，支持多晚连续入住验证
+- 🌡 多酒店总价比较、价格热力图与每日最低价酒店
 - 🎯 目标价、会员价、降价和空房变化提醒
 - 🌙 静默时段、消息聚合、每日摘要与紧急规则
 - 🔔 本地桌面通知
@@ -44,6 +46,8 @@
 [`docs/PHASE1_MULTI_TASK_GUIDE.md`](docs/PHASE1_MULTI_TASK_GUIDE.md)。
 价格提醒与通知策略见
 [`docs/PHASE2_ALERTS_GUIDE.md`](docs/PHASE2_ALERTS_GUIDE.md)。
+灵活日期、连住验证与酒店价格比较见
+[`docs/PHASE3_FLEXIBLE_STAYS.md`](docs/PHASE3_FLEXIBLE_STAYS.md)。
 
 ---
 

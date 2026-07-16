@@ -44,6 +44,10 @@
             let PRICE_CALENDAR_REQUEST = 0;
             let PRICE_CALENDAR_POLL_TIMER = null;
             let PRICE_CALENDAR_AUTO_KEY = '';
+            let FLEXIBLE_STAY_JOB_ID = '';
+            let FLEXIBLE_STAY_DATA = null;
+            let FLEXIBLE_STAY_POLL_TIMER = null;
+            let FLEXIBLE_STAY_SHORTCUT = 'custom';
             let COMMAND_FEEDBACK_TIMER = null;
             let LAST_HOME_REFRESH = 0;
             let LAST_HOME_PAYLOAD = null;
@@ -1081,7 +1085,10 @@
                 priceBookingNote:'点击有报价的日期可打开官网预订页', priceSelectHotel:'先选择酒店', priceSelectHotelCopy:'在空房检索中勾选酒店后，即可查看价格日历。', priceGoSearch:'前往空房检索',
                 priceGuestRoom:'{people} 人 · {rooms} 房', priceFreshCoverage:'{fresh} 天为最新数据', priceAvailabilityNote:'{full} 天满房 · {unknown} 天待确认', priceStaleNote:'{count} 天数据待刷新', priceNoStale:'当前数据有效',
                 priceRefreshComplete:'本月价格已更新', priceRefreshPartial:'已取得部分日期，稍后可继续刷新', priceRefreshLimited:'访问节奏已放缓，请稍后继续', priceRefreshBusy:'正在刷新另一家酒店', priceRefreshFailed:'价格读取出现错误', priceQueued:'价格查询已排队', priceNoQuote:'暂无报价', priceOpenBooking:'打开 {date} 官网预订页',
-                priceSmokingAll:'不限吸烟条件', priceSmokingNon:'无烟房', priceSmokingYes:'吸烟房', priceRoomAny:'不限房型', priceRoomSingle:'单人房', priceRoomDouble:'大床房', priceRoomTwin:'双床房', priceMembershipMember:'会员价格优先', priceMembershipNon:'非会员价格', priceMembershipUnknown:'同时显示价格'
+                priceSmokingAll:'不限吸烟条件', priceSmokingNon:'无烟房', priceSmokingYes:'吸烟房', priceRoomAny:'不限房型', priceRoomSingle:'单人房', priceRoomDouble:'大床房', priceRoomTwin:'双床房', priceMembershipMember:'会员价格优先', priceMembershipNon:'非会员价格', priceMembershipUnknown:'同时显示价格',
+                flexibleEyebrow:'灵活日期与连住验证', flexibleTitle:'多酒店价格比较', flexibleSubtitle:'生成日期组合，逐晚验证连续入住，并计算总价、平均价和每日最低价。', flexibleWeekend:'周末', flexibleNext30:'未来 30 天', flexibleEarliest:'最早入住', flexibleLatest:'最晚退房', flexibleNights:'连住晚数', flexibleStart:'开始比较', flexiblePause:'暂停', flexibleResume:'继续',
+                flexibleQueued:'灵活日期搜索已排队', flexibleRunning:'正在读取逐晚价格', flexiblePaused:'搜索已暂停，可继续', flexibleComplete:'比较已完成', flexiblePartial:'已取得部分结果', flexibleFailed:'比较出现错误', flexibleCancelled:'搜索已取消', flexibleWaiting:'等待验证', flexibleProgress:'{done} / {total} · {hotel} {date}',
+                flexibleHotels:'酒店', flexibleCombinations:'日期组合', flexibleFullStays:'完整连住', flexibleLowestTotal:'最低总价', flexibleHotel:'酒店', flexibleAvailable:'可连住', flexibleUnavailable:'不可连住', flexibleIncomplete:'证据不完整', flexibleUnknown:'待确认', flexibleAverage:'均价 {price}/晚', flexibleRoomChange:'需要换房', flexibleSameRoom:'同房型连住', flexibleEvidenceNote:'连住结论来自逐晚证据，★ 表示该入住日最低总价', flexibleMissing:'{count} 个组合缺少价格或待确认'
               },
               zh_tw: {
                 navPrice:'價格日曆', priceEyebrow:'住宿價格檢視', priceTitle:'價格日曆', priceSubtitle:'按日查看已選飯店的一晚最低價、會員價與空房狀態。', priceHotel:'飯店',
@@ -1090,7 +1097,10 @@
                 priceBookingNote:'點擊有報價的日期可開啟官網預訂頁', priceSelectHotel:'先選擇飯店', priceSelectHotelCopy:'在空房搜尋中勾選飯店後，即可查看價格日曆。', priceGoSearch:'前往空房搜尋',
                 priceGuestRoom:'{people} 人 · {rooms} 房', priceFreshCoverage:'{fresh} 天為最新資料', priceAvailabilityNote:'{full} 天客滿 · {unknown} 天待確認', priceStaleNote:'{count} 天資料待重新整理', priceNoStale:'目前資料有效',
                 priceRefreshComplete:'本月價格已更新', priceRefreshPartial:'已取得部分日期，稍後可繼續重新整理', priceRefreshLimited:'存取節奏已放緩，請稍後繼續', priceRefreshBusy:'正在重新整理另一家飯店', priceRefreshFailed:'價格讀取發生錯誤', priceQueued:'價格查詢已排隊', priceNoQuote:'暫無報價', priceOpenBooking:'開啟 {date} 官網預訂頁',
-                priceSmokingAll:'不限吸菸條件', priceSmokingNon:'禁菸房', priceSmokingYes:'吸菸房', priceRoomAny:'不限房型', priceRoomSingle:'單人房', priceRoomDouble:'雙人床房', priceRoomTwin:'雙床房', priceMembershipMember:'會員價格優先', priceMembershipNon:'非會員價格', priceMembershipUnknown:'同時顯示價格'
+                priceSmokingAll:'不限吸菸條件', priceSmokingNon:'禁菸房', priceSmokingYes:'吸菸房', priceRoomAny:'不限房型', priceRoomSingle:'單人房', priceRoomDouble:'雙人床房', priceRoomTwin:'雙床房', priceMembershipMember:'會員價格優先', priceMembershipNon:'非會員價格', priceMembershipUnknown:'同時顯示價格',
+                flexibleEyebrow:'彈性日期與連住驗證', flexibleTitle:'多飯店價格比較', flexibleSubtitle:'產生日期組合，逐晚驗證連續入住，並計算總價、平均價與每日最低價。', flexibleWeekend:'週末', flexibleNext30:'未來 30 天', flexibleEarliest:'最早入住', flexibleLatest:'最晚退房', flexibleNights:'連住晚數', flexibleStart:'開始比較', flexiblePause:'暫停', flexibleResume:'繼續',
+                flexibleQueued:'彈性日期搜尋已排隊', flexibleRunning:'正在讀取逐晚價格', flexiblePaused:'搜尋已暫停，可繼續', flexibleComplete:'比較已完成', flexiblePartial:'已取得部分結果', flexibleFailed:'比較發生錯誤', flexibleCancelled:'搜尋已取消', flexibleWaiting:'等待驗證', flexibleProgress:'{done} / {total} · {hotel} {date}',
+                flexibleHotels:'飯店', flexibleCombinations:'日期組合', flexibleFullStays:'完整連住', flexibleLowestTotal:'最低總價', flexibleHotel:'飯店', flexibleAvailable:'可連住', flexibleUnavailable:'不可連住', flexibleIncomplete:'證據不完整', flexibleUnknown:'待確認', flexibleAverage:'平均 {price}/晚', flexibleRoomChange:'需要換房', flexibleSameRoom:'同房型連住', flexibleEvidenceNote:'連住結論來自逐晚證據，★ 表示該入住日最低總價', flexibleMissing:'{count} 個組合缺少價格或待確認'
               },
               ja: {
                 navPrice:'料金カレンダー', priceEyebrow:'宿泊料金ビュー', priceTitle:'料金カレンダー', priceSubtitle:'選択したホテルの1泊最低料金、会員料金、空室状況を日別に確認できます。', priceHotel:'ホテル',
@@ -1099,7 +1109,10 @@
                 priceBookingNote:'料金のある日をクリックすると公式予約ページを開きます', priceSelectHotel:'ホテルを選択してください', priceSelectHotelCopy:'空室検索でホテルを選択すると料金カレンダーを表示できます。', priceGoSearch:'空室検索へ',
                 priceGuestRoom:'{people} 名 · {rooms} 室', priceFreshCoverage:'最新データ {fresh} 日', priceAvailabilityNote:'満室 {full} 日 · 要確認 {unknown} 日', priceStaleNote:'{count} 日分を更新予定', priceNoStale:'データは最新です',
                 priceRefreshComplete:'今月の料金を更新しました', priceRefreshPartial:'一部の日付を取得しました。後で続きを更新できます', priceRefreshLimited:'取得間隔を調整しました。後でもう一度お試しください', priceRefreshBusy:'別のホテルを更新中です', priceRefreshFailed:'料金の取得でエラーが発生しました', priceQueued:'料金検索を開始します', priceNoQuote:'料金なし', priceOpenBooking:'{date} の公式予約ページを開く',
-                priceSmokingAll:'喫煙条件なし', priceSmokingNon:'禁煙室', priceSmokingYes:'喫煙室', priceRoomAny:'部屋タイプ指定なし', priceRoomSingle:'シングル', priceRoomDouble:'ダブル', priceRoomTwin:'ツイン', priceMembershipMember:'会員料金を優先', priceMembershipNon:'一般料金', priceMembershipUnknown:'両方の料金を表示'
+                priceSmokingAll:'喫煙条件なし', priceSmokingNon:'禁煙室', priceSmokingYes:'喫煙室', priceRoomAny:'部屋タイプ指定なし', priceRoomSingle:'シングル', priceRoomDouble:'ダブル', priceRoomTwin:'ツイン', priceMembershipMember:'会員料金を優先', priceMembershipNon:'一般料金', priceMembershipUnknown:'両方の料金を表示',
+                flexibleEyebrow:'日程の柔軟検索と連泊確認', flexibleTitle:'複数ホテル料金比較', flexibleSubtitle:'日程候補を生成し、各泊の連続空室、合計、平均、日別最安を確認します。', flexibleWeekend:'週末', flexibleNext30:'今後 30 日', flexibleEarliest:'最早チェックイン', flexibleLatest:'最終チェックアウト', flexibleNights:'泊数', flexibleStart:'比較開始', flexiblePause:'一時停止', flexibleResume:'再開',
+                flexibleQueued:'柔軟日程検索を待機中', flexibleRunning:'各泊の料金を取得中', flexiblePaused:'一時停止中・再開可能', flexibleComplete:'比較完了', flexiblePartial:'一部結果を取得', flexibleFailed:'比較エラー', flexibleCancelled:'検索を中止しました', flexibleWaiting:'確認待ち', flexibleProgress:'{done} / {total} · {hotel} {date}',
+                flexibleHotels:'ホテル', flexibleCombinations:'日程候補', flexibleFullStays:'連泊可能', flexibleLowestTotal:'最安合計', flexibleHotel:'ホテル', flexibleAvailable:'連泊可能', flexibleUnavailable:'連泊不可', flexibleIncomplete:'証拠不足', flexibleUnknown:'要確認', flexibleAverage:'平均 {price}/泊', flexibleRoomChange:'部屋移動が必要', flexibleSameRoom:'同一客室タイプ', flexibleEvidenceNote:'連泊判定は各泊の証拠を合成し、★ は各チェックイン日の最安合計です', flexibleMissing:'{count} 件は料金不足または要確認'
               },
               ko: {
                 navPrice:'가격 달력', priceEyebrow:'숙박 가격 보기', priceTitle:'가격 달력', priceSubtitle:'선택한 호텔의 1박 최저가, 회원가와 객실 상태를 날짜별로 확인합니다.', priceHotel:'호텔',
@@ -1108,7 +1121,10 @@
                 priceBookingNote:'가격이 있는 날짜를 누르면 공식 예약 페이지를 엽니다', priceSelectHotel:'호텔을 먼저 선택하세요', priceSelectHotelCopy:'빈 객실 검색에서 호텔을 선택하면 가격 달력을 볼 수 있습니다.', priceGoSearch:'빈 객실 검색으로',
                 priceGuestRoom:'{people}명 · {rooms}실', priceFreshCoverage:'최신 데이터 {fresh}일', priceAvailabilityNote:'만실 {full}일 · 확인 필요 {unknown}일', priceStaleNote:'{count}일 데이터 새로고침 필요', priceNoStale:'현재 데이터가 최신입니다',
                 priceRefreshComplete:'이번 달 가격을 업데이트했습니다', priceRefreshPartial:'일부 날짜를 불러왔습니다. 나중에 이어서 새로고침할 수 있습니다', priceRefreshLimited:'조회 속도를 조절했습니다. 잠시 후 다시 시도하세요', priceRefreshBusy:'다른 호텔을 새로고침 중입니다', priceRefreshFailed:'가격을 불러오는 중 오류가 발생했습니다', priceQueued:'가격 조회를 시작합니다', priceNoQuote:'가격 정보 없음', priceOpenBooking:'{date} 공식 예약 페이지 열기',
-                priceSmokingAll:'흡연 조건 무관', priceSmokingNon:'금연 객실', priceSmokingYes:'흡연 객실', priceRoomAny:'객실 유형 무관', priceRoomSingle:'싱글', priceRoomDouble:'더블', priceRoomTwin:'트윈', priceMembershipMember:'회원가 우선', priceMembershipNon:'일반 가격', priceMembershipUnknown:'두 가격 모두 표시'
+                priceSmokingAll:'흡연 조건 무관', priceSmokingNon:'금연 객실', priceSmokingYes:'흡연 객실', priceRoomAny:'객실 유형 무관', priceRoomSingle:'싱글', priceRoomDouble:'더블', priceRoomTwin:'트윈', priceMembershipMember:'회원가 우선', priceMembershipNon:'일반 가격', priceMembershipUnknown:'두 가격 모두 표시',
+                flexibleEyebrow:'유연한 날짜와 연박 확인', flexibleTitle:'여러 호텔 가격 비교', flexibleSubtitle:'날짜 조합을 만들고 매일 객실을 확인하여 총액, 평균가와 일별 최저가를 계산합니다.', flexibleWeekend:'주말', flexibleNext30:'향후 30일', flexibleEarliest:'가장 빠른 체크인', flexibleLatest:'가장 늦은 체크아웃', flexibleNights:'연박 수', flexibleStart:'비교 시작', flexiblePause:'일시정지', flexibleResume:'계속',
+                flexibleQueued:'유연한 날짜 검색 대기 중', flexibleRunning:'일별 가격 불러오는 중', flexiblePaused:'검색 일시정지·계속 가능', flexibleComplete:'비교 완료', flexiblePartial:'일부 결과 확인', flexibleFailed:'비교 오류', flexibleCancelled:'검색 취소됨', flexibleWaiting:'확인 대기', flexibleProgress:'{done} / {total} · {hotel} {date}',
+                flexibleHotels:'호텔', flexibleCombinations:'날짜 조합', flexibleFullStays:'연박 가능', flexibleLowestTotal:'최저 총액', flexibleHotel:'호텔', flexibleAvailable:'연박 가능', flexibleUnavailable:'연박 불가', flexibleIncomplete:'근거 부족', flexibleUnknown:'확인 필요', flexibleAverage:'평균 {price}/박', flexibleRoomChange:'객실 이동 필요', flexibleSameRoom:'같은 객실 유형', flexibleEvidenceNote:'연박 결과는 일별 근거를 합산하며 ★는 해당 체크인 날짜의 최저 총액입니다', flexibleMissing:'{count}개 조합은 가격 누락 또는 확인 필요'
               },
               en: {
                 navPrice:'Price Calendar', priceEyebrow:'Stay price view', priceTitle:'Price Calendar', priceSubtitle:'Review nightly lowest prices, member rates, and availability for every selected hotel.', priceHotel:'Hotel',
@@ -1117,7 +1133,10 @@
                 priceBookingNote:'Select a quoted date to open the official booking page', priceSelectHotel:'Select a hotel first', priceSelectHotelCopy:'Choose hotels in Vacancy Search to view their price calendars.', priceGoSearch:'Go to Vacancy Search',
                 priceGuestRoom:'{people} guests · {rooms} rooms', priceFreshCoverage:'{fresh} days are fresh', priceAvailabilityNote:'{full} sold out · {unknown} need review', priceStaleNote:'{count} days need refresh', priceNoStale:'Current data is fresh',
                 priceRefreshComplete:'Monthly prices are up to date', priceRefreshPartial:'Some dates loaded; refresh again later to continue', priceRefreshLimited:'Request pacing was slowed; continue later', priceRefreshBusy:'Another hotel is being refreshed', priceRefreshFailed:'Price loading encountered an error', priceQueued:'Price check queued', priceNoQuote:'No quote', priceOpenBooking:'Open the official booking page for {date}',
-                priceSmokingAll:'Any smoking preference', priceSmokingNon:'Non-smoking', priceSmokingYes:'Smoking', priceRoomAny:'Any room type', priceRoomSingle:'Single', priceRoomDouble:'Double', priceRoomTwin:'Twin', priceMembershipMember:'Prefer member prices', priceMembershipNon:'Non-member prices', priceMembershipUnknown:'Show both prices'
+                priceSmokingAll:'Any smoking preference', priceSmokingNon:'Non-smoking', priceSmokingYes:'Smoking', priceRoomAny:'Any room type', priceRoomSingle:'Single', priceRoomDouble:'Double', priceRoomTwin:'Twin', priceMembershipMember:'Prefer member prices', priceMembershipNon:'Non-member prices', priceMembershipUnknown:'Show both prices',
+                flexibleEyebrow:'Flexible dates and stay validation', flexibleTitle:'Multi-hotel price comparison', flexibleSubtitle:'Generate date combinations, validate every night, and calculate totals, averages, and daily lows.', flexibleWeekend:'Weekends', flexibleNext30:'Next 30 days', flexibleEarliest:'Earliest check-in', flexibleLatest:'Latest checkout', flexibleNights:'Stay length', flexibleStart:'Start comparison', flexiblePause:'Pause', flexibleResume:'Resume',
+                flexibleQueued:'Flexible-date search queued', flexibleRunning:'Loading nightly prices', flexiblePaused:'Search paused and ready to resume', flexibleComplete:'Comparison complete', flexiblePartial:'Partial results available', flexibleFailed:'Comparison error', flexibleCancelled:'Search cancelled', flexibleWaiting:'Waiting for evidence', flexibleProgress:'{done} / {total} · {hotel} {date}',
+                flexibleHotels:'Hotels', flexibleCombinations:'Date combinations', flexibleFullStays:'Full stays', flexibleLowestTotal:'Lowest total', flexibleHotel:'Hotel', flexibleAvailable:'Full stay', flexibleUnavailable:'Unavailable', flexibleIncomplete:'Incomplete evidence', flexibleUnknown:'Needs review', flexibleAverage:'Avg {price}/night', flexibleRoomChange:'Room change needed', flexibleSameRoom:'Same room type', flexibleEvidenceNote:'Full-stay status combines nightly evidence; ★ marks the lowest total for that check-in date', flexibleMissing:'{count} combinations have missing prices or need review'
               }
             };
             Object.assign(SINGLE_UI_OVERRIDES.zh_cn, PRICE_CALENDAR_UI.zh_cn);
@@ -1511,6 +1530,8 @@
                 if (ACTIVE_APP_VIEW === 'price') {
                   PRICE_CALENDAR_DATA = null;
                   PRICE_CALENDAR_AUTO_KEY = '';
+                  FLEXIBLE_STAY_JOB_ID = '';
+                  FLEXIBLE_STAY_DATA = null;
                   preparePriceCalendar();
                 }
               } catch(error) {
@@ -2198,6 +2219,13 @@
               });
               document.getElementById('price-calendar-refresh')?.addEventListener('click', () => startPriceCalendarRefresh(true));
               document.getElementById('price-empty-action')?.addEventListener('click', () => switchAppView('search'));
+              document.getElementById('flexible-shortcut-weekend')?.addEventListener('click', () => applyFlexibleShortcut('weekend'));
+              document.getElementById('flexible-shortcut-30')?.addEventListener('click', () => applyFlexibleShortcut('next_30'));
+              document.getElementById('flexible-start')?.addEventListener('click', startFlexibleStaySearch);
+              document.getElementById('flexible-pause')?.addEventListener('click', () => controlFlexibleStay('pause'));
+              document.getElementById('flexible-resume')?.addEventListener('click', () => controlFlexibleStay('resume'));
+              document.getElementById('flexible-earliest-date')?.addEventListener('change', () => { FLEXIBLE_STAY_SHORTCUT = 'custom'; });
+              document.getElementById('flexible-latest-date')?.addEventListener('change', () => { FLEXIBLE_STAY_SHORTCUT = 'custom'; });
               document.getElementById('btn_alert_rule_add')?.addEventListener('click', addAlertRule);
               document.getElementById('btn_alert_rule_cancel')?.addEventListener('click', resetAlertRuleEditor);
               document.getElementById('btn_alert_policy_save')?.addEventListener('click', saveAlertPolicy);
@@ -2367,10 +2395,12 @@
               const conditionStrip = document.getElementById('price-condition-strip');
               const summary = document.querySelector('.price-summary-grid');
               const card = document.querySelector('.price-calendar-card');
+              const flexible = document.getElementById('flexible-stay-card');
               if (emptyState) emptyState.hidden = !empty;
               if (conditionStrip) conditionStrip.hidden = empty;
               if (summary) summary.hidden = empty;
               if (card) card.hidden = empty;
+              if (flexible) flexible.hidden = empty;
             }
             function renderPriceHotelOptions(hotels){
               const select = document.getElementById('price-hotel-select');
@@ -2607,6 +2637,7 @@
               if (!PRICE_CALENDAR_MONTH) PRICE_CALENDAR_MONTH = priceCurrentMonth();
               renderPriceHotelOptions(hotels);
               loadPriceCalendar(autoStart, replaceRunning);
+              prepareFlexibleStay();
             }
             function cyclePriceHotel(direction){
               const hotels = PRICE_CALENDAR_DATA?.hotels || priceCalendarHotels();
@@ -2616,14 +2647,197 @@
               PRICE_CALENDAR_DATA = null;
               preparePriceCalendar(true, true);
             }
+            function flexibleIsoDate(value){
+              const year = value.getFullYear();
+              const month = String(value.getMonth() + 1).padStart(2, '0');
+              const day = String(value.getDate()).padStart(2, '0');
+              return `${year}-${month}-${day}`;
+            }
+            function prepareFlexibleStayDates(){
+              const earliest = document.getElementById('flexible-earliest-date');
+              const latest = document.getElementById('flexible-latest-date');
+              if (!earliest || !latest) return;
+              const today = priceDate(todayStr());
+              const start = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+              const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 30);
+              earliest.min = todayStr();
+              latest.min = flexibleIsoDate(new Date(start.getFullYear(), start.getMonth(), start.getDate() + 1));
+              if (!earliest.value || earliest.value < todayStr()) earliest.value = flexibleIsoDate(start);
+              if (!latest.value || latest.value <= earliest.value) latest.value = flexibleIsoDate(end);
+            }
+            function applyFlexibleShortcut(mode){
+              prepareFlexibleStayDates();
+              const earliest = document.getElementById('flexible-earliest-date');
+              const latest = document.getElementById('flexible-latest-date');
+              if (!earliest || !latest) return;
+              const today = priceDate(todayStr());
+              if (mode === 'weekend') {
+                const start = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+                while (start.getDay() !== 5) start.setDate(start.getDate() + 1);
+                const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 30);
+                earliest.value = flexibleIsoDate(start);
+                latest.value = flexibleIsoDate(end);
+              } else {
+                const start = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+                const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 30);
+                earliest.value = flexibleIsoDate(start);
+                latest.value = flexibleIsoDate(end);
+              }
+              FLEXIBLE_STAY_SHORTCUT = mode;
+            }
+            function flexibleStateLabel(state){
+              return tx(({
+                available:'flexibleAvailable', unavailable:'flexibleUnavailable', incomplete:'flexibleIncomplete',
+                unknown:'flexibleUnknown', not_evaluated:'flexibleWaiting'
+              })[state] || 'flexibleWaiting');
+            }
+            function renderFlexibleStay(payload){
+              FLEXIBLE_STAY_DATA = payload;
+              const job = payload?.job || {};
+              if (job.job_id) FLEXIBLE_STAY_JOB_ID = String(job.job_id);
+              const status = document.getElementById('flexible-job-status');
+              const running = ['queued','running'].includes(String(job.status || ''));
+              if (status) status.hidden = !job.job_id;
+              setNodeText('#flexible-job-title', tx(({
+                queued:'flexibleQueued', running:'flexibleRunning', paused:'flexiblePaused',
+                complete:'flexibleComplete', partial:'flexiblePartial', failed:'flexibleFailed',
+                cancelled:'flexibleCancelled'
+              })[job.status] || 'flexibleWaiting'));
+              setNodeText('#flexible-job-detail', job.total_work ? fmt('flexibleProgress', {
+                done:job.completed_work || 0, total:job.total_work || 0,
+                hotel:job.current_hotel || '', date:job.current_date || ''
+              }) : '');
+              const bar = document.getElementById('flexible-progress-bar');
+              if (bar) bar.style.width = `${Math.max(0, Math.min(100, Number(job.progress_percent || 0)))}%`;
+              const start = document.getElementById('flexible-start');
+              const pause = document.getElementById('flexible-pause');
+              const resume = document.getElementById('flexible-resume');
+              if (start) start.disabled = running;
+              if (pause) pause.hidden = !running;
+              if (resume) resume.hidden = !['paused','partial','failed'].includes(String(job.status || ''));
+
+              const summary = payload?.summary || {};
+              const summaryNode = document.getElementById('flexible-comparison-summary');
+              if (summaryNode) {
+                summaryNode.hidden = !job.job_id;
+                summaryNode.innerHTML = [
+                  [tx('flexibleHotels'), String(summary.hotel_count || 0)],
+                  [tx('flexibleCombinations'), String(summary.combination_count || 0)],
+                  [tx('flexibleFullStays'), String(summary.available_stays || 0)],
+                  [tx('flexibleLowestTotal'), priceYen(summary.lowest_total_price)]
+                ].map(([label,value]) => `<article><span>${priceSafe(label)}</span><strong>${priceSafe(value)}</strong></article>`).join('');
+              }
+
+              const columns = Array.isArray(payload?.columns) ? payload.columns : [];
+              const rows = Array.isArray(payload?.rows) ? payload.rows : [];
+              const scroll = document.getElementById('flexible-comparison-scroll');
+              const head = document.getElementById('flexible-comparison-head');
+              const body = document.getElementById('flexible-comparison-body');
+              if (scroll) scroll.hidden = !(columns.length && rows.length);
+              if (head) {
+                head.innerHTML = `<tr><th>${priceSafe(tx('flexibleHotel'))}</th>${columns.map(column => {
+                  const checkin = new Intl.DateTimeFormat(priceLocale(), {month:'short',day:'numeric'}).format(priceDate(column.checkin_date));
+                  const checkout = new Intl.DateTimeFormat(priceLocale(), {month:'short',day:'numeric'}).format(priceDate(column.checkout_date));
+                  return `<th title="${priceSafe(column.checkin_date)} → ${priceSafe(column.checkout_date)}">${priceSafe(checkin)}<br><small>${priceSafe(checkout)} · ${Number(column.nights || 1)}N</small></th>`;
+                }).join('')}</tr>`;
+              }
+              if (body) {
+                body.innerHTML = rows.map(row => `<tr><th><strong>${priceSafe(row.display_code)} · ${priceSafe(row.name)}</strong><small>${priceSafe(row.provider)}</small></th>${(row.cells || []).map(cell => {
+                  const state = String(cell.state || 'not_evaluated');
+                  const roomChange = cell.room_continuity === 'room_change_required';
+                  const price = cell.price != null ? priceYen(cell.price) : flexibleStateLabel(state);
+                  const average = cell.average_nightly_price != null ? fmt('flexibleAverage', {price:priceYen(cell.average_nightly_price)}) : '';
+                  const note = roomChange ? tx('flexibleRoomChange') : cell.room_continuity === 'same_room' ? tx('flexibleSameRoom') : flexibleStateLabel(state);
+                  return `<td class="flexible-price-cell heat-${Number(cell.heat_level || 0)} ${cell.daily_cheapest ? 'cheapest' : ''}" title="${priceSafe(note)}">${cell.daily_cheapest ? '<b class="flexible-best">★</b>' : ''}<strong>${priceSafe(price)}</strong><span>${priceSafe(average)}</span><small>${priceSafe(note)}</small></td>`;
+                }).join('')}</tr>`).join('');
+              }
+              const note = document.getElementById('flexible-comparison-note');
+              if (note) {
+                const missing = Number(summary.missing_or_unknown || 0);
+                note.textContent = `${tx('flexibleEvidenceNote')} · ${fmt('flexibleMissing', {count:missing})}`;
+              }
+              if (running) scheduleFlexibleStayPoll();
+            }
+            function scheduleFlexibleStayPoll(){
+              if (FLEXIBLE_STAY_POLL_TIMER) clearTimeout(FLEXIBLE_STAY_POLL_TIMER);
+              if (ACTIVE_APP_VIEW !== 'price' || !FLEXIBLE_STAY_JOB_ID) return;
+              FLEXIBLE_STAY_POLL_TIMER = setTimeout(() => loadFlexibleStay(FLEXIBLE_STAY_JOB_ID), 1600);
+            }
+            async function loadFlexibleStay(jobId){
+              if (!jobId) return;
+              try {
+                const response = await fetch(`/api/v1/flexible-stays/${encodeURIComponent(jobId)}`);
+                const payload = await response.json();
+                if (!response.ok || !payload.ok) throw new Error(payload.message || `HTTP ${response.status}`);
+                renderFlexibleStay(payload);
+              } catch (error) {
+                setNodeText('#flexible-job-title', tx('flexibleFailed'));
+              }
+            }
+            async function loadLatestFlexibleStay(){
+              try {
+                const response = await fetch(`/api/v1/flexible-stays?task_id=${encodeURIComponent(TASK_CENTER_ACTIVE_ID || '')}&limit=1`);
+                const payload = await response.json();
+                const job = payload?.jobs?.[0];
+                if (response.ok && payload.ok && job?.job_id) {
+                  FLEXIBLE_STAY_JOB_ID = String(job.job_id);
+                  loadFlexibleStay(FLEXIBLE_STAY_JOB_ID);
+                }
+              } catch (error) {}
+            }
+            async function startFlexibleStaySearch(){
+              prepareFlexibleStayDates();
+              const draft = priceCalendarDraftPayload();
+              const earliest = document.getElementById('flexible-earliest-date')?.value || '';
+              const latest = document.getElementById('flexible-latest-date')?.value || '';
+              const nights = Number(document.getElementById('flexible-nights')?.value || 1);
+              const start = document.getElementById('flexible-start');
+              if (start) start.disabled = true;
+              try {
+                const response = await fetch('/api/v1/flexible-stays', {
+                  method:'POST', headers:{'Content-Type':'application/json'},
+                  body:JSON.stringify({...draft, earliest_date:earliest, latest_date:latest, nights, shortcut:FLEXIBLE_STAY_SHORTCUT})
+                });
+                const payload = await response.json();
+                if (!response.ok || !payload.ok) throw new Error(payload.message || `HTTP ${response.status}`);
+                renderFlexibleStay(payload);
+              } catch (error) {
+                setNodeText('#flexible-job-title', String(error.message || tx('flexibleFailed')));
+                const status = document.getElementById('flexible-job-status');
+                if (status) status.hidden = false;
+                if (start) start.disabled = false;
+              }
+            }
+            async function controlFlexibleStay(action){
+              if (!FLEXIBLE_STAY_JOB_ID) return;
+              try {
+                const response = await fetch(`/api/v1/flexible-stays/${encodeURIComponent(FLEXIBLE_STAY_JOB_ID)}/${encodeURIComponent(action)}`, {method:'POST'});
+                const payload = await response.json();
+                if (!response.ok || !payload.ok) throw new Error(payload.message || `HTTP ${response.status}`);
+                renderFlexibleStay(payload);
+              } catch (error) {
+                setNodeText('#flexible-job-title', String(error.message || tx('flexibleFailed')));
+              }
+            }
+            function prepareFlexibleStay(){
+              prepareFlexibleStayDates();
+              const card = document.getElementById('flexible-stay-card');
+              if (card) card.hidden = !priceCalendarHotels().length;
+              if (!FLEXIBLE_STAY_JOB_ID) loadLatestFlexibleStay();
+              else if (FLEXIBLE_STAY_DATA?.job?.running) scheduleFlexibleStayPoll();
+            }
             function localizePriceCalendar(){
               [
                 ['#price-calendar-eyebrow','priceEyebrow'],['#price-calendar-title','priceTitle'],['#price-calendar-subtitle','priceSubtitle'],['#price-hotel-label','priceHotel'],
                 ['#price-summary-lowest-label','priceLowest'],['#price-summary-available-label','priceAvailableDays'],['#price-summary-coverage-label','priceCoverage'],['#price-summary-updated-label','priceRecentUpdate'],
                 ['#price-month-today','priceThisMonth'],['#price-calendar-refresh-label','priceRefreshMonth'],['#price-legend-available','priceAvailable'],['#price-legend-unavailable','priceSoldOut'],['#price-legend-unknown','priceCheck'],['#price-legend-unloaded','priceNotLoaded'],
-                ['#price-calendar-note','priceBookingNote'],['#price-empty-title','priceSelectHotel'],['#price-empty-copy','priceSelectHotelCopy'],['#price-empty-action','priceGoSearch']
+                ['#price-calendar-note','priceBookingNote'],['#price-empty-title','priceSelectHotel'],['#price-empty-copy','priceSelectHotelCopy'],['#price-empty-action','priceGoSearch'],
+                ['#flexible-stay-eyebrow','flexibleEyebrow'],['#flexible-stay-title','flexibleTitle'],['#flexible-stay-subtitle','flexibleSubtitle'],
+                ['#flexible-shortcut-weekend','flexibleWeekend'],['#flexible-shortcut-30','flexibleNext30'],['#flexible-earliest-label','flexibleEarliest'],['#flexible-latest-label','flexibleLatest'],
+                ['#flexible-nights-label','flexibleNights'],['#flexible-start-label','flexibleStart'],['#flexible-pause-label','flexiblePause'],['#flexible-resume-label','flexibleResume']
               ].forEach(([selector,key]) => setNodeText(selector, tx(key)));
               if (PRICE_CALENDAR_DATA) renderPriceCalendarPayload(PRICE_CALENDAR_DATA);
+              if (FLEXIBLE_STAY_DATA) renderFlexibleStay(FLEXIBLE_STAY_DATA);
             }
             const AREA_PRIMARY_NAME_BY_LANG = {
               ja: {
@@ -6105,6 +6319,8 @@
                 if (j.task_id && j.task_id !== TASK_CENTER_ACTIVE_ID) {
                   TASK_CENTER_ACTIVE_ID = String(j.task_id);
                   storageSet(TASK_CENTER_SELECTION_KEY, TASK_CENTER_ACTIVE_ID);
+                  FLEXIBLE_STAY_JOB_ID = '';
+                  FLEXIBLE_STAY_DATA = null;
                 }
                 if (j.task) taskCenterUpsert(j.task);
                 setConnectionOnline(true);

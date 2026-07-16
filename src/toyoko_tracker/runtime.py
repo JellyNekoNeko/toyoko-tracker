@@ -92,6 +92,21 @@ from .price_calendar import (
     month_dates as _price_calendar_month_dates,
     record_day as _record_price_calendar_day,
 )
+from .flexible_stays import (
+    FlexibleStayNotFoundError as _FlexibleStayNotFoundError,
+    FlexibleStayValidationError as _FlexibleStayValidationError,
+    comparison_snapshot as _flexible_comparison_snapshot,
+    create_job as _create_flexible_stay_job,
+    delete_job as _delete_flexible_stay_job,
+    get_job as _get_flexible_stay_job,
+    list_jobs as _list_flexible_stay_jobs,
+    pending_work as _flexible_pending_work,
+    recompute_results as _recompute_flexible_stay_results,
+    record_night as _record_flexible_stay_night,
+    recover_active_jobs as _recover_flexible_stay_jobs,
+    set_job_state as _set_flexible_stay_job_state,
+    update_job_progress as _update_flexible_stay_progress,
+)
 from .simulation import run_stress_test as _run_simulation_stress_test
 from .traffic_meter import traffic_snapshot as _traffic_snapshot
 from .routeinn import (
@@ -266,6 +281,9 @@ _CHECKPOINT_RESTORED_SCOPE = ""
 _PRICE_CALENDAR_JOB_LOCK = threading.Lock()
 _PRICE_CALENDAR_JOB: Dict[str, Any] = {}
 _PRICE_CALENDAR_THREAD: Optional[threading.Thread] = None
+_FLEXIBLE_STAY_LOCK = threading.RLock()
+_FLEXIBLE_STAY_THREAD: Optional[threading.Thread] = None
+_FLEXIBLE_STAY_ACTIVE_ID = ""
 
 _HOTEL_RESULT_FIELDS = {field.name for field in fields(HotelResult)}
 
@@ -3289,6 +3307,45 @@ def home() -> Response:
 	                </footer>
 	              </section>
 
+	              <section class="flexible-stay-card" id="flexible-stay-card">
+	                <header class="flexible-stay-header">
+	                  <div>
+	                    <span id="flexible-stay-eyebrow">灵活日期与连住验证</span>
+	                    <h2 id="flexible-stay-title">多酒店价格比较</h2>
+	                    <p id="flexible-stay-subtitle">生成日期组合，逐晚验证连续入住，并计算总价、平均价和每日最低价。</p>
+	                  </div>
+	                  <div class="flexible-shortcuts" aria-label="Flexible date shortcuts">
+	                    <button id="flexible-shortcut-weekend" type="button">周末</button>
+	                    <button id="flexible-shortcut-30" type="button">未来 30 天</button>
+	                  </div>
+	                </header>
+	                <div class="flexible-stay-controls">
+	                  <label><span id="flexible-earliest-label">最早入住</span><input id="flexible-earliest-date" type="date"></label>
+	                  <label><span id="flexible-latest-label">最晚退房</span><input id="flexible-latest-date" type="date"></label>
+	                  <label><span id="flexible-nights-label">连住晚数</span><input id="flexible-nights" type="number" min="1" max="14" value="2"></label>
+	                  <button class="primary" id="flexible-start" type="button"><span aria-hidden="true">⌕</span> <span id="flexible-start-label">开始比较</span></button>
+	                  <button id="flexible-pause" type="button" hidden><span id="flexible-pause-label">暂停</span></button>
+	                  <button id="flexible-resume" type="button" hidden><span id="flexible-resume-label">继续</span></button>
+	                </div>
+	                <div class="flexible-job-status" id="flexible-job-status" hidden>
+	                  <div>
+	                    <strong id="flexible-job-title">正在读取逐晚价格</strong>
+	                    <span id="flexible-job-detail">0 / 0</span>
+	                  </div>
+	                  <div class="flexible-progress" aria-hidden="true"><i id="flexible-progress-bar"></i></div>
+	                </div>
+	                <div class="flexible-comparison-summary" id="flexible-comparison-summary" hidden></div>
+	                <div class="flexible-comparison-scroll" id="flexible-comparison-scroll" hidden>
+	                  <table class="flexible-comparison-table">
+	                    <thead id="flexible-comparison-head"></thead>
+	                    <tbody id="flexible-comparison-body"></tbody>
+	                  </table>
+	                </div>
+	                <footer class="flexible-comparison-note" id="flexible-comparison-note">
+	                  连住结论来自逐晚证据；房型无法贯穿全部日期时会标记为需要换房。
+	                </footer>
+	              </section>
+
 	              <section class="price-empty-state" id="price-empty-state" hidden>
 	                <img src="/static/toyoko-chan-mascot.png?v=3" alt="">
 	                <div><h2 id="price-empty-title">先选择酒店</h2><p id="price-empty-copy">在空房检索中勾选酒店后，即可查看价格日历。</p><button id="price-empty-action" class="primary" type="button">前往空房检索</button></div>
@@ -6176,6 +6233,318 @@ def price_calendar_refresh() -> Response:
     response = _price_calendar_response_payload(cfg, hotel_code, month, hotels)
     response["job"] = job
     return jsonify(response), 202
+
+
+def _flexible_stay_config(job: Dict[str, Any]) -> AppConfig:
+    task_id = str(job.get("task_id") or "")
+    if task_id:
+        try:
+            cfg = _task_config_with_globals(_workspace.get_task(task_id))
+        except Exception:
+            with _CONFIG_LOCK:
+                cfg = deepcopy(_CONFIG)
+    else:
+        with _CONFIG_LOCK:
+            cfg = deepcopy(_CONFIG)
+    conditions = job.get("conditions") or {}
+    cfg.people = int(conditions.get("people") or cfg.people or 1)
+    cfg.rooms = int(conditions.get("rooms") or cfg.rooms or 1)
+    cfg.smoking = str(conditions.get("smoking") or cfg.smoking or "all")
+    cfg.membership_status = str(
+        conditions.get("membership_status")
+        or cfg.membership_status
+        or "member"
+    )
+    room_requirement = str(
+        conditions.get("room_requirement")
+        or getattr(cfg, "room_requirement", None)
+        or getattr(cfg, "om_requirement", "any")
+        or "any"
+    )
+    cfg.room_requirement = room_requirement
+    cfg.om_requirement = room_requirement
+    cfg.hotel_codes = list(job.get("hotel_codes") or [])
+    cfg.selected_hotels = deepcopy(job.get("hotels") or [])
+    cfg.engine = "http"
+    if task_id:
+        setattr(cfg, "task_id", task_id)
+    return cfg
+
+
+def _run_flexible_stay_job(job_id: str) -> None:
+    global _FLEXIBLE_STAY_ACTIVE_ID
+    consecutive_errors = 0
+    try:
+        job = _set_flexible_stay_job_state(job_id, "running")
+        cfg = _flexible_stay_config(job)
+        work = _flexible_pending_work(job_id)
+        for item in work:
+            current = _get_flexible_stay_job(job_id)
+            if current["status"] in {"paused", "cancelled"}:
+                return
+            provider = str(item["provider"] or "toyoko")
+            hotel_code = str(item["hotel_code"])
+            stay_date = str(item["stay_date"])
+            checkout_date = str(item["checkout_date"])
+            cooldown = max(
+                0,
+                int(math.ceil(_provider_cooldown_until(provider) - _now_mono())),
+            )
+            if cooldown:
+                _set_flexible_stay_job_state(
+                    job_id,
+                    "paused",
+                    last_error=f"provider cooldown active; resume after {cooldown} seconds",
+                )
+                return
+
+            cfg.start_date = stay_date
+            cfg.end_date = checkout_date
+            _update_flexible_stay_progress(
+                job_id,
+                current_hotel=hotel_code,
+                current_date=stay_date,
+            )
+            try:
+                base_delay = max(
+                    0.75,
+                    min(5.0, float(cfg.per_hotel_delay_seconds or 1)),
+                )
+                request_interval = _jittered_spacing(
+                    _provider_dynamic_spacing(provider, base_delay),
+                    min(25, int(cfg.request_jitter_percent or 0)),
+                )
+                with _provider_pacer.acquire(
+                    provider,
+                    task_id=f"flexible-stay:{job_id}",
+                    min_start_interval=request_interval,
+                ):
+                    result = _check_hotel_cached(
+                        cfg,
+                        None,
+                        hotel_code,
+                        stay_date,
+                        checkout_date,
+                        allow_cache=True,
+                        force_refresh=False,
+                    )
+                result.provider = provider
+                if result.http_status is not None:
+                    _provider_pacer.report_response(
+                        provider,
+                        int(result.http_status),
+                        retry_after=result.retry_after_sec,
+                    )
+                _record_provider_result(provider, result)
+                _record_flexible_stay_night(
+                    job_id,
+                    hotel_code,
+                    provider,
+                    stay_date,
+                    checkout_date,
+                    result,
+                )
+                _record_price_calendar_day(
+                    cfg,
+                    hotel_code,
+                    provider,
+                    stay_date,
+                    checkout_date,
+                    result,
+                )
+                _update_flexible_stay_progress(
+                    job_id,
+                    current_hotel=hotel_code,
+                    current_date=stay_date,
+                    error=(
+                        str(result.error_summary or "provider returned an unknown result")
+                        if result.available is None
+                        else ""
+                    ),
+                )
+                consecutive_errors = consecutive_errors + 1 if result.available is None else 0
+                if result.http_status in {429, 503} or consecutive_errors >= 3:
+                    _set_flexible_stay_job_state(
+                        job_id,
+                        "paused",
+                        last_error=(
+                            f"provider returned HTTP {result.http_status}"
+                            if result.http_status in {429, 503}
+                            else "repeated provider errors; ready to resume"
+                        ),
+                    )
+                    _recompute_flexible_stay_results(job_id)
+                    return
+            except Exception as exc:
+                consecutive_errors += 1
+                _log(f"[flexible-stay] {hotel_code}/{stay_date}: {exc}")
+                _update_flexible_stay_progress(
+                    job_id,
+                    current_hotel=hotel_code,
+                    current_date=stay_date,
+                    error=str(exc),
+                )
+                if consecutive_errors >= 3:
+                    _set_flexible_stay_job_state(
+                        job_id,
+                        "paused",
+                        last_error="repeated provider errors; ready to resume",
+                    )
+                    _recompute_flexible_stay_results(job_id)
+                    return
+
+        _recompute_flexible_stay_results(job_id)
+        final_state = "complete" if not _flexible_pending_work(job_id) else "partial"
+        _set_flexible_stay_job_state(job_id, final_state)
+    except _FlexibleStayNotFoundError:
+        return
+    except Exception as exc:
+        _log(f"[flexible-stay] job {job_id} failed: {exc}")
+        try:
+            _recompute_flexible_stay_results(job_id)
+            _set_flexible_stay_job_state(job_id, "failed", last_error=str(exc))
+        except Exception:
+            pass
+    finally:
+        with _FLEXIBLE_STAY_LOCK:
+            if _FLEXIBLE_STAY_ACTIVE_ID == job_id:
+                _FLEXIBLE_STAY_ACTIVE_ID = ""
+
+
+def _start_flexible_stay_job(job_id: str) -> Tuple[Dict[str, Any], bool]:
+    global _FLEXIBLE_STAY_THREAD, _FLEXIBLE_STAY_ACTIVE_ID
+    job = _get_flexible_stay_job(job_id)
+    with _FLEXIBLE_STAY_LOCK:
+        if _FLEXIBLE_STAY_THREAD and _FLEXIBLE_STAY_THREAD.is_alive():
+            return job, _FLEXIBLE_STAY_ACTIVE_ID == job_id
+        if job["status"] == "cancelled":
+            raise _FlexibleStayValidationError("cancelled jobs are read-only")
+        if job["status"] == "complete" and not _flexible_pending_work(job_id):
+            return job, True
+        _set_flexible_stay_job_state(job_id, "queued")
+        _FLEXIBLE_STAY_ACTIVE_ID = job_id
+        _FLEXIBLE_STAY_THREAD = threading.Thread(
+            target=_run_flexible_stay_job,
+            args=(job_id,),
+            name="flexible-stay-search",
+            daemon=True,
+        )
+        _FLEXIBLE_STAY_THREAD.start()
+    return _get_flexible_stay_job(job_id), True
+
+
+def recover_flexible_stay_jobs() -> int:
+    with _FLEXIBLE_STAY_LOCK:
+        if _FLEXIBLE_STAY_THREAD and _FLEXIBLE_STAY_THREAD.is_alive():
+            return 0
+    return _recover_flexible_stay_jobs()
+
+
+def _flexible_stay_payload(job_id: str) -> Dict[str, Any]:
+    comparison = _flexible_comparison_snapshot(job_id)
+    return {"ok": True, **comparison}
+
+
+def flexible_stays_collection() -> Response:
+    if request.method == "GET":
+        task_id = str(request.args.get("task_id") or "")
+        try:
+            limit = max(1, min(100, int(request.args.get("limit", 20))))
+        except (TypeError, ValueError):
+            limit = 20
+        jobs = _list_flexible_stay_jobs(task_id=task_id, limit=limit)
+        return jsonify({"ok": True, "jobs": jobs})
+
+    payload = request.get_json(force=True, silent=True) or {}
+    try:
+        requested_task_id = payload.get("task_id")
+        if requested_task_id:
+            task_id = _resolve_task_id(requested_task_id)
+            cfg = _price_calendar_request_config(
+                _task_config_with_globals(_workspace.get_task(task_id)),
+                payload,
+            )
+        else:
+            task_id = _resolve_task_id()
+            with _CONFIG_LOCK:
+                cfg = _price_calendar_request_config(_CONFIG, payload)
+        hotels = _price_calendar_hotels(cfg)
+        job = _create_flexible_stay_job({
+            "task_id": task_id,
+            "name": payload.get("name") or "",
+            "earliest_date": payload.get("earliest_date"),
+            "latest_date": payload.get("latest_date"),
+            "nights": payload.get("nights", 1),
+            "shortcut": payload.get("shortcut", "custom"),
+            "hotel_codes": list(cfg.hotel_codes or []),
+            "selected_hotels": deepcopy(cfg.selected_hotels or []),
+            "conditions": {
+                "people": cfg.people,
+                "rooms": cfg.rooms,
+                "smoking": cfg.smoking,
+                "room_requirement": str(
+                    getattr(cfg, "room_requirement", None)
+                    or getattr(cfg, "om_requirement", "any")
+                    or "any"
+                ),
+                "membership_status": cfg.membership_status,
+            },
+        })
+        if not hotels:
+            raise _FlexibleStayValidationError("select at least one hotel")
+        job, accepted = _start_flexible_stay_job(job["job_id"])
+        if not accepted:
+            return jsonify({
+                "ok": False,
+                "message": "another flexible-stay search is already running",
+                "job": job,
+            }), 409
+        return jsonify(_flexible_stay_payload(job["job_id"])), 202
+    except (_FlexibleStayValidationError, ValueError) as exc:
+        return jsonify({"ok": False, "message": str(exc)}), 400
+
+
+def flexible_stay_detail(job_id: str) -> Response:
+    try:
+        if request.method == "DELETE":
+            job = _get_flexible_stay_job(job_id)
+            if job["status"] in {"queued", "running"}:
+                return jsonify({
+                    "ok": False,
+                    "message": "pause or cancel the flexible-stay search before deletion",
+                }), 409
+            _delete_flexible_stay_job(job_id)
+            return jsonify({"ok": True, "deleted": job_id})
+        return jsonify(_flexible_stay_payload(job_id))
+    except _FlexibleStayNotFoundError as exc:
+        return jsonify({"ok": False, "message": str(exc)}), 404
+
+
+def flexible_stay_control(job_id: str, action: str) -> Response:
+    try:
+        job = _get_flexible_stay_job(job_id)
+        command = str(action or "")
+        if command == "pause":
+            job = _set_flexible_stay_job_state(job_id, "paused")
+        elif command == "cancel":
+            job = _set_flexible_stay_job_state(job_id, "cancelled")
+        elif command == "resume":
+            if job["status"] == "cancelled":
+                raise _FlexibleStayValidationError("cancelled jobs are read-only")
+            job, accepted = _start_flexible_stay_job(job_id)
+            if not accepted:
+                return jsonify({
+                    "ok": False,
+                    "message": "another flexible-stay search is already running",
+                    "job": job,
+                }), 409
+        else:
+            raise _FlexibleStayValidationError("action must be pause, resume, or cancel")
+        return jsonify(_flexible_stay_payload(job_id)), 202 if command == "resume" else 200
+    except _FlexibleStayNotFoundError as exc:
+        return jsonify({"ok": False, "message": str(exc)}), 404
+    except _FlexibleStayValidationError as exc:
+        return jsonify({"ok": False, "message": str(exc)}), 400
 
 
 def events_status() -> Response:

@@ -2,6 +2,18 @@
 
 ## v0.7.0 - Development
 
+- Completed Phase 3 flexible-date search with deterministic custom, weekend
+  and next-30-day combinations, durable pause/resume jobs and shared Provider
+  pacing.
+- Added multi-night continuous-stay validation, regular/member total and
+  average prices, isolated-night evidence, common-room selection and explicit
+  room-change detection.
+- Added multi-hotel comparison tables, deterministic five-level price heat
+  maps, per-check-in and per-night cheapest-hotel markers, missing-price
+  states and Provider capability notices.
+- Added workspace schema v3, flexible-stay APIs, restart recovery, a
+  five-language responsive comparison UI and the Phase 3 architecture/user
+  guide.
 - Completed Phase 2 price alerts with task-scoped target-price, member-price,
   price-drop and vacancy-transition rules, date/hotel scopes, revisions and
   persistent observation baselines.

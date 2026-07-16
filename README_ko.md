@@ -19,6 +19,8 @@
 - 🛏 싱글·더블·트윈 객실 유형 필터
 - 💳 회원가와 비회원가 표시
 - 📅 선택한 각 호텔의 월간 가격 달력을 필요할 때 새로고침
+- 🔀 유연한 날짜·주말 검색과 여러 박 연속 객실 확인
+- 🌡 여러 호텔 총액 비교, 가격 히트맵과 일별 최저가 호텔
 - 🎯 목표가·회원가·가격 인하·객실 상태 변화 알림
 - 🌙 방해 금지 시간, 메시지 묶음, 일일 요약, 긴급 규칙
 - 🔔 로컬 데스크톱 알림
@@ -29,6 +31,8 @@
 [`docs/PHASE1_MULTI_TASK_GUIDE.md`](docs/PHASE1_MULTI_TASK_GUIDE.md)를 참고하세요.
 가격 알림과 알림 정책은
 [`docs/PHASE2_ALERTS_GUIDE.md`](docs/PHASE2_ALERTS_GUIDE.md)를 참고하세요.
+유연한 날짜, 연박 확인과 호텔 가격 비교는
+[`docs/PHASE3_FLEXIBLE_STAYS.md`](docs/PHASE3_FLEXIBLE_STAYS.md)를 참고하세요.
 
 ## 요구 사항
 

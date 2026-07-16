@@ -251,15 +251,15 @@ Status: **Delivered**.
 
 ## Current assignment
 
-Phase 1 and Phase 2 are complete. Phase 3 is the next active stage and begins
-with flexible-date generation and continuous-stay evaluation.
+Phase 1 through Phase 3 are complete. Phase 4 is the next active stage and
+begins with historical price statistics and reproducible decision scoring.
 
 | Lane | Next assignment | Completion signal |
 | --- | --- | --- |
-| A | P3-01 flexible-date request model | Date window and stay-length DTOs are frozen |
-| B | P3-02 stay combination engine | Deterministic, deduplicated combinations pass |
-| C | P3-06 comparison UI contract | Calendar and hotel comparison states are defined |
-| D | P3-09 continuity fixtures | Continuous-stay and room-change cases are ready |
+| A | P4-00 historical-data contract | Sampling and retention rules are frozen |
+| B | P4-01/02 statistics and price labels | Minimum, average, maximum and percentiles pass |
+| C | P4-06 decision-center UI contract | Labels, samples and evidence states are defined |
+| D | P4-08 historical and optimizer fixtures | Percentile and split-stay cases are ready |
 
 The frozen Phase 1 integration contracts are documented in
 `docs/PHASE1_ARCHITECTURE.md`.
@@ -309,3 +309,20 @@ The frozen Phase 1 integration contracts are documented in
 | P2-08 | Implemented | Per-channel alert history and price-calendar badges |
 | P2-09 | Implemented | Baseline, cooldown, cross-midnight, digest, restart and partial-channel tests |
 | P2-10 | Implemented | `docs/PHASE2_ALERTS_GUIDE.md` and roadmap/readme updates |
+
+### Phase 3 implementation status
+
+| Work package | Status | Evidence |
+| --- | --- | --- |
+| P3-00 | Implemented | Workspace schema v3, explicit JPY/tax/evidence capability contract |
+| P3-01 | Implemented | Stable custom, weekend and next-30-day combination generation |
+| P3-02 | Implemented | Durable jobs, nightly evidence, results and restart recovery |
+| P3-03 | Implemented | Pause/resume/cancel controls and shared Provider pacing |
+| P3-04 | Implemented | Full-stay state, totals, averages and room-change detection |
+| P3-05 | Implemented | Hotel comparison matrix, five-level heat map and tied minima |
+| P3-06 | Implemented | Collection, detail, control and comparison APIs |
+| P3-07 | Implemented | Five-language responsive flexible-date comparison UI |
+| P3-08 | Implemented | Date, continuity, persistence, worker, API and UI regression tests |
+
+The Phase 3 contracts and user workflow are documented in
+`docs/PHASE3_ARCHITECTURE.md` and `docs/PHASE3_FLEXIBLE_STAYS.md`.

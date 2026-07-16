@@ -57,7 +57,7 @@ Acceptance gate:
 Status: **Delivered**. Task-scoped price rules, durable observations and
 notification batches, quiet-hour scheduling, aggregation, daily digests,
 critical override, per-channel history, retry behavior and price-calendar
-badges are implemented. Phase 3 is the next development stage.
+badges are implemented.
 
 Deliverables:
 
@@ -75,6 +75,12 @@ Acceptance gate:
 - Each delivery is traceable from rule to event to channel outcome.
 
 ## Phase 3 — flexible dates, multi-night stays and comparison
+
+Status: **Delivered**. Deterministic date combinations, weekend and next-30-day
+shortcuts, durable resumable searches, nightly evidence reuse, continuous-stay
+validation, regular/member totals, room-change detection, multi-hotel heat
+maps and daily cheapest-hotel markers are implemented. Phase 4 is the next
+development stage.
 
 Deliverables:
 

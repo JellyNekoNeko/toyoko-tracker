@@ -73,6 +73,7 @@ def initialize_runtime(lan_enabled: Optional[bool] = None) -> bool:
         initialize_workspace()
         with runtime._CONFIG_LOCK:
             ensure_default_task(runtime._CONFIG)
+        runtime.recover_flexible_stay_jobs()
         runtime.start_task_scheduler()
         runtime.start_alert_dispatcher()
     except Exception as exc:
