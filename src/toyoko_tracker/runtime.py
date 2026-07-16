@@ -20,6 +20,7 @@ import sys
 import math
 import platform
 import shutil
+import uuid
 import webbrowser
 import socket
 import subprocess
@@ -34,7 +35,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple, Dict, Any, Mapping
 
 import requests
-from flask import request, jsonify, Response
+from flask import request, jsonify, Response, send_file
 from bs4 import BeautifulSoup
 
 from .i18n import LANGUAGE_OPTIONS, normalize_primary_language as _normalize_primary_language
@@ -237,6 +238,7 @@ from .settings import (
     HEADERS,
     RADIUS_HOTELS_CACHE_PATH,
     SEARCH_HISTORY_PATH,
+    IMPORT_DIR,
     TIMEOUT,
 )
 from .desktop_version import DESKTOP_VERSION
@@ -893,6 +895,28 @@ def _upgrade_from_pypi_async() -> None:
     def worker() -> None:
         try:
             cmd = _pypi_upgrade_command()
+            with _UPDATE_LOCK:
+                target_version = str(_UPDATE_STATUS.get("latest_version") or "")
+            from .data_tools import create_pre_upgrade_backup, update_rollback_metadata
+
+            data_backup = create_pre_upgrade_backup(
+                target_version,
+                f"pypi:{method}",
+                config_dir=Path(CONFIG_DIR),
+            )
+            update_rollback_metadata(
+                {
+                    "install_method": method,
+                    "upgrade_command": cmd[:2],
+                },
+                config_dir=Path(CONFIG_DIR),
+            )
+            _set_update_status(
+                state="upgrading",
+                message=f"backup complete; upgrading with {method}",
+                data_backup_path=str(data_backup["path"]),
+                rollback_metadata_path=str(data_backup["rollback_metadata_path"]),
+            )
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
             output = ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()[-4000:]
             if proc.returncode == 0:
@@ -942,11 +966,28 @@ def _upgrade_desktop_async() -> None:
                 config_dir=Path(CONFIG_DIR),
                 progress=progress,
             )
+            from .data_tools import create_pre_upgrade_backup, update_rollback_metadata
+
+            data_backup = create_pre_upgrade_backup(
+                version,
+                asset_name,
+                config_dir=Path(CONFIG_DIR),
+            )
+            update_rollback_metadata(
+                {
+                    "application_backup": str(update.backup_root),
+                    "staged_application": str(update.staged_root),
+                    "installer_helper": str(update.helper_path),
+                },
+                config_dir=Path(CONFIG_DIR),
+            )
             _set_update_status(
                 state="installing",
                 message="update verified; restarting to install",
                 download_percent=100,
                 backup_path=str(update.backup_root),
+                data_backup_path=str(data_backup["path"]),
+                rollback_metadata_path=str(data_backup["rollback_metadata_path"]),
             )
             _launch_desktop_update_helper(update)
             threading.Thread(
@@ -2877,7 +2918,7 @@ def home() -> Response:
     <link rel="icon" type="image/png" href="/static/toyoko-chan-mascot.png?v=3">
     <link rel="apple-touch-icon" href="/static/toyoko-chan-mascot.png?v=3">
     <link rel="manifest" href="/manifest.webmanifest">
-    <link rel="stylesheet" href="/static/app.css?v={APP_VERSION}-phase5-1">
+    <link rel="stylesheet" href="/static/app.css?v={APP_VERSION}-phase6-1">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"></head>
 	        <body data-theme="light" data-app-version="{APP_VERSION}">
 	          <div class="app-shell">
@@ -3899,6 +3940,54 @@ def home() -> Response:
 	                  <span id="desktop-lifecycle-state" aria-live="polite">正在读取桌面能力</span>
 	                </div>
 	              </section>
+	              <section class="interface-card phase6-data-card" id="phase6-data-card">
+	                <span class="interface-card-icon">⇄</span>
+	                <div><h2 id="phase6-data-title">数据与备份</h2><p id="phase6-data-help">导出可校验备份，预览冲突后再导入，并清理可重建数据。</p></div>
+	                <div class="phase6-storage-summary" id="phase6-storage-summary" aria-live="polite">正在读取存储状态</div>
+	                <div class="phase6-data-controls">
+	                  <label class="inline"><input id="phase6_export_history" type="checkbox"> <span id="phase6-export-history-label">包含价格、提醒与运行历史</span></label>
+	                  <button type="button" class="primary" id="btn_phase6_export">导出备份</button>
+	                  <label class="phase6-file-label" for="phase6_import_file" id="phase6-import-file-label">选择备份文件</label>
+	                  <input id="phase6_import_file" type="file" accept=".zip,application/zip">
+	                  <button type="button" id="btn_phase6_import_preview">预览导入</button>
+	                  <select id="phase6_import_strategy" aria-label="Import conflict strategy">
+	                    <option value="keep_existing">保留现有冲突项</option>
+	                    <option value="overwrite">用备份覆盖冲突项</option>
+	                    <option value="replace_imported">替换备份包含的数据</option>
+	                  </select>
+	                  <button type="button" class="danger" id="btn_phase6_import_apply" disabled>确认导入</button>
+	                </div>
+	                <div class="phase6-import-preview" id="phase6-import-preview" aria-live="polite">导入前会先校验清单、SHA-256 和数据库完整性。</div>
+	                <div class="phase6-cleanup-controls">
+	                  <select id="phase6_cleanup_category" aria-label="Storage cleanup category">
+	                    <option value="cache">检索缓存</option>
+	                    <option value="events">事件记录</option>
+	                    <option value="alerts">提醒历史</option>
+	                    <option value="analytics">价格统计历史</option>
+	                    <option value="prices">价格日历缓存</option>
+	                    <option value="task_runs">任务运行历史</option>
+	                    <option value="completed_flexible">已完成灵活日期任务</option>
+	                    <option value="imports">已上传的导入包</option>
+	                    <option value="updates">旧更新暂存</option>
+	                    <option value="backups">旧备份（保留最新一份）</option>
+	                  </select>
+	                  <label><span id="phase6-cleanup-days-label">保留天数</span><input id="phase6_cleanup_days" type="number" min="1" max="3650" value="30"></label>
+	                  <button type="button" id="btn_phase6_cleanup_preview">预估清理</button>
+	                  <button type="button" id="btn_phase6_cleanup">执行清理</button>
+	                </div>
+	                <div class="phase6-data-state" id="phase6-data-state" aria-live="polite"></div>
+	              </section>
+	              <section class="interface-card phase6-diagnostics-card" id="phase6-diagnostics-card">
+	                <span class="interface-card-icon">＋</span>
+	                <div><h2 id="phase6-diagnostics-title">运行诊断</h2><p id="phase6-diagnostics-help">检查数据库、存储、运行环境和跨平台信息；支持包会自动脱敏。</p></div>
+	                <div class="interface-card-actions">
+	                  <button type="button" id="btn_phase6_diagnostics_refresh">刷新诊断</button>
+	                  <button type="button" id="btn_phase6_diagnostics_copy">复制报告</button>
+	                  <button type="button" class="primary" id="btn_phase6_support_bundle">下载支持包</button>
+	                  <span id="phase6-diagnostics-state" aria-live="polite">尚未运行诊断</span>
+	                </div>
+	                <pre id="phase6-diagnostics-report">-</pre>
+	              </section>
 	              <section class="interface-card pwa-install-card">
 	                <span class="interface-card-icon">▣</span>
 	                <div><h2 id="pwa-title">手机桌面版</h2><p id="pwa-help">安装到主屏幕，保留最近结果并自动重连。</p></div>
@@ -4064,7 +4153,7 @@ def home() -> Response:
 
     page_html += f"""
           <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-          <script src="/static/app.js?v={APP_VERSION}-phase5-1"></script>
+          <script src="/static/app.js?v={APP_VERSION}-phase6-1"></script>
         </body></html>
         """
     response = Response(page_html, mimetype="text/html")
@@ -5915,6 +6004,216 @@ def desktop_notifications_read() -> Response:
     from .desktop_lifecycle import mark_desktop_notifications_read
 
     return jsonify(mark_desktop_notifications_read())
+
+
+def _known_secret_values() -> List[str]:
+    with _CONFIG_LOCK:
+        return [
+            str(getattr(_CONFIG, key, "") or "")
+            for key in _SECRET_CONFIG_FIELDS | {"chat_id"}
+            if str(getattr(_CONFIG, key, "") or "")
+        ]
+
+
+def data_storage_status() -> Response:
+    from .data_tools import storage_status
+
+    try:
+        return jsonify({"ok": True, "storage": storage_status()})
+    except Exception as exc:
+        return jsonify({"ok": False, "message": str(exc)}), 500
+
+
+def data_export() -> Response:
+    from .data_tools import create_export_archive
+
+    payload = request.get_json(force=True, silent=True) or {}
+    try:
+        archive = create_export_archive(
+            components=payload.get("components"),
+            include_history=payload.get("include_history", False),
+            purpose="portable",
+        )
+        response = send_file(
+            archive["path"],
+            mimetype="application/zip",
+            as_attachment=True,
+            download_name=archive["filename"],
+            conditional=True,
+        )
+        response.headers["X-Toyoko-Archive-SHA256"] = archive["sha256"]
+        return response
+    except Exception as exc:
+        _log(f"[data] export failed: {exc}")
+        return jsonify({"ok": False, "message": str(exc)}), 400
+
+
+def data_import_preview() -> Response:
+    from .data_tools import preview_import_archive
+
+    upload = request.files.get("archive")
+    if upload is None or not upload.filename:
+        return jsonify({"ok": False, "message": "select a backup ZIP archive"}), 400
+    if request.content_length and request.content_length > 512 * 1024 * 1024:
+        return jsonify({"ok": False, "message": "archive is too large"}), 413
+    token = uuid.uuid4().hex
+    import_dir = Path(IMPORT_DIR)
+    import_dir.mkdir(parents=True, exist_ok=True)
+    archive_path = import_dir / f"{token}.zip"
+    try:
+        upload.save(archive_path)
+        preview = preview_import_archive(archive_path)
+        return jsonify({
+            "ok": True,
+            "token": token,
+            "filename": Path(upload.filename).name,
+            "preview": preview,
+        })
+    except Exception as exc:
+        archive_path.unlink(missing_ok=True)
+        _log(f"[data] import preview failed: {exc}")
+        return jsonify({"ok": False, "message": str(exc)}), 400
+
+
+def _restart_services_after_import() -> None:
+    global _TASK_SERVICE, _ALERT_DISPATCHER
+    with _TASK_SERVICE_LOCK:
+        _TASK_SERVICE = None
+    with _ALERT_DISPATCHER_LOCK:
+        _ALERT_DISPATCHER = None
+    _load_config_from_file(AUTO_SAVE_PATH)
+    _workspace.initialize_workspace()
+    with _CONFIG_LOCK:
+        _workspace.ensure_default_task(_CONFIG)
+    recover_flexible_stay_jobs()
+    start_task_scheduler()
+    start_alert_dispatcher()
+    _start_catalog_scheduler()
+    _start_provider_database_scheduler()
+
+
+def data_import_apply() -> Response:
+    from .data_tools import apply_import_archive
+    from .server import stop_runtime_services
+
+    payload = request.get_json(force=True, silent=True) or {}
+    token = str(payload.get("token") or "")
+    if not re.fullmatch(r"[0-9a-f]{32}", token):
+        return jsonify({"ok": False, "message": "import token is invalid"}), 400
+    archive_path = Path(IMPORT_DIR) / f"{token}.zip"
+    if not archive_path.is_file():
+        return jsonify({"ok": False, "message": "import preview has expired"}), 404
+    with _FLEXIBLE_STAY_LOCK:
+        flexible_busy = bool(_FLEXIBLE_STAY_THREAD and _FLEXIBLE_STAY_THREAD.is_alive())
+    if flexible_busy:
+        return jsonify({
+            "ok": False,
+            "message": "pause the flexible-date search before importing data",
+        }), 409
+    with _TASK_SERVICE_LOCK:
+        active_tasks = (
+            int(_TASK_SERVICE.summary().get("active_count") or 0)
+            if _TASK_SERVICE is not None
+            else int(bool(_RUN_REQUESTED))
+        )
+    if active_tasks:
+        return jsonify({
+            "ok": False,
+            "message": "pause active monitor tasks before importing data",
+        }), 409
+    stopped = False
+    try:
+        stop_runtime_services()
+        with _TASK_SERVICE_LOCK:
+            task_service_draining = bool(_TASK_SERVICE and _TASK_SERVICE.running)
+        with _ALERT_DISPATCHER_LOCK:
+            alert_dispatcher_draining = bool(
+                _ALERT_DISPATCHER and _ALERT_DISPATCHER.running
+            )
+        if task_service_draining or alert_dispatcher_draining:
+            return jsonify({
+                "ok": False,
+                "message": "background services are still draining; retry the import shortly",
+            }), 409
+        stopped = True
+        result = apply_import_archive(
+            archive_path,
+            str(payload.get("strategy") or "keep_existing"),
+        )
+        _restart_services_after_import()
+        return jsonify({"ok": True, "result": result})
+    except Exception as exc:
+        _log(f"[data] import failed: {exc}")
+        if stopped:
+            try:
+                _restart_services_after_import()
+            except Exception as restart_exc:
+                _log(f"[data] service restart after failed import: {restart_exc}")
+        return jsonify({"ok": False, "message": str(exc)}), 400
+
+
+def data_cleanup() -> Response:
+    from .data_tools import cleanup_storage
+
+    payload = request.get_json(force=True, silent=True) or {}
+    try:
+        result = cleanup_storage(
+            payload.get("categories") or [],
+            older_than_days=payload.get("older_than_days", 30),
+            dry_run=bool(payload.get("dry_run", False)),
+        )
+        return jsonify({"ok": True, "result": result})
+    except Exception as exc:
+        return jsonify({"ok": False, "message": str(exc)}), 400
+
+
+def diagnostics_status() -> Response:
+    from .diagnostics import diagnostic_snapshot, render_diagnostic_report
+
+    try:
+        with _LOG_LOCK:
+            logs = list(_LOG_LINES[-200:])
+        snapshot = diagnostic_snapshot(
+            runtime=_runtime_status_snapshot(),
+            logs=logs,
+            known_secrets=_known_secret_values(),
+        )
+        return jsonify({
+            "ok": True,
+            "diagnostics": snapshot,
+            "report": render_diagnostic_report(snapshot),
+        })
+    except Exception as exc:
+        return jsonify({"ok": False, "message": str(exc)}), 500
+
+
+def diagnostics_support_bundle() -> Response:
+    from .diagnostics import create_support_bundle
+    from .settings import BACKUP_DIR
+
+    try:
+        with _LOG_LOCK:
+            logs = list(_LOG_LINES[-200:])
+        destination = Path(BACKUP_DIR) / (
+            f"toyoko-support-{datetime.now().strftime('%Y%m%d-%H%M%S')}-"
+            f"{uuid.uuid4().hex[:8]}.zip"
+        )
+        bundle = create_support_bundle(
+            destination,
+            runtime=_runtime_status_snapshot(),
+            logs=logs,
+            known_secrets=_known_secret_values(),
+        )
+        return send_file(
+            bundle["path"],
+            mimetype="application/zip",
+            as_attachment=True,
+            download_name=bundle["filename"],
+            conditional=True,
+        )
+    except Exception as exc:
+        _log(f"[diagnostics] support bundle failed: {exc}")
+        return jsonify({"ok": False, "message": str(exc)}), 500
 
 
 def cache_status() -> Response:

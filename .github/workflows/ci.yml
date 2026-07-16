@@ -29,6 +29,9 @@ jobs:
           - os: windows-latest
             python-version: "3.14"
             install-target: ".[dev]"
+          - os: macos-latest
+            python-version: "3.12"
+            install-target: ".[dev,all]"
 
     steps:
       - uses: actions/checkout@v7

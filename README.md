@@ -34,6 +34,7 @@ It supports:
 - 🌡 Multi-hotel total-price comparison, heat maps, and daily cheapest hotels
 - 📈 Historical percentiles with explainable low, normal, and high price labels
 - 🧳 Split-stay optimization, travel lists, hotel priorities, budgets, and itinerary exports
+- 💾 Verified data export/import, upgrade backups, storage cleanup, and redacted diagnostics
 - 🎯 Target-price, member-price, price-drop, and vacancy-transition alerts
 - 🌙 Quiet hours, alert aggregation, daily digests, and critical overrides
 - 🔔 Local desktop notifications
@@ -52,6 +53,8 @@ For flexible dates, multi-night validation, and hotel comparison, see
 [`docs/PHASE3_FLEXIBLE_STAYS.md`](docs/PHASE3_FLEXIBLE_STAYS.md).
 For historical price decisions, split stays, travel lists, and exports, see
 [`docs/PHASE4_TRIP_DECISIONS.md`](docs/PHASE4_TRIP_DECISIONS.md).
+For backups, import conflict handling, cleanup, and support diagnostics, see
+[`docs/PHASE6_DATA_DIAGNOSTICS.md`](docs/PHASE6_DATA_DIAGNOSTICS.md).
 
 ---
 
@@ -63,7 +66,8 @@ For historical price decisions, split stays, travel lists, and exports, see
 - Recommended: Python **3.10–3.14**
 - Internet connection
 
-The core HTTP/API WebUI is tested in CI on **Windows** and **Linux**. The
+The core HTTP/API WebUI is tested in CI on **Windows**, **Linux**, and
+**macOS**. The
 default engine does not require a desktop session. Playwright and native local
 notifications remain optional platform integrations.
 

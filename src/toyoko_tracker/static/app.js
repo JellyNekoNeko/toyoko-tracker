@@ -36,6 +36,9 @@
             let LAST_DIAGNOSTICS = {};
             let LAST_MOBILE_ACCESS_STATUS = null;
             let LAST_DESKTOP_LIFECYCLE = null;
+            let PHASE6_IMPORT_TOKEN = '';
+            let PHASE6_STORAGE = null;
+            let PHASE6_DIAGNOSTIC_REPORT = '';
             let PWA_INSTALL_PROMPT = null;
             let LAST_TREND_REFRESH = 0;
             let LAST_TREND_DATA = null;
@@ -1338,10 +1341,29 @@
               ko:{title:'데스크톱 백그라운드',help:'트레이, 로그인 시작, 절전 복구 및 알림 배지를 관리합니다.',close:'창을 닫아도 백그라운드에서 실행',login:'로그인 시 자동 시작',badge:'읽지 않은 알림 배지 표시',recovery:'절전 해제 또는 네트워크 복구 후 모니터링 재개',save:'데스크톱 설정 저장',read:'배지 지우기',loading:'데스크톱 기능 확인 중',webui:'현재 WebUI입니다. 설정은 데스크톱 앱에서 활성화됩니다.',ready:'데스크톱 기능 준비 완료 · 읽지 않음 {count}',saved:'데스크톱 설정 저장됨 · 읽지 않음 {count}',error:'데스크톱 설정을 불러오지 못함: {message}'},
               en:{title:'Desktop Background',help:'Manage tray, login startup, resume recovery, and notification badges.',close:'Keep running after the window closes',login:'Start automatically at login',badge:'Show unread notification badge',recovery:'Resume monitoring after sleep or network recovery',save:'Save desktop settings',read:'Clear badge',loading:'Checking desktop capabilities',webui:'This is the WebUI; these settings activate in the desktop app.',ready:'Desktop capabilities ready · {count} unread',saved:'Desktop settings saved · {count} unread',error:'Desktop settings failed: {message}'}
             };
+            const PHASE6_UI18N = {
+              zh_cn:{dataTitle:'数据与备份',dataHelp:'导出可校验备份，预览冲突后再导入，并清理可重建数据。',history:'包含价格、提醒与运行历史',export:'导出备份',file:'选择备份文件',preview:'预览导入',keep:'保留现有冲突项',overwrite:'用备份覆盖冲突项',replace:'替换备份包含的数据',apply:'确认导入',initial:'导入前会先校验清单、SHA-256 和数据库完整性。',days:'保留天数',cleanupPreview:'预估清理',cleanup:'执行清理',diagTitle:'运行诊断',diagHelp:'检查数据库、存储、运行环境和跨平台信息；支持包会自动脱敏。',diagRefresh:'刷新诊断',diagCopy:'复制报告',support:'下载支持包',diagInitial:'尚未运行诊断',loading:'处理中…',storage:'数据 {total} · 数据库 {database} · 备份 {backups} 份 · Schema {schema}',previewReady:'校验通过：{rows} 条记录，{conflicts} 项冲突。选择策略后确认导入。',imported:'导入完成，运行服务已重新加载。',cleanupResult:'{mode}：{count} 项，预计/实际释放 {bytes}。',copied:'诊断报告已复制。',downloaded:'文件已生成。',error:'操作失败：{message}',summaryTotal:'总占用',summaryDb:'数据库',summaryBackup:'备份',summarySchema:'Schema'},
+              zh_tw:{dataTitle:'資料與備份',dataHelp:'匯出可驗證備份，預覽衝突後再匯入，並清理可重建資料。',history:'包含價格、提醒與執行歷史',export:'匯出備份',file:'選擇備份檔案',preview:'預覽匯入',keep:'保留現有衝突項',overwrite:'用備份覆蓋衝突項',replace:'替換備份包含的資料',apply:'確認匯入',initial:'匯入前會先驗證清單、SHA-256 與資料庫完整性。',days:'保留天數',cleanupPreview:'預估清理',cleanup:'執行清理',diagTitle:'執行診斷',diagHelp:'檢查資料庫、儲存、執行環境與跨平台資訊；支援包會自動脫敏。',diagRefresh:'重新整理診斷',diagCopy:'複製報告',support:'下載支援包',diagInitial:'尚未執行診斷',loading:'處理中…',storage:'資料 {total} · 資料庫 {database} · 備份 {backups} 份 · Schema {schema}',previewReady:'驗證通過：{rows} 筆記錄，{conflicts} 項衝突。選擇策略後確認匯入。',imported:'匯入完成，執行服務已重新載入。',cleanupResult:'{mode}：{count} 項，預估/實際釋放 {bytes}。',copied:'診斷報告已複製。',downloaded:'檔案已產生。',error:'操作失敗：{message}',summaryTotal:'總占用',summaryDb:'資料庫',summaryBackup:'備份',summarySchema:'Schema'},
+              ja:{dataTitle:'データとバックアップ',dataHelp:'検証可能なバックアップを作成し、競合を確認してからインポートし、再生成可能なデータを整理します。',history:'価格・通知・実行履歴を含める',export:'バックアップを書き出す',file:'バックアップを選択',preview:'インポートを確認',keep:'既存の競合項目を保持',overwrite:'バックアップで競合項目を上書き',replace:'バックアップ対象データを置換',apply:'インポートを実行',initial:'インポート前にマニフェスト、SHA-256、DB整合性を検証します。',days:'保持日数',cleanupPreview:'整理内容を確認',cleanup:'整理を実行',diagTitle:'実行診断',diagHelp:'DB、ストレージ、実行環境、各OS情報を確認します。サポートバンドルは自動で秘匿化されます。',diagRefresh:'診断を更新',diagCopy:'レポートをコピー',support:'サポートバンドル',diagInitial:'診断はまだ実行されていません',loading:'処理中…',storage:'データ {total} · DB {database} · バックアップ {backups} · Schema {schema}',previewReady:'検証完了：{rows} 件、競合 {conflicts} 件。方式を選んで実行してください。',imported:'インポートが完了し、サービスを再読込しました。',cleanupResult:'{mode}: {count} 件、解放見込み/実績 {bytes}。',copied:'診断レポートをコピーしました。',downloaded:'ファイルを作成しました。',error:'処理エラー：{message}',summaryTotal:'総容量',summaryDb:'データベース',summaryBackup:'バックアップ',summarySchema:'Schema'},
+              ko:{dataTitle:'데이터 및 백업',dataHelp:'검증 가능한 백업을 내보내고 충돌을 미리 본 뒤 가져오며 재생성 가능한 데이터를 정리합니다.',history:'가격·알림·실행 기록 포함',export:'백업 내보내기',file:'백업 파일 선택',preview:'가져오기 미리보기',keep:'기존 충돌 항목 유지',overwrite:'백업으로 충돌 항목 덮어쓰기',replace:'백업 포함 데이터 교체',apply:'가져오기 확인',initial:'가져오기 전에 매니페스트, SHA-256 및 DB 무결성을 검사합니다.',days:'보관 일수',cleanupPreview:'정리 예상',cleanup:'정리 실행',diagTitle:'실행 진단',diagHelp:'DB, 저장소, 실행 환경과 플랫폼 정보를 검사하며 지원 번들은 자동으로 민감정보를 제거합니다.',diagRefresh:'진단 새로고침',diagCopy:'보고서 복사',support:'지원 번들 다운로드',diagInitial:'아직 진단하지 않았습니다',loading:'처리 중…',storage:'데이터 {total} · DB {database} · 백업 {backups}개 · Schema {schema}',previewReady:'검증 완료: {rows}개 기록, {conflicts}개 충돌. 전략을 선택한 뒤 가져오세요.',imported:'가져오기가 완료되어 실행 서비스를 다시 불러왔습니다.',cleanupResult:'{mode}: {count}개, 예상/실제 확보 {bytes}.',copied:'진단 보고서를 복사했습니다.',downloaded:'파일이 생성되었습니다.',error:'작업 실패: {message}',summaryTotal:'전체 사용량',summaryDb:'데이터베이스',summaryBackup:'백업',summarySchema:'Schema'},
+              en:{dataTitle:'Data & Backups',dataHelp:'Export verified backups, preview conflicts before import, and clean rebuildable data.',history:'Include price, alert, and run history',export:'Export backup',file:'Choose backup file',preview:'Preview import',keep:'Keep existing conflicts',overwrite:'Overwrite conflicts from backup',replace:'Replace data included in backup',apply:'Apply import',initial:'The manifest, SHA-256 hashes, and database integrity are verified before import.',days:'Retention days',cleanupPreview:'Preview cleanup',cleanup:'Run cleanup',diagTitle:'Runtime Diagnostics',diagHelp:'Check database, storage, runtime, and platform details. Support bundles are automatically redacted.',diagRefresh:'Refresh diagnostics',diagCopy:'Copy report',support:'Download support bundle',diagInitial:'Diagnostics have not run yet',loading:'Working…',storage:'Data {total} · Database {database} · {backups} backups · Schema {schema}',previewReady:'Verified: {rows} rows and {conflicts} conflicts. Choose a strategy, then apply.',imported:'Import complete; runtime services were reloaded.',cleanupResult:'{mode}: {count} items, {bytes} estimated/actually reclaimed.',copied:'Diagnostic report copied.',downloaded:'File generated.',error:'Operation failed: {message}',summaryTotal:'Total storage',summaryDb:'Database',summaryBackup:'Backups',summarySchema:'Schema'}
+            };
+            const PHASE6_CLEANUP_LABELS = {
+              zh_cn:{cache:'检索缓存',events:'事件记录',alerts:'提醒历史',analytics:'价格统计历史',prices:'价格日历缓存',task_runs:'任务运行历史',completed_flexible:'已完成灵活日期任务',imports:'已上传的导入包',updates:'旧更新暂存',backups:'旧备份（保留最新一份）'},
+              zh_tw:{cache:'搜尋快取',events:'事件記錄',alerts:'提醒歷史',analytics:'價格統計歷史',prices:'價格日曆快取',task_runs:'任務執行歷史',completed_flexible:'已完成彈性日期任務',imports:'已上傳的匯入包',updates:'舊更新暫存',backups:'舊備份（保留最新一份）'},
+              ja:{cache:'検索キャッシュ',events:'イベント履歴',alerts:'通知履歴',analytics:'価格統計履歴',prices:'価格カレンダーキャッシュ',task_runs:'タスク実行履歴',completed_flexible:'完了した柔軟日程タスク',imports:'アップロード済みインポート',updates:'古い更新ステージ',backups:'古いバックアップ（最新を保持）'},
+              ko:{cache:'검색 캐시',events:'이벤트 기록',alerts:'알림 기록',analytics:'가격 통계 기록',prices:'가격 달력 캐시',task_runs:'작업 실행 기록',completed_flexible:'완료된 유연 날짜 작업',imports:'업로드된 가져오기 번들',updates:'이전 업데이트 임시 파일',backups:'이전 백업(최신 1개 유지)'},
+              en:{cache:'Search cache',events:'Event history',alerts:'Alert history',analytics:'Price analytics history',prices:'Price calendar cache',task_runs:'Task run history',completed_flexible:'Completed flexible-date jobs',imports:'Uploaded import archives',updates:'Old update staging',backups:'Old backups (keep newest)'}
+            };
             function currentLang(){ return document.getElementById('primary_language')?.value || 'zh_cn'; }
             function desktopTx(key, values={}){
               const table = DESKTOP_UI18N[currentLang()] || DESKTOP_UI18N.en;
               return String(table[key] || DESKTOP_UI18N.en[key] || key)
+                .replace(/\{(\w+)\}/g, (_, name) => values[name] != null ? String(values[name]) : '');
+            }
+            function phase6Tx(key, values={}){
+              const table = PHASE6_UI18N[currentLang()] || PHASE6_UI18N.en;
+              return String(table[key] || PHASE6_UI18N.en[key] || key)
                 .replace(/\{(\w+)\}/g, (_, name) => values[name] != null ? String(values[name]) : '');
             }
             function tx(key){
@@ -2385,6 +2407,19 @@
               document.getElementById('btn_mobile_access_copy')?.addEventListener('click', copyMobileAccessUrl);
               document.getElementById('btn_desktop_lifecycle_save')?.addEventListener('click', saveDesktopLifecycle);
               document.getElementById('btn_desktop_notifications_read')?.addEventListener('click', clearDesktopBadge);
+              document.getElementById('btn_phase6_export')?.addEventListener('click', exportPhase6Data);
+              document.getElementById('btn_phase6_import_preview')?.addEventListener('click', previewPhase6Import);
+              document.getElementById('btn_phase6_import_apply')?.addEventListener('click', applyPhase6Import);
+              document.getElementById('btn_phase6_cleanup_preview')?.addEventListener('click', () => cleanupPhase6Storage(true));
+              document.getElementById('btn_phase6_cleanup')?.addEventListener('click', () => cleanupPhase6Storage(false));
+              document.getElementById('btn_phase6_diagnostics_refresh')?.addEventListener('click', loadPhase6Diagnostics);
+              document.getElementById('btn_phase6_diagnostics_copy')?.addEventListener('click', copyPhase6Diagnostics);
+              document.getElementById('btn_phase6_support_bundle')?.addEventListener('click', downloadPhase6SupportBundle);
+              document.getElementById('phase6_import_file')?.addEventListener('change', () => {
+                PHASE6_IMPORT_TOKEN = '';
+                const apply = document.getElementById('btn_phase6_import_apply');
+                if (apply) apply.disabled = true;
+              });
               document.querySelectorAll('[data-mobile-connection]').forEach(button => {
                 button.addEventListener('click', () => selectMobileConnection(button.dataset.mobileConnection || 'lan'));
               });
@@ -2438,6 +2473,7 @@
                 if (storageGet(GUIDE_SEEN_KEY, '') !== guideAppVersion()) openGuide(true);
               }, 450);
               loadDesktopLifecycle();
+              loadPhase6Storage();
               if (deepLinkParams.get('event_id')) {
                 fetch('/api/v1/desktop/notifications/read', {method:'POST'}).catch(()=>{});
               }
@@ -3470,6 +3506,36 @@
               setNodeText('#btn_desktop_lifecycle_save', desktopTx('save'));
               setNodeText('#btn_desktop_notifications_read', desktopTx('read'));
               if (LAST_DESKTOP_LIFECYCLE) renderDesktopLifecycle(LAST_DESKTOP_LIFECYCLE);
+              setNodeText('#phase6-data-title', phase6Tx('dataTitle'));
+              setNodeText('#phase6-data-help', phase6Tx('dataHelp'));
+              setNodeText('#phase6-export-history-label', phase6Tx('history'));
+              setNodeText('#btn_phase6_export', phase6Tx('export'));
+              setNodeText('#phase6-import-file-label', phase6Tx('file'));
+              setNodeText('#btn_phase6_import_preview', phase6Tx('preview'));
+              setNodeText('#btn_phase6_import_apply', phase6Tx('apply'));
+              setNodeText('#phase6-cleanup-days-label', phase6Tx('days'));
+              setNodeText('#btn_phase6_cleanup_preview', phase6Tx('cleanupPreview'));
+              setNodeText('#btn_phase6_cleanup', phase6Tx('cleanup'));
+              setNodeText('#phase6-diagnostics-title', phase6Tx('diagTitle'));
+              setNodeText('#phase6-diagnostics-help', phase6Tx('diagHelp'));
+              setNodeText('#btn_phase6_diagnostics_refresh', phase6Tx('diagRefresh'));
+              setNodeText('#btn_phase6_diagnostics_copy', phase6Tx('diagCopy'));
+              setNodeText('#btn_phase6_support_bundle', phase6Tx('support'));
+              const importStrategy = document.getElementById('phase6_import_strategy');
+              if (importStrategy) {
+                const labels = {keep_existing:phase6Tx('keep'), overwrite:phase6Tx('overwrite'), replace_imported:phase6Tx('replace')};
+                Array.from(importStrategy.options).forEach(option => { option.textContent = labels[option.value] || option.value; });
+              }
+              const cleanupSelect = document.getElementById('phase6_cleanup_category');
+              if (cleanupSelect) {
+                const labels = PHASE6_CLEANUP_LABELS[lang] || PHASE6_CLEANUP_LABELS.en;
+                Array.from(cleanupSelect.options).forEach(option => { option.textContent = labels[option.value] || option.value; });
+              }
+              const importPreview = document.getElementById('phase6-import-preview');
+              if (importPreview && importPreview.dataset.ready !== 'true') importPreview.textContent = phase6Tx('initial');
+              const diagnosticState = document.getElementById('phase6-diagnostics-state');
+              if (diagnosticState && !PHASE6_DIAGNOSTIC_REPORT) diagnosticState.textContent = phase6Tx('diagInitial');
+              if (PHASE6_STORAGE) renderPhase6Storage(PHASE6_STORAGE);
               setNodeText('#mobile-access-title', tx('mobileAccessTitle'));
               setNodeText('#mobile-access-help', tx('mobileAccessHelp'));
               setNodeText('#mobile-access-enable-label', tx('enableMobileAccess'));
@@ -6099,6 +6165,228 @@
               }catch(error){
                 const state = document.getElementById('desktop-lifecycle-state');
                 if (state) state.textContent = desktopTx('error', {message:String(error)});
+              }
+            }
+
+            function formatPhase6Bytes(value){
+              let amount = Math.max(0, Number(value || 0));
+              const units = ['B','KB','MB','GB'];
+              let index = 0;
+              while (amount >= 1024 && index < units.length - 1) {
+                amount /= 1024;
+                index += 1;
+              }
+              return `${amount >= 100 || index === 0 ? Math.round(amount) : amount.toFixed(1)} ${units[index]}`;
+            }
+
+            function setPhase6State(message, state=''){
+              const element = document.getElementById('phase6-data-state');
+              if (!element) return;
+              element.textContent = message || '';
+              element.dataset.state = state;
+            }
+
+            function renderPhase6Storage(storage){
+              PHASE6_STORAGE = storage || {};
+              const element = document.getElementById('phase6-storage-summary');
+              if (!element) return;
+              element.innerHTML = [
+                [phase6Tx('summaryTotal'), formatPhase6Bytes(storage?.total_size)],
+                [phase6Tx('summaryDb'), formatPhase6Bytes(storage?.database_size)],
+                [phase6Tx('summaryBackup'), String(storage?.backup_count || 0)],
+                [phase6Tx('summarySchema'), `${storage?.workspace_schema_version || 0} / ${storage?.supported_schema_version || 0}`]
+              ].map(([label,value]) => `<span>${escapeHtml(label)}<b>${escapeHtml(value)}</b></span>`).join('');
+            }
+
+            async function loadPhase6Storage(){
+              try{
+                const response = await fetch('/api/v1/data/storage', {cache:'no-store'});
+                const data = await response.json();
+                if (!response.ok || !data.ok) throw new Error(data.message || `HTTP ${response.status}`);
+                renderPhase6Storage(data.storage);
+              }catch(error){
+                setPhase6State(phase6Tx('error', {message:String(error)}), 'error');
+              }
+            }
+
+            async function phase6ErrorFromResponse(response){
+              try{
+                const data = await response.json();
+                return data.message || `HTTP ${response.status}`;
+              }catch(_error){
+                return `HTTP ${response.status}`;
+              }
+            }
+
+            async function downloadPhase6Response(response, fallbackName){
+              if (!response.ok) throw new Error(await phase6ErrorFromResponse(response));
+              const blob = await response.blob();
+              const disposition = response.headers.get('Content-Disposition') || '';
+              const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+              const plain = disposition.match(/filename="?([^";]+)"?/i);
+              const filename = encoded ? decodeURIComponent(encoded[1]) : (plain ? plain[1] : fallbackName);
+              const url = URL.createObjectURL(blob);
+              const anchor = document.createElement('a');
+              anchor.href = url;
+              anchor.download = filename || fallbackName;
+              document.body.appendChild(anchor);
+              anchor.click();
+              anchor.remove();
+              setTimeout(() => URL.revokeObjectURL(url), 1500);
+            }
+
+            async function exportPhase6Data(){
+              const button = document.getElementById('btn_phase6_export');
+              if (button) button.disabled = true;
+              setPhase6State(phase6Tx('loading'));
+              try{
+                const response = await fetch('/api/v1/data/export', {
+                  method:'POST',
+                  headers:{'Content-Type':'application/json'},
+                  body:JSON.stringify({
+                    include_history:!!document.getElementById('phase6_export_history')?.checked
+                  })
+                });
+                await downloadPhase6Response(response, 'toyoko-backup.zip');
+                setPhase6State(phase6Tx('downloaded'), 'success');
+                await loadPhase6Storage();
+              }catch(error){
+                setPhase6State(phase6Tx('error', {message:String(error)}), 'error');
+              }finally{
+                if (button) button.disabled = false;
+              }
+            }
+
+            async function previewPhase6Import(){
+              const input = document.getElementById('phase6_import_file');
+              const file = input?.files?.[0];
+              if (!file) {
+                setPhase6State(phase6Tx('error', {message:phase6Tx('file')}), 'error');
+                return;
+              }
+              const button = document.getElementById('btn_phase6_import_preview');
+              if (button) button.disabled = true;
+              PHASE6_IMPORT_TOKEN = '';
+              const apply = document.getElementById('btn_phase6_import_apply');
+              if (apply) apply.disabled = true;
+              setPhase6State(phase6Tx('loading'));
+              try{
+                const form = new FormData();
+                form.append('archive', file);
+                const response = await fetch('/api/v1/data/import/preview', {method:'POST', body:form});
+                const data = await response.json();
+                if (!response.ok || !data.ok) throw new Error(data.message || `HTTP ${response.status}`);
+                PHASE6_IMPORT_TOKEN = String(data.token || '');
+                const preview = data.preview || {};
+                const rows = Object.values(preview.table_counts || {}).reduce((sum,value) => sum + Number(value || 0), 0);
+                const element = document.getElementById('phase6-import-preview');
+                if (element) {
+                  element.textContent = phase6Tx('previewReady', {rows, conflicts:Number(preview.conflict_total || 0)});
+                  element.dataset.ready = 'true';
+                }
+                if (apply) apply.disabled = !PHASE6_IMPORT_TOKEN;
+                setPhase6State('');
+              }catch(error){
+                const element = document.getElementById('phase6-import-preview');
+                if (element) {
+                  element.textContent = phase6Tx('initial');
+                  element.dataset.ready = 'false';
+                }
+                setPhase6State(phase6Tx('error', {message:String(error)}), 'error');
+              }finally{
+                if (button) button.disabled = false;
+              }
+            }
+
+            async function applyPhase6Import(){
+              if (!PHASE6_IMPORT_TOKEN) return;
+              const button = document.getElementById('btn_phase6_import_apply');
+              if (button) button.disabled = true;
+              setPhase6State(phase6Tx('loading'));
+              try{
+                const response = await fetch('/api/v1/data/import/apply', {
+                  method:'POST',
+                  headers:{'Content-Type':'application/json'},
+                  body:JSON.stringify({
+                    token:PHASE6_IMPORT_TOKEN,
+                    strategy:document.getElementById('phase6_import_strategy')?.value || 'keep_existing'
+                  })
+                });
+                const data = await response.json();
+                if (!response.ok || !data.ok) throw new Error(data.message || `HTTP ${response.status}`);
+                PHASE6_IMPORT_TOKEN = '';
+                setPhase6State(phase6Tx('imported'), 'success');
+                await loadPhase6Storage();
+                scheduleStatusReconnect(80);
+              }catch(error){
+                setPhase6State(phase6Tx('error', {message:String(error)}), 'error');
+                if (button) button.disabled = false;
+              }
+            }
+
+            async function cleanupPhase6Storage(dryRun){
+              const category = document.getElementById('phase6_cleanup_category')?.value || 'cache';
+              const days = Number(document.getElementById('phase6_cleanup_days')?.value || 30);
+              setPhase6State(phase6Tx('loading'));
+              try{
+                const response = await fetch('/api/v1/data/cleanup', {
+                  method:'POST',
+                  headers:{'Content-Type':'application/json'},
+                  body:JSON.stringify({categories:[category], older_than_days:days, dry_run:!!dryRun})
+                });
+                const data = await response.json();
+                if (!response.ok || !data.ok) throw new Error(data.message || `HTTP ${response.status}`);
+                const result = data.result || {};
+                const count = Object.values(result.deleted || {}).reduce((sum,value) => sum + Number(value || 0), 0);
+                setPhase6State(phase6Tx('cleanupResult', {
+                  mode:dryRun ? phase6Tx('cleanupPreview') : phase6Tx('cleanup'),
+                  count,
+                  bytes:formatPhase6Bytes(result.bytes_reclaimed)
+                }), dryRun ? '' : 'success');
+                if (!dryRun) await loadPhase6Storage();
+              }catch(error){
+                setPhase6State(phase6Tx('error', {message:String(error)}), 'error');
+              }
+            }
+
+            async function loadPhase6Diagnostics(){
+              const state = document.getElementById('phase6-diagnostics-state');
+              if (state) state.textContent = phase6Tx('loading');
+              try{
+                const response = await fetch('/api/v1/diagnostics', {cache:'no-store'});
+                const data = await response.json();
+                if (!response.ok || !data.ok) throw new Error(data.message || `HTTP ${response.status}`);
+                PHASE6_DIAGNOSTIC_REPORT = String(data.report || '');
+                const report = document.getElementById('phase6-diagnostics-report');
+                if (report) report.textContent = PHASE6_DIAGNOSTIC_REPORT || '-';
+                const diagnostic = data.diagnostics || {};
+                if (state) state.textContent = `${diagnostic?.health?.database?.integrity || '-'} · ${diagnostic?.platform?.system || '-'} ${diagnostic?.platform?.machine || ''}`;
+              }catch(error){
+                if (state) state.textContent = phase6Tx('error', {message:String(error)});
+              }
+            }
+
+            async function copyPhase6Diagnostics(){
+              if (!PHASE6_DIAGNOSTIC_REPORT) await loadPhase6Diagnostics();
+              if (!PHASE6_DIAGNOSTIC_REPORT) return;
+              await navigator.clipboard.writeText(PHASE6_DIAGNOSTIC_REPORT);
+              const state = document.getElementById('phase6-diagnostics-state');
+              if (state) state.textContent = phase6Tx('copied');
+            }
+
+            async function downloadPhase6SupportBundle(){
+              const button = document.getElementById('btn_phase6_support_bundle');
+              if (button) button.disabled = true;
+              try{
+                const response = await fetch('/api/v1/diagnostics/support-bundle', {method:'POST'});
+                await downloadPhase6Response(response, 'toyoko-support.zip');
+                const state = document.getElementById('phase6-diagnostics-state');
+                if (state) state.textContent = phase6Tx('downloaded');
+              }catch(error){
+                const state = document.getElementById('phase6-diagnostics-state');
+                if (state) state.textContent = phase6Tx('error', {message:String(error)});
+              }finally{
+                if (button) button.disabled = false;
               }
             }
 

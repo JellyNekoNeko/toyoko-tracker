@@ -251,15 +251,16 @@ Status: **Delivered**.
 
 ## Current assignment
 
-Phase 1 through Phase 5 are complete. Phase 6 is the next active stage and
-begins with backup/export contracts, diagnostics and release-closure testing.
+Phase 1 through Phase 6 are implemented. The repository remains at 0.7.0
+Development while CI and the six native desktop runners provide the final
+release-candidate evidence; publication still requires explicit approval.
 
-| Lane | Next assignment | Completion signal |
+| Lane | Delivered assignment | Completion signal |
 | --- | --- | --- |
-| A | P6-01 consistent backup archive | Versioned manifest and integrity hashes |
-| B | P6-05 diagnostic and redaction engine | Copyable reports contain no credentials |
-| C | P6-04 data and storage management UI | Preview, backup and cleanup controls |
-| D | P6-07/08 regression matrix | WebUI and all six desktop targets pass |
+| A | P6-01–03 data archive/import/rollback | Versioned manifest, hashes and transactional restore |
+| B | P6-05 diagnostic and redaction engine | Copyable reports and scanned support bundles |
+| C | P6-04/06 data and diagnostic UI | Preview, backup, cleanup and support controls |
+| D | P6-07–11 regression closure | WebUI CI and six native desktop acceptance manifests |
 
 The frozen Phase 1 integration contracts are documented in
 `docs/PHASE1_ARCHITECTURE.md`.
@@ -361,3 +362,23 @@ The Phase 4 contracts and user workflow are documented in
 
 The Phase 5 contracts and user workflow are documented in
 `docs/PHASE5_ARCHITECTURE.md` and `docs/PHASE5_DESKTOP_LIFECYCLE.md`.
+
+### Phase 6 implementation status
+
+| Work package | Status | Evidence |
+| --- | --- | --- |
+| P6-01 | Implemented | Consistent SQLite backup, format manifest, table counts, sizes and SHA-256 |
+| P6-02 | Implemented | Read-only validation/conflict preview and three transactional merge strategies |
+| P6-03 | Implemented | Pre-import and pre-upgrade full backups with persistent rollback metadata |
+| P6-04 | Implemented | Storage status, export/import, dry-run cleanup and five-language data card |
+| P6-05 | Implemented | Recursive credential redaction, inline masking and known-secret scanning |
+| P6-06 | Implemented | Copyable diagnostic report and self-verifying support-bundle download |
+| P6-07 | Implemented | Windows/Linux multi-version CI plus macOS Python 3.12 regression |
+| P6-08A/B/C | Implemented | Six native build/startup smoke gates in the desktop workflow |
+| P6-09 | Implemented | Archive structure, native binary architecture, hash and signature manifests |
+| P6-10 | Implemented | English, Chinese, Japanese and Korean Phase 6 guides |
+| P6-11 | Implemented | Acceptance record; tag, Release and PyPI actions intentionally remain separate |
+
+The Phase 6 contracts, user workflows and acceptance record are documented in
+`docs/PHASE6_ARCHITECTURE.md`, `docs/PHASE6_DATA_DIAGNOSTICS.md` and
+`docs/PHASE6_ACCEPTANCE.md`.

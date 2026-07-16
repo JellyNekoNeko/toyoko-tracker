@@ -23,6 +23,7 @@
 - 🌡 여러 호텔 총액 비교, 가격 히트맵과 일별 최저가 호텔
 - 📈 가격 기록 백분위와 근거를 확인할 수 있는 저가·보통·고가 판단
 - 🧳 분할 숙박 최적화, 여행 목록, 호텔 우선순위, 예산과 여행 요약 내보내기
+- 💾 검증 가능한 데이터 내보내기/가져오기, 업데이트 백업, 저장소 정리와 민감정보 제거 진단
 - 🎯 목표가·회원가·가격 인하·객실 상태 변화 알림
 - 🌙 방해 금지 시간, 메시지 묶음, 일일 요약, 긴급 규칙
 - 🔔 로컬 데스크톱 알림
@@ -37,6 +38,8 @@
 [`docs/PHASE3_FLEXIBLE_STAYS.md`](docs/PHASE3_FLEXIBLE_STAYS.md)를 참고하세요.
 가격 기록 판단, 분할 숙박, 여행 목록과 요약 내보내기는
 [`docs/PHASE4_TRIP_DECISIONS.md`](docs/PHASE4_TRIP_DECISIONS.md)를 참고하세요.
+백업, 충돌 미리보기 가져오기, 정리와 지원 진단은
+[`docs/PHASE6_DATA_DIAGNOSTICS_ko.md`](docs/PHASE6_DATA_DIAGNOSTICS_ko.md)를 참고하세요.
 
 ## 요구 사항
 

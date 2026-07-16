@@ -146,6 +146,12 @@ Acceptance gate:
 
 ## Phase 6 — data tools, diagnostics and release closure
 
+Status: **Delivered**. Versioned self-verifying backups, read-only import
+preview, transactional conflict handling, automatic upgrade/import rollback,
+storage management, redacted support bundles, macOS WebUI CI and native
+six-target desktop smoke/artifact gates are implemented. Publication remains a
+separate explicit decision.
+
 Deliverables:
 
 - Export/import for settings, tasks, rules, lists and selected history.

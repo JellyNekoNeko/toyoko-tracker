@@ -1761,8 +1761,8 @@ class AppRouteSecurityTests(unittest.TestCase):
         self.assertIn('data-home-quick="radius"', body)
         self.assertIn('data-app-view="push-settings"><span class="nav-icon">✉</span>', body)
         self.assertIn('data-home-quick="push"><i>✉</i>', body)
-        self.assertIn('/static/app.js?v=v0.7.0-phase5-1', body)
-        self.assertIn('/static/app.css?v=v0.7.0-phase5-1', body)
+        self.assertIn('/static/app.js?v=v0.7.0-phase6-1', body)
+        self.assertIn('/static/app.css?v=v0.7.0-phase6-1', body)
 
     def test_home_renders_after_search_results_exist(self):
         from toyoko_tracker import runtime

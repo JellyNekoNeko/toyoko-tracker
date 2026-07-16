@@ -34,6 +34,7 @@
 - 🌡 多酒店总价比较、价格热力图与每日最低价酒店
 - 📈 历史价格百分位，以及可解释的低价、正常价和高价判断
 - 🧳 拆分住宿优化、旅行清单、酒店优先级、预算与行程摘要导出
+- 💾 可校验的数据导入导出、升级备份、存储清理与脱敏诊断
 - 🎯 目标价、会员价、降价和空房变化提醒
 - 🌙 静默时段、消息聚合、每日摘要与紧急规则
 - 🔔 本地桌面通知
@@ -52,6 +53,8 @@
 [`docs/PHASE3_FLEXIBLE_STAYS.md`](docs/PHASE3_FLEXIBLE_STAYS.md)。
 历史价格判断、拆分住宿、旅行清单与行程导出见
 [`docs/PHASE4_TRIP_DECISIONS.md`](docs/PHASE4_TRIP_DECISIONS.md)。
+数据备份、导入冲突、清理与支持诊断见
+[`docs/PHASE6_DATA_DIAGNOSTICS_zh.md`](docs/PHASE6_DATA_DIAGNOSTICS_zh.md)。
 
 ---
 
@@ -63,7 +66,7 @@
 - 推荐 Python **3.10–3.14**
 - 网络连接
 
-核心 HTTP/API WebUI 已在 CI 中覆盖 **Windows** 和 **Linux**。默认引擎不依赖
+核心 HTTP/API WebUI 已在 CI 中覆盖 **Windows**、**Linux** 和 **macOS**。默认引擎不依赖
 桌面环境；Playwright 与系统本地通知仍属于按需启用的平台集成功能。
 
 #### 可选条件

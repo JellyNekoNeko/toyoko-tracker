@@ -2,6 +2,20 @@
 
 ## v0.7.0 - Development
 
+- Completed Phase 6 with versioned ZIP backups containing a consistent SQLite
+  snapshot, component/history selection, row counts, file sizes and SHA-256.
+- Added read-only import validation and conflict previews plus keep,
+  overwrite, and replace-imported strategies applied through a staged,
+  integrity-checked database swap with automatic pre-import rollback.
+- Added automatic full data backup and `rollback.json` metadata before
+  pip/pipx upgrades and frozen desktop application replacement.
+- Added five-language storage, export/import, cleanup and diagnostic controls
+  to Interface Settings.
+- Added recursively redacted diagnostic reports and self-verifying support
+  bundles with known-secret and credential-pattern scanning.
+- Extended WebUI CI to macOS and added native startup smoke tests, binary
+  architecture validation, signature status and acceptance manifests for all
+  six desktop targets.
 - Completed Phase 5 native desktop lifecycle with cross-platform tray/menu-bar
   controls, close-to-background behavior and explicit Quit semantics.
 - Added per-user launch-at-login adapters for macOS LaunchAgents, Windows Run

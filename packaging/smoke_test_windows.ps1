@@ -30,7 +30,11 @@ try {
           -Uri "http://127.0.0.1:$port/" `
           -UseBasicParsing `
           -TimeoutSec 3
-        if ($response.StatusCode -eq 200 -and $response.Content -match "Toyoko") {
+        if (
+          $response.StatusCode -eq 200 -and
+          $response.Content -match "Toyoko" -and
+          $response.Content -match "phase6-data-card"
+        ) {
           $httpReady = $true
         }
         else {

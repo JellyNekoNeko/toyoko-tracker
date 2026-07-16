@@ -124,6 +124,62 @@ def desktop_notifications_read() -> Response:
     return _runtime.desktop_notifications_read()
 
 
+@app.route("/api/v1/data/storage")
+def data_storage() -> Response:
+    local_only = require_local_request()
+    if local_only is not None:
+        return local_only
+    return _runtime.data_storage_status()
+
+
+@app.route("/api/v1/data/export", methods=["POST"])
+def data_export() -> Response:
+    local_only = require_local_request()
+    if local_only is not None:
+        return local_only
+    return _runtime.data_export()
+
+
+@app.route("/api/v1/data/import/preview", methods=["POST"])
+def data_import_preview() -> Response:
+    local_only = require_local_request()
+    if local_only is not None:
+        return local_only
+    return _runtime.data_import_preview()
+
+
+@app.route("/api/v1/data/import/apply", methods=["POST"])
+def data_import_apply() -> Response:
+    local_only = require_local_request()
+    if local_only is not None:
+        return local_only
+    return _runtime.data_import_apply()
+
+
+@app.route("/api/v1/data/cleanup", methods=["POST"])
+def data_cleanup() -> Response:
+    local_only = require_local_request()
+    if local_only is not None:
+        return local_only
+    return _runtime.data_cleanup()
+
+
+@app.route("/api/v1/diagnostics")
+def diagnostics_status() -> Response:
+    local_only = require_local_request()
+    if local_only is not None:
+        return local_only
+    return _runtime.diagnostics_status()
+
+
+@app.route("/api/v1/diagnostics/support-bundle", methods=["POST"])
+def diagnostics_support_bundle() -> Response:
+    local_only = require_local_request()
+    if local_only is not None:
+        return local_only
+    return _runtime.diagnostics_support_bundle()
+
+
 @app.route("/api/v1/traffic")
 def traffic_status() -> Response:
     return traffic_snapshot_response()
