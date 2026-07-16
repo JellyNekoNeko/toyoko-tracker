@@ -2,6 +2,17 @@
 
 ## v0.7.0 - Development
 
+- Completed Phase 4 historical price statistics with three-source evidence
+  merging, mirrored-sample deduplication, IQR anomaly handling, R-7
+  percentiles and explainable low/normal/high current-price labels.
+- Added reproducible split-stay suggestions ranked by room total, hotel moves,
+  geographic distance and travel-list hotel priorities, with complete nightly
+  evidence and a visible score breakdown.
+- Added workspace schema v4 travel lists with dates, JPY budget, status, notes,
+  per-hotel priorities and links to monitor tasks, alert rules and flexible
+  price comparisons.
+- Added the multilingual Trip Decisions center plus credential-free versioned
+  JSON, Markdown and HTML itinerary summaries.
 - Completed Phase 3 flexible-date search with deterministic custom, weekend
   and next-30-day combinations, durable pause/resume jobs and shared Provider
   pacing.

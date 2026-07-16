@@ -56,6 +56,7 @@ def test_workspace_schema_is_initialized_idempotently():
             "notification_policies",
             "travel_lists",
             "travel_list_hotels",
+            "travel_list_links",
             "flexible_stay_jobs",
             "flexible_stay_nights",
             "flexible_stay_results",

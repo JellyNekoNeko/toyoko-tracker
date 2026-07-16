@@ -32,6 +32,8 @@ It supports:
 - 📅 On-demand monthly price calendar for every selected hotel
 - 🔀 Flexible-date and weekend searches with multi-night stay validation
 - 🌡 Multi-hotel total-price comparison, heat maps, and daily cheapest hotels
+- 📈 Historical percentiles with explainable low, normal, and high price labels
+- 🧳 Split-stay optimization, travel lists, hotel priorities, budgets, and itinerary exports
 - 🎯 Target-price, member-price, price-drop, and vacancy-transition alerts
 - 🌙 Quiet hours, alert aggregation, daily digests, and critical overrides
 - 🔔 Local desktop notifications
@@ -48,6 +50,8 @@ For price-alert rules and notification policies, see
 [`docs/PHASE2_ALERTS_GUIDE.md`](docs/PHASE2_ALERTS_GUIDE.md).
 For flexible dates, multi-night validation, and hotel comparison, see
 [`docs/PHASE3_FLEXIBLE_STAYS.md`](docs/PHASE3_FLEXIBLE_STAYS.md).
+For historical price decisions, split stays, travel lists, and exports, see
+[`docs/PHASE4_TRIP_DECISIONS.md`](docs/PHASE4_TRIP_DECISIONS.md).
 
 ---
 

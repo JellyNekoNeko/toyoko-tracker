@@ -79,8 +79,7 @@ Acceptance gate:
 Status: **Delivered**. Deterministic date combinations, weekend and next-30-day
 shortcuts, durable resumable searches, nightly evidence reuse, continuous-stay
 validation, regular/member totals, room-change detection, multi-hotel heat
-maps and daily cheapest-hotel markers are implemented. Phase 4 is the next
-development stage.
+maps and daily cheapest-hotel markers are implemented.
 
 Deliverables:
 
@@ -99,6 +98,11 @@ Acceptance gate:
 - Long searches remain paced and resumable.
 
 ## Phase 4 — decision intelligence and travel lists
+
+Status: **Delivered**. Historical statistics and percentile labels,
+night-by-night split-stay optimization, workspace schema v4 travel lists,
+resource associations, budget summaries and credential-free JSON/Markdown/HTML
+exports are implemented. Phase 5 is the next development stage.
 
 Deliverables:
 

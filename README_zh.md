@@ -32,6 +32,8 @@
 - 📅 为每家已选酒店提供按需刷新的月度价格日历
 - 🔀 灵活日期与周末搜索，支持多晚连续入住验证
 - 🌡 多酒店总价比较、价格热力图与每日最低价酒店
+- 📈 历史价格百分位，以及可解释的低价、正常价和高价判断
+- 🧳 拆分住宿优化、旅行清单、酒店优先级、预算与行程摘要导出
 - 🎯 目标价、会员价、降价和空房变化提醒
 - 🌙 静默时段、消息聚合、每日摘要与紧急规则
 - 🔔 本地桌面通知
@@ -48,6 +50,8 @@
 [`docs/PHASE2_ALERTS_GUIDE.md`](docs/PHASE2_ALERTS_GUIDE.md)。
 灵活日期、连住验证与酒店价格比较见
 [`docs/PHASE3_FLEXIBLE_STAYS.md`](docs/PHASE3_FLEXIBLE_STAYS.md)。
+历史价格判断、拆分住宿、旅行清单与行程导出见
+[`docs/PHASE4_TRIP_DECISIONS.md`](docs/PHASE4_TRIP_DECISIONS.md)。
 
 ---
 

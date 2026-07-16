@@ -48,6 +48,13 @@
             let FLEXIBLE_STAY_DATA = null;
             let FLEXIBLE_STAY_POLL_TIMER = null;
             let FLEXIBLE_STAY_SHORTCUT = 'custom';
+            let DECISION_PRICE_DATA = null;
+            let DECISION_FLEXIBLE_JOBS = [];
+            let DECISION_SPLIT_DATA = null;
+            let DECISION_ALERT_RULES = [];
+            let TRAVEL_LISTS = [];
+            let ACTIVE_TRAVEL_LIST_ID = '';
+            let ACTIVE_TRAVEL_LIST = null;
             let COMMAND_FEEDBACK_TIMER = null;
             let LAST_HOME_REFRESH = 0;
             let LAST_HOME_PAYLOAD = null;
@@ -77,7 +84,7 @@
             const THEME_KEY = 'toyoko-chan-theme-v1';
             const LANGUAGE_KEY = 'toyoko-chan-language-v1';
             const GUIDE_SEEN_KEY = 'toyoko-chan-guide-seen-version';
-            const APP_VIEWS = ['home', 'search', 'tasks', 'monitor', 'price', 'search-settings', 'push-settings', 'interface'];
+            const APP_VIEWS = ['home', 'search', 'tasks', 'monitor', 'price', 'travel', 'search-settings', 'push-settings', 'interface'];
             let ACTIVE_APP_VIEW = 'home';
             let THEME_PREFERENCE = 'system';
             let GUIDE_STEP = 0;
@@ -1144,6 +1151,53 @@
             Object.assign(SINGLE_UI_OVERRIDES.ja, PRICE_CALENDAR_UI.ja);
             Object.assign(SINGLE_UI_OVERRIDES.ko, PRICE_CALENDAR_UI.ko);
             Object.assign(EN_UI, PRICE_CALENDAR_UI.en);
+            const DECISION_CENTER_UI = {
+              zh_cn: {
+                navTravel:'行程决策', decisionEyebrow:'Phase 4 决策中心', decisionSubtitle:'用历史价格、逐晚证据、预算与酒店优先级生成可复核的住宿方案。', decisionRefresh:'刷新决策数据',
+                decisionLowHotels:'低价酒店', decisionHighHotels:'高价酒店', decisionSamples:'历史样本', decisionLists:'旅行清单', decisionHistoryEyebrow:'历史价格统计', decisionHistoryTitle:'价格高低判断', decisionHistoryNote:'基于当前任务住宿条件，显示样本窗口、百分位与判断方法。', decisionDays:'统计窗口', decisionHotelHead:'酒店', decisionCurrentHead:'当前价', decisionRangeHead:'最低 / 平均 / 最高', decisionPercentileHead:'P25 / 中位 / P75', decisionAssessmentHead:'判断', decisionSampleHead:'样本',
+                decisionLow:'低价', decisionNormal:'正常', decisionHigh:'高价', decisionInsufficient:'样本不足', decisionNoCurrent:'暂无当前价', decisionNoHistory:'暂无匹配的历史价格', decisionExcluded:'个异常值已排除',
+                splitEyebrow:'逐晚组合优化', splitStayTitle:'拆分住宿建议', splitNote:'评分 = 房费 + 换店成本 + 距离成本 − 酒店优先级奖励。', splitJob:'价格比较任务', splitWindow:'入住组合', splitMoveCost:'每次换店成本', splitDistanceCost:'每公里成本', splitUnknownCost:'未知距离成本', splitPriorityBonus:'每级优先奖励', splitRun:'生成建议', splitNoPlan:'暂无完整逐晚方案', splitSelectJob:'请选择已完成的价格比较任务', splitType:'拆分住宿', continuousType:'连续住宿', splitMoves:'次换店', splitScore:'评分',
+                travelEyebrow:'旅行清单', travelTitle:'预算与酒店优先级', travelNote:'旅行清单可关联监控任务、价格规则和价格比较。', travelCreate:'新建', travelName:'名称', travelStart:'入住', travelEnd:'退房', travelBudget:'预算 JPY', travelStatus:'状态', travelNotes:'备注', travelSave:'保存清单', travelAddHotels:'加入当前已选酒店', travelLinkTask:'关联当前任务', travelLinkComparison:'关联当前比较', travelLinkAlert:'关联提醒规则', travelDelete:'删除清单', travelNoLists:'暂无旅行清单', travelNoHotels:'尚未加入酒店', travelNoLinks:'尚未关联资源', travelSelectList:'请选择或创建旅行清单', travelSelectResource:'请选择可关联的资源', travelDefaultName:'新旅行清单', travelCreated:'旅行清单已创建', travelSaved:'旅行清单已保存', travelDeleted:'旅行清单已删除', travelHotels:'酒店', travelPriority:'优先级', travelPlanning:'规划中', travelBooked:'已预订', travelCompleted:'已完成', travelArchived:'已归档',
+                tripEyebrow:'可导出行程', tripSummaryTitle:'行程摘要', tripNote:'汇总预算、重点酒店、价格判断、拆分方案和关联资源。', tripRefresh:'刷新摘要', tripEstimate:'预计住宿', tripRemaining:'预算余额'
+              },
+              zh_tw: {
+                navTravel:'行程決策', decisionEyebrow:'Phase 4 決策中心', decisionSubtitle:'以歷史價格、逐晚證據、預算與飯店優先級產生可複核的住宿方案。', decisionRefresh:'重新整理決策資料',
+                decisionLowHotels:'低價飯店', decisionHighHotels:'高價飯店', decisionSamples:'歷史樣本', decisionLists:'旅行清單', decisionHistoryEyebrow:'歷史價格統計', decisionHistoryTitle:'價格高低判斷', decisionHistoryNote:'依目前任務住宿條件顯示樣本視窗、百分位與判斷方法。', decisionDays:'統計視窗', decisionHotelHead:'飯店', decisionCurrentHead:'目前價格', decisionRangeHead:'最低 / 平均 / 最高', decisionPercentileHead:'P25 / 中位 / P75', decisionAssessmentHead:'判斷', decisionSampleHead:'樣本',
+                decisionLow:'低價', decisionNormal:'一般', decisionHigh:'高價', decisionInsufficient:'樣本不足', decisionNoCurrent:'無目前價格', decisionNoHistory:'暫無符合的歷史價格', decisionExcluded:'個異常值已排除',
+                splitEyebrow:'逐晚組合最佳化', splitStayTitle:'拆分住宿建議', splitNote:'評分 = 房費 + 換店成本 + 距離成本 − 飯店優先級獎勵。', splitJob:'價格比較任務', splitWindow:'入住組合', splitMoveCost:'每次換店成本', splitDistanceCost:'每公里成本', splitUnknownCost:'未知距離成本', splitPriorityBonus:'每級優先獎勵', splitRun:'產生建議', splitNoPlan:'暫無完整逐晚方案', splitSelectJob:'請選擇已完成的價格比較任務', splitType:'拆分住宿', continuousType:'連續住宿', splitMoves:'次換店', splitScore:'評分',
+                travelEyebrow:'旅行清單', travelTitle:'預算與飯店優先級', travelNote:'旅行清單可連結監控任務、價格規則和價格比較。', travelCreate:'新增', travelName:'名稱', travelStart:'入住', travelEnd:'退房', travelBudget:'預算 JPY', travelStatus:'狀態', travelNotes:'備註', travelSave:'儲存清單', travelAddHotels:'加入目前已選飯店', travelLinkTask:'連結目前任務', travelLinkComparison:'連結目前比較', travelLinkAlert:'連結提醒規則', travelDelete:'刪除清單', travelNoLists:'暫無旅行清單', travelNoHotels:'尚未加入飯店', travelNoLinks:'尚未連結資源', travelSelectList:'請選擇或建立旅行清單', travelSelectResource:'請選擇可連結的資源', travelDefaultName:'新旅行清單', travelCreated:'旅行清單已建立', travelSaved:'旅行清單已儲存', travelDeleted:'旅行清單已刪除', travelHotels:'飯店', travelPriority:'優先級', travelPlanning:'規劃中', travelBooked:'已預訂', travelCompleted:'已完成', travelArchived:'已封存',
+                tripEyebrow:'可匯出行程', tripSummaryTitle:'行程摘要', tripNote:'彙整預算、重點飯店、價格判斷、拆分方案與連結資源。', tripRefresh:'重新整理摘要', tripEstimate:'預估住宿', tripRemaining:'預算餘額'
+              },
+              ja: {
+                navTravel:'旅行プラン', decisionEyebrow:'Phase 4 意思決定センター', decisionSubtitle:'料金履歴、各泊の証拠、予算、ホテル優先度から検証可能な宿泊案を作成します。', decisionRefresh:'判断データを更新',
+                decisionLowHotels:'割安ホテル', decisionHighHotels:'割高ホテル', decisionSamples:'履歴サンプル', decisionLists:'旅行リスト', decisionHistoryEyebrow:'料金履歴統計', decisionHistoryTitle:'料金水準の判定', decisionHistoryNote:'現在の宿泊条件に合わせ、期間・百分位・判定方法を表示します。', decisionDays:'集計期間', decisionHotelHead:'ホテル', decisionCurrentHead:'現在料金', decisionRangeHead:'最低 / 平均 / 最高', decisionPercentileHead:'P25 / 中央 / P75', decisionAssessmentHead:'判定', decisionSampleHead:'サンプル',
+                decisionLow:'割安', decisionNormal:'通常', decisionHigh:'割高', decisionInsufficient:'サンプル不足', decisionNoCurrent:'現在料金なし', decisionNoHistory:'該当する料金履歴なし', decisionExcluded:'件の外れ値を除外',
+                splitEyebrow:'各泊の組合せ最適化', splitStayTitle:'分泊の提案', splitNote:'スコア = 宿泊料金 + 移動コスト + 距離コスト − ホテル優先度ボーナス。', splitJob:'料金比較タスク', splitWindow:'宿泊日程', splitMoveCost:'ホテル移動コスト', splitDistanceCost:'1km 当たりコスト', splitUnknownCost:'距離不明コスト', splitPriorityBonus:'優先度ボーナス', splitRun:'提案を作成', splitNoPlan:'完全な各泊プランなし', splitSelectJob:'完了した料金比較タスクを選択してください', splitType:'分泊', continuousType:'連泊', splitMoves:'回移動', splitScore:'スコア',
+                travelEyebrow:'旅行リスト', travelTitle:'予算とホテル優先度', travelNote:'監視タスク、料金ルール、料金比較を旅行リストに関連付けます。', travelCreate:'新規', travelName:'名前', travelStart:'チェックイン', travelEnd:'チェックアウト', travelBudget:'予算 JPY', travelStatus:'状態', travelNotes:'メモ', travelSave:'リストを保存', travelAddHotels:'選択中ホテルを追加', travelLinkTask:'現在のタスクを関連付け', travelLinkComparison:'現在の比較を関連付け', travelLinkAlert:'通知ルールを関連付け', travelDelete:'リストを削除', travelNoLists:'旅行リストなし', travelNoHotels:'ホテル未登録', travelNoLinks:'関連リソースなし', travelSelectList:'旅行リストを選択または作成してください', travelSelectResource:'関連付けるリソースを選択してください', travelDefaultName:'新しい旅行リスト', travelCreated:'旅行リストを作成しました', travelSaved:'旅行リストを保存しました', travelDeleted:'旅行リストを削除しました', travelHotels:'ホテル', travelPriority:'優先度', travelPlanning:'計画中', travelBooked:'予約済み', travelCompleted:'完了', travelArchived:'アーカイブ',
+                tripEyebrow:'エクスポート可能', tripSummaryTitle:'旅行サマリー', tripNote:'予算、優先ホテル、料金判定、分泊案、関連リソースをまとめます。', tripRefresh:'サマリーを更新', tripEstimate:'宿泊見積', tripRemaining:'予算残額'
+              },
+              ko: {
+                navTravel:'여행 결정', decisionEyebrow:'Phase 4 의사결정 센터', decisionSubtitle:'가격 기록, 일별 근거, 예산과 호텔 우선순위로 검토 가능한 숙박안을 만듭니다.', decisionRefresh:'결정 데이터 새로고침',
+                decisionLowHotels:'저가 호텔', decisionHighHotels:'고가 호텔', decisionSamples:'가격 기록', decisionLists:'여행 목록', decisionHistoryEyebrow:'과거 가격 통계', decisionHistoryTitle:'가격 수준 판단', decisionHistoryNote:'현재 숙박 조건에 맞는 표본 기간, 백분위와 판단 방식을 표시합니다.', decisionDays:'통계 기간', decisionHotelHead:'호텔', decisionCurrentHead:'현재 가격', decisionRangeHead:'최저 / 평균 / 최고', decisionPercentileHead:'P25 / 중앙 / P75', decisionAssessmentHead:'판단', decisionSampleHead:'표본',
+                decisionLow:'저가', decisionNormal:'보통', decisionHigh:'고가', decisionInsufficient:'표본 부족', decisionNoCurrent:'현재 가격 없음', decisionNoHistory:'일치하는 가격 기록 없음', decisionExcluded:'개 이상치 제외',
+                splitEyebrow:'일별 조합 최적화', splitStayTitle:'분할 숙박 제안', splitNote:'점수 = 객실료 + 이동 비용 + 거리 비용 − 호텔 우선순위 보너스.', splitJob:'가격 비교 작업', splitWindow:'숙박 조합', splitMoveCost:'호텔 이동 비용', splitDistanceCost:'km당 비용', splitUnknownCost:'거리 미상 비용', splitPriorityBonus:'우선순위 보너스', splitRun:'제안 만들기', splitNoPlan:'완전한 일별 계획 없음', splitSelectJob:'완료된 가격 비교 작업을 선택하세요', splitType:'분할 숙박', continuousType:'연속 숙박', splitMoves:'회 이동', splitScore:'점수',
+                travelEyebrow:'여행 목록', travelTitle:'예산과 호텔 우선순위', travelNote:'모니터 작업, 가격 규칙과 가격 비교를 여행 목록에 연결합니다.', travelCreate:'새로 만들기', travelName:'이름', travelStart:'체크인', travelEnd:'체크아웃', travelBudget:'예산 JPY', travelStatus:'상태', travelNotes:'메모', travelSave:'목록 저장', travelAddHotels:'현재 선택 호텔 추가', travelLinkTask:'현재 작업 연결', travelLinkComparison:'현재 비교 연결', travelLinkAlert:'알림 규칙 연결', travelDelete:'목록 삭제', travelNoLists:'여행 목록 없음', travelNoHotels:'추가된 호텔 없음', travelNoLinks:'연결된 리소스 없음', travelSelectList:'여행 목록을 선택하거나 만드세요', travelSelectResource:'연결할 리소스를 선택하세요', travelDefaultName:'새 여행 목록', travelCreated:'여행 목록을 만들었습니다', travelSaved:'여행 목록을 저장했습니다', travelDeleted:'여행 목록을 삭제했습니다', travelHotels:'호텔', travelPriority:'우선순위', travelPlanning:'계획 중', travelBooked:'예약됨', travelCompleted:'완료', travelArchived:'보관됨',
+                tripEyebrow:'내보낼 수 있는 일정', tripSummaryTitle:'여행 요약', tripNote:'예산, 우선 호텔, 가격 판단, 분할 숙박안과 연결 리소스를 요약합니다.', tripRefresh:'요약 새로고침', tripEstimate:'예상 숙박비', tripRemaining:'남은 예산'
+              },
+              en: {
+                navTravel:'Trip Decisions', decisionEyebrow:'Phase 4 decision center', decisionSubtitle:'Build reviewable stay plans from price history, nightly evidence, budget, and hotel priorities.', decisionRefresh:'Refresh decisions',
+                decisionLowHotels:'Low-price hotels', decisionHighHotels:'High-price hotels', decisionSamples:'History samples', decisionLists:'Travel lists', decisionHistoryEyebrow:'Historical price statistics', decisionHistoryTitle:'Price level assessment', decisionHistoryNote:'Show the sample window, percentiles, and method for the active stay conditions.', decisionDays:'History window', decisionHotelHead:'Hotel', decisionCurrentHead:'Current price', decisionRangeHead:'Min / average / max', decisionPercentileHead:'P25 / median / P75', decisionAssessmentHead:'Assessment', decisionSampleHead:'Samples',
+                decisionLow:'Low', decisionNormal:'Normal', decisionHigh:'High', decisionInsufficient:'Insufficient data', decisionNoCurrent:'No current price', decisionNoHistory:'No matching price history', decisionExcluded:'outliers excluded',
+                splitEyebrow:'Night-by-night optimization', splitStayTitle:'Split-stay suggestions', splitNote:'Score = room total + move cost + distance cost − hotel priority bonus.', splitJob:'Price comparison job', splitWindow:'Stay window', splitMoveCost:'Cost per hotel move', splitDistanceCost:'Cost per kilometer', splitUnknownCost:'Unknown-distance cost', splitPriorityBonus:'Priority bonus per level', splitRun:'Generate suggestions', splitNoPlan:'No complete nightly plan', splitSelectJob:'Select a completed price comparison job', splitType:'Split stay', continuousType:'Continuous stay', splitMoves:'moves', splitScore:'Score',
+                travelEyebrow:'Travel list', travelTitle:'Budget and hotel priorities', travelNote:'Link monitor tasks, price rules, and price comparisons to a travel list.', travelCreate:'New', travelName:'Name', travelStart:'Check-in', travelEnd:'Checkout', travelBudget:'Budget JPY', travelStatus:'Status', travelNotes:'Notes', travelSave:'Save list', travelAddHotels:'Add selected hotels', travelLinkTask:'Link active task', travelLinkComparison:'Link active comparison', travelLinkAlert:'Link alert rule', travelDelete:'Delete list', travelNoLists:'No travel lists', travelNoHotels:'No hotels added', travelNoLinks:'No linked resources', travelSelectList:'Select or create a travel list', travelSelectResource:'Select a resource to link', travelDefaultName:'New travel list', travelCreated:'Travel list created', travelSaved:'Travel list saved', travelDeleted:'Travel list deleted', travelHotels:'Hotels', travelPriority:'Priority', travelPlanning:'Planning', travelBooked:'Booked', travelCompleted:'Completed', travelArchived:'Archived',
+                tripEyebrow:'Exportable itinerary', tripSummaryTitle:'Trip summary', tripNote:'Summarize the budget, priority hotels, price assessments, split plans, and linked resources.', tripRefresh:'Refresh summary', tripEstimate:'Estimated stay', tripRemaining:'Budget remaining'
+              }
+            };
+            Object.assign(SINGLE_UI_OVERRIDES.zh_cn, DECISION_CENTER_UI.zh_cn);
+            Object.assign(SINGLE_UI_OVERRIDES.zh_tw, DECISION_CENTER_UI.zh_tw);
+            Object.assign(SINGLE_UI_OVERRIDES.ja, DECISION_CENTER_UI.ja);
+            Object.assign(SINGLE_UI_OVERRIDES.ko, DECISION_CENTER_UI.ko);
+            Object.assign(EN_UI, DECISION_CENTER_UI.en);
             const TASK_CENTER_UI = {
               zh_cn: {
                 navTasks:'监控任务', taskEyebrow:'0.7.0 多任务工作区', taskTitle:'监控任务', taskSubtitle:'集中管理不同日期、酒店和检索节奏，并查看每个任务的实时进度、结果和运行记录。',
@@ -1996,6 +2050,7 @@
                 clearTimeout(PRICE_CALENDAR_POLL_TIMER);
                 PRICE_CALENDAR_POLL_TIMER = null;
               }
+              if (next === 'travel') prepareDecisionCenter();
               if (next === 'push-settings') loadAlertCenter();
               else if (ALERT_POLL_TIMER) {
                 clearTimeout(ALERT_POLL_TIMER);
@@ -2226,6 +2281,36 @@
               document.getElementById('flexible-resume')?.addEventListener('click', () => controlFlexibleStay('resume'));
               document.getElementById('flexible-earliest-date')?.addEventListener('change', () => { FLEXIBLE_STAY_SHORTCUT = 'custom'; });
               document.getElementById('flexible-latest-date')?.addEventListener('change', () => { FLEXIBLE_STAY_SHORTCUT = 'custom'; });
+              document.getElementById('decision-refresh')?.addEventListener('click', () => prepareDecisionCenter(true));
+              document.getElementById('decision-history-days')?.addEventListener('change', loadDecisionPrices);
+              document.getElementById('split-job-select')?.addEventListener('change', event => {
+                renderSplitWindowOptions(String(event.target?.value || ''));
+              });
+              document.getElementById('split-run')?.addEventListener('click', runSplitStaySuggestions);
+              document.getElementById('travel-list-select')?.addEventListener('change', event => {
+                selectTravelList(String(event.target?.value || ''));
+              });
+              document.getElementById('travel-list-create')?.addEventListener('click', createTravelList);
+              document.getElementById('travel-save')?.addEventListener('click', saveTravelList);
+              document.getElementById('travel-delete')?.addEventListener('click', deleteTravelList);
+              document.getElementById('travel-add-hotels')?.addEventListener('click', addCurrentHotelsToTravelList);
+              document.getElementById('travel-link-task')?.addEventListener('click', () => linkTravelResource('task', TASK_CENTER_ACTIVE_ID));
+              document.getElementById('travel-link-comparison')?.addEventListener('click', () => linkTravelResource('comparison', document.getElementById('split-job-select')?.value || ''));
+              document.getElementById('travel-link-alert')?.addEventListener('click', () => linkTravelResource('alert_rule', document.getElementById('travel-alert-rule-select')?.value || ''));
+              document.getElementById('trip-summary-refresh')?.addEventListener('click', loadTripSummary);
+              document.getElementById('travel-hotels-body')?.addEventListener('change', event => {
+                const row = event.target?.closest?.('[data-travel-hotel]');
+                if (row) updateTravelHotel(row.dataset.travelHotel || '');
+              });
+              document.getElementById('travel-hotels-body')?.addEventListener('click', event => {
+                const button = event.target?.closest?.('[data-travel-remove-hotel]');
+                if (button) removeTravelHotel(button.dataset.travelRemoveHotel || '');
+              });
+              document.getElementById('travel-links')?.addEventListener('click', event => {
+                const button = event.target?.closest?.('[data-travel-unlink]');
+                if (!button) return;
+                unlinkTravelResource(button.dataset.travelType || '', button.dataset.travelUnlink || '');
+              });
               document.getElementById('btn_alert_rule_add')?.addEventListener('click', addAlertRule);
               document.getElementById('btn_alert_rule_cancel')?.addEventListener('click', resetAlertRuleEditor);
               document.getElementById('btn_alert_policy_save')?.addEventListener('click', saveAlertPolicy);
@@ -2826,6 +2911,362 @@
               if (!FLEXIBLE_STAY_JOB_ID) loadLatestFlexibleStay();
               else if (FLEXIBLE_STAY_DATA?.job?.running) scheduleFlexibleStayPoll();
             }
+            async function decisionApi(path, options={}){
+              const response = await fetch(path, {
+                ...options,
+                headers:{'Content-Type':'application/json', ...(options.headers || {})}
+              });
+              const payload = await response.json();
+              if (!response.ok || !payload.ok) throw new Error(payload.message || `HTTP ${response.status}`);
+              return payload;
+            }
+            function decisionAssessmentLabel(label){
+              return tx(({
+                low:'decisionLow', normal:'decisionNormal', high:'decisionHigh',
+                insufficient:'decisionInsufficient', no_current_price:'decisionNoCurrent'
+              })[label] || 'decisionInsufficient');
+            }
+            function renderDecisionPrices(statistics){
+              DECISION_PRICE_DATA = statistics;
+              const hotels = Array.isArray(statistics?.hotels) ? statistics.hotels : [];
+              const summary = statistics?.summary || {};
+              setNodeText('#decision-low-count', summary.low_count || 0);
+              setNodeText('#decision-high-count', summary.high_count || 0);
+              setNodeText('#decision-sample-count', hotels.reduce((total,item) => total + Number(item.sample_count || 0), 0));
+              const body = document.getElementById('travel-price-table-body');
+              if (!body) return;
+              if (!hotels.length) {
+                body.innerHTML = `<tr><td colspan="6">${priceSafe(tx('decisionNoHistory'))}</td></tr>`;
+                return;
+              }
+              body.innerHTML = hotels.map(item => {
+                const assessment = item.assessment || {};
+                const range = item.minimum != null ? `${priceYen(item.minimum)} / ${priceYen(item.average)} / ${priceYen(item.maximum)}` : '—';
+                const percentiles = item.p25 != null ? `${priceYen(item.p25)} / ${priceYen(item.median)} / ${priceYen(item.p75)}` : '—';
+                const observed = item.first_observed_at && item.last_observed_at
+                  ? `${priceRelativeTime(item.last_observed_at)} · ${Number(item.sample_window?.days || 0)}d`
+                  : tx('decisionNoHistory');
+                return `<tr><td><strong>${priceSafe(item.display_code)} · ${priceSafe(item.name)}</strong><small>${priceSafe(item.provider)}</small></td><td><strong>${priceSafe(priceYen(item.current_price))}</strong><small>${priceSafe(observed)}</small></td><td>${priceSafe(range)}</td><td>${priceSafe(percentiles)}</td><td><span class="price-assessment ${priceSafe(assessment.label || 'insufficient')}" title="${priceSafe(assessment.explanation || '')}">${priceSafe(decisionAssessmentLabel(assessment.label))}</span><small>${assessment.position_percentile != null ? `P${Number(assessment.position_percentile)}` : ''}</small></td><td><strong>${Number(item.sample_count || 0)}</strong><small>${Number(item.excluded_anomaly_count || 0)} ${priceSafe(tx('decisionExcluded'))}</small></td></tr>`;
+              }).join('');
+            }
+            async function loadDecisionPrices(){
+              const days = Number(document.getElementById('decision-history-days')?.value || 180);
+              try {
+                const payload = await decisionApi(`/api/v1/decision/prices?task_id=${encodeURIComponent(TASK_CENTER_ACTIVE_ID || '')}&days=${days}`);
+                renderDecisionPrices(payload.statistics || {});
+              } catch(error) {
+                const body = document.getElementById('travel-price-table-body');
+                if (body) body.innerHTML = `<tr><td colspan="6">${priceSafe(String(error))}</td></tr>`;
+              }
+            }
+            function renderDecisionFlexibleJobs(){
+              const select = document.getElementById('split-job-select');
+              if (!select) return;
+              const previous = select.value;
+              select.innerHTML = DECISION_FLEXIBLE_JOBS.map(job => `<option value="${priceSafe(job.job_id)}">${priceSafe(job.name || `${job.earliest_date} → ${job.latest_date}`)} · ${priceSafe(job.status)}</option>`).join('');
+              select.value = DECISION_FLEXIBLE_JOBS.some(job => job.job_id === previous) ? previous : (DECISION_FLEXIBLE_JOBS[0]?.job_id || '');
+              renderSplitWindowOptions(select.value);
+            }
+            function renderSplitWindowOptions(jobId){
+              const select = document.getElementById('split-window-select');
+              if (!select) return;
+              const job = DECISION_FLEXIBLE_JOBS.find(item => item.job_id === jobId);
+              select.innerHTML = (job?.windows || []).map(window => `<option value="${priceSafe(window.key)}">${priceSafe(window.checkin_date)} → ${priceSafe(window.checkout_date)} · ${Number(window.nights || 1)}N</option>`).join('');
+            }
+            async function loadDecisionFlexibleJobs(){
+              try {
+                const payload = await decisionApi(`/api/v1/flexible-stays?task_id=${encodeURIComponent(TASK_CENTER_ACTIVE_ID || '')}&limit=30`);
+                DECISION_FLEXIBLE_JOBS = (payload.jobs || []).filter(job => ['complete','partial','paused'].includes(String(job.status || '')));
+                renderDecisionFlexibleJobs();
+              } catch(error) {
+                DECISION_FLEXIBLE_JOBS = [];
+                renderDecisionFlexibleJobs();
+              }
+            }
+            function renderDecisionAlertRules(){
+              const select = document.getElementById('travel-alert-rule-select');
+              if (!select) return;
+              select.innerHTML = DECISION_ALERT_RULES.length
+                ? DECISION_ALERT_RULES.map(rule => `<option value="${priceSafe(rule.rule_id)}">${priceSafe(rule.name || alertRuleTypeLabel(rule.rule_type))}</option>`).join('')
+                : `<option value="">${priceSafe(tx('travelSelectResource'))}</option>`;
+            }
+            async function loadDecisionAlertRules(){
+              if (!TASK_CENTER_ACTIVE_ID) {
+                DECISION_ALERT_RULES = [];
+                renderDecisionAlertRules();
+                return;
+              }
+              try {
+                const payload = await decisionApi(`/api/v1/alerts/rules?task_id=${encodeURIComponent(TASK_CENTER_ACTIVE_ID)}`);
+                DECISION_ALERT_RULES = payload.rules || [];
+              } catch(error) {
+                DECISION_ALERT_RULES = [];
+              }
+              renderDecisionAlertRules();
+            }
+            function renderSplitStaySuggestions(payload){
+              DECISION_SPLIT_DATA = payload;
+              const container = document.getElementById('split-results');
+              if (!container) return;
+              const plans = Array.isArray(payload?.plans) ? payload.plans : [];
+              if (!plans.length) {
+                container.innerHTML = `<div class="decision-empty">${priceSafe(payload?.message || tx('splitNoPlan'))}</div>`;
+                return;
+              }
+              container.innerHTML = plans.slice(0,6).map((plan,index) => {
+                const segments = (plan.segments || []).map(segment => `<div><strong>${priceSafe(segment.name || segment.hotel_code)}</strong><br>${priceSafe(segment.checkin_date)} → ${priceSafe(segment.checkout_date)} · ${Number(segment.nights || 0)}N · ${priceSafe(priceYen(segment.subtotal))}</div>`).join('');
+                return `<article class="split-plan ${index === 0 ? 'best' : ''}"><header><strong>#${Number(plan.rank || index + 1)} · ${priceSafe(priceYen(plan.total_price))}</strong><span>${plan.plan_type === 'split' ? priceSafe(tx('splitType')) : priceSafe(tx('continuousType'))}</span></header><div class="split-plan-metrics"><span>${Number(plan.moves || 0)} ${priceSafe(tx('splitMoves'))}</span><span>${Number(plan.distance_km || 0)} km</span><span>${priceSafe(tx('splitScore'))} ${Number(plan.score || 0)}</span></div><div class="split-segments">${segments}</div></article>`;
+              }).join('');
+            }
+            async function runSplitStaySuggestions(){
+              const jobId = document.getElementById('split-job-select')?.value || '';
+              if (!jobId) {
+                renderSplitStaySuggestions({message:tx('splitSelectJob'),plans:[]});
+                return;
+              }
+              const payload = {
+                window_key:document.getElementById('split-window-select')?.value || '',
+                move_penalty:Number(document.getElementById('split-move-penalty')?.value || 2500),
+                distance_cost_per_km:Number(document.getElementById('split-distance-cost')?.value || 200),
+                unknown_distance_penalty:Number(document.getElementById('split-unknown-penalty')?.value || 1000),
+                priority_bonus:Number(document.getElementById('split-priority-bonus')?.value || 300),
+                travel_list_id:ACTIVE_TRAVEL_LIST_ID || ''
+              };
+              try {
+                renderSplitStaySuggestions(await decisionApi(`/api/v1/flexible-stays/${encodeURIComponent(jobId)}/split-stays`, {method:'POST',body:JSON.stringify(payload)}));
+              } catch(error) {
+                renderSplitStaySuggestions({message:String(error),plans:[]});
+              }
+            }
+            function travelDraft(){
+              return {
+                name:document.getElementById('travel-name')?.value || '',
+                start_date:document.getElementById('travel-start-date')?.value || '',
+                end_date:document.getElementById('travel-end-date')?.value || '',
+                budget_limit:document.getElementById('travel-budget')?.value || null,
+                status:document.getElementById('travel-status')?.value || 'planning',
+                notes:document.getElementById('travel-notes')?.value || ''
+              };
+            }
+            function renderTravelListOptions(){
+              const select = document.getElementById('travel-list-select');
+              if (!select) return;
+              select.innerHTML = TRAVEL_LISTS.length
+                ? TRAVEL_LISTS.map(item => `<option value="${priceSafe(item.list_id)}">${priceSafe(item.name)} · ${Number(item.hotel_count || 0)}</option>`).join('')
+                : `<option value="">${priceSafe(tx('travelNoLists'))}</option>`;
+              if (!TRAVEL_LISTS.some(item => item.list_id === ACTIVE_TRAVEL_LIST_ID)) ACTIVE_TRAVEL_LIST_ID = TRAVEL_LISTS[0]?.list_id || '';
+              select.value = ACTIVE_TRAVEL_LIST_ID;
+              setNodeText('#decision-list-count', TRAVEL_LISTS.length);
+            }
+            function renderTravelList(travel){
+              ACTIVE_TRAVEL_LIST = travel || null;
+              ACTIVE_TRAVEL_LIST_ID = travel?.list_id || '';
+              renderTravelListOptions();
+              const assign = (id,value='') => { const node=document.getElementById(id); if(node) node.value=value == null ? '' : value; };
+              assign('travel-name', travel?.name || '');
+              assign('travel-start-date', travel?.start_date || '');
+              assign('travel-end-date', travel?.end_date || '');
+              assign('travel-budget', travel?.budget_limit);
+              assign('travel-status', travel?.status || 'planning');
+              assign('travel-notes', travel?.notes || '');
+              const body = document.getElementById('travel-hotels-body');
+              if (body) {
+                body.innerHTML = (travel?.hotels || []).length
+                  ? travel.hotels.map(item => `<tr data-travel-hotel="${priceSafe(item.hotel_code)}"><td><strong>${priceSafe(item.display_code)} · ${priceSafe(item.name)}</strong><small>${priceSafe(item.provider)}</small></td><td><select data-travel-priority>${[0,1,2,3,4,5].map(value => `<option value="${value}" ${value === Number(item.priority || 0) ? 'selected' : ''}>${value}</option>`).join('')}</select></td><td><input data-travel-hotel-notes value="${priceSafe(item.notes || '')}" maxlength="2000"></td><td><button data-travel-remove-hotel="${priceSafe(item.hotel_code)}" type="button">×</button></td></tr>`).join('')
+                  : `<tr><td colspan="4">${priceSafe(tx('travelNoHotels'))}</td></tr>`;
+              }
+              const links = document.getElementById('travel-links');
+              if (links) links.innerHTML = (travel?.links || []).map(link => `<span class="travel-link-chip">${priceSafe(link.resource_type)} · ${priceSafe(link.metadata?.name || link.resource_id)}<button type="button" data-travel-type="${priceSafe(link.resource_type)}" data-travel-unlink="${priceSafe(link.resource_id)}">×</button></span>`).join('') || `<span>${priceSafe(tx('travelNoLinks'))}</span>`;
+              updateTravelExportLinks();
+              if (travel?.list_id) loadTripSummary();
+              else {
+                setNodeText('#trip-summary-preview', tx('travelSelectList'));
+                const budget = document.getElementById('trip-budget');
+                if (budget) budget.innerHTML = '';
+              }
+            }
+            async function loadTravelLists(selectId=''){
+              try {
+                const payload = await decisionApi('/api/v1/travel-lists');
+                TRAVEL_LISTS = payload.travel_lists || [];
+                if (selectId) ACTIVE_TRAVEL_LIST_ID = selectId;
+                renderTravelListOptions();
+                if (ACTIVE_TRAVEL_LIST_ID) await selectTravelList(ACTIVE_TRAVEL_LIST_ID);
+                else renderTravelList(null);
+              } catch(error) {
+                TRAVEL_LISTS = [];
+                renderTravelList(null);
+              }
+            }
+            async function selectTravelList(listId){
+              ACTIVE_TRAVEL_LIST_ID = listId;
+              if (!listId) { renderTravelList(null); return; }
+              try {
+                const payload = await decisionApi(`/api/v1/travel-lists/${encodeURIComponent(listId)}`);
+                renderTravelList(payload.travel_list);
+              } catch(error) {
+                showCommandFeedback(String(error), 'error');
+              }
+            }
+            async function createTravelList(){
+              const start = document.getElementById('start_date')?.value || '';
+              const end = document.getElementById('end_date')?.value || '';
+              try {
+                const payload = await decisionApi('/api/v1/travel-lists', {
+                  method:'POST',
+                  body:JSON.stringify({name:tx('travelDefaultName'),start_date:start,end_date:end,budget_limit:null})
+                });
+                await loadTravelLists(payload.travel_list.list_id);
+                showCommandFeedback(tx('travelCreated'), 'success');
+              } catch(error) { showCommandFeedback(String(error), 'error'); }
+            }
+            async function saveTravelList(){
+              if (!ACTIVE_TRAVEL_LIST_ID) { await createTravelList(); return; }
+              try {
+                const payload = await decisionApi(`/api/v1/travel-lists/${encodeURIComponent(ACTIVE_TRAVEL_LIST_ID)}`, {
+                  method:'PATCH',
+                  body:JSON.stringify({...travelDraft(),expected_revision:ACTIVE_TRAVEL_LIST?.revision})
+                });
+                await loadTravelLists(payload.travel_list.list_id);
+                showCommandFeedback(tx('travelSaved'), 'success');
+              } catch(error) { showCommandFeedback(String(error), 'error'); }
+            }
+            async function deleteTravelList(){
+              if (!ACTIVE_TRAVEL_LIST_ID) return;
+              try {
+                await decisionApi(`/api/v1/travel-lists/${encodeURIComponent(ACTIVE_TRAVEL_LIST_ID)}`, {method:'DELETE'});
+                ACTIVE_TRAVEL_LIST_ID = '';
+                await loadTravelLists();
+                showCommandFeedback(tx('travelDeleted'), 'success');
+              } catch(error) { showCommandFeedback(String(error), 'error'); }
+            }
+            async function addCurrentHotelsToTravelList(){
+              if (!ACTIVE_TRAVEL_LIST_ID) { showCommandFeedback(tx('travelSelectList'), 'error'); return; }
+              const hotels = priceCalendarDraftPayload().selected_hotels || [];
+              try {
+                for (let index=0; index<hotels.length; index += 1) {
+                  const hotel = hotels[index];
+                  await decisionApi(`/api/v1/travel-lists/${encodeURIComponent(ACTIVE_TRAVEL_LIST_ID)}/hotels/${encodeURIComponent(hotel.code)}`, {
+                    method:'PUT',
+                    body:JSON.stringify({hotel,provider:hotel.provider,priority:0,sort_order:index})
+                  });
+                }
+                await selectTravelList(ACTIVE_TRAVEL_LIST_ID);
+              } catch(error) { showCommandFeedback(String(error), 'error'); }
+            }
+            async function updateTravelHotel(code){
+              if (!ACTIVE_TRAVEL_LIST_ID || !code) return;
+              const row = document.querySelector(`[data-travel-hotel="${CSS.escape(code)}"]`);
+              const current = (ACTIVE_TRAVEL_LIST?.hotels || []).find(item => item.hotel_code === code);
+              if (!row || !current) return;
+              try {
+                const payload = await decisionApi(`/api/v1/travel-lists/${encodeURIComponent(ACTIVE_TRAVEL_LIST_ID)}/hotels/${encodeURIComponent(code)}`, {
+                  method:'PUT',
+                  body:JSON.stringify({
+                    hotel:current.hotel,provider:current.provider,
+                    priority:Number(row.querySelector('[data-travel-priority]')?.value || 0),
+                    notes:row.querySelector('[data-travel-hotel-notes]')?.value || '',
+                    sort_order:current.sort_order || 0
+                  })
+                });
+                renderTravelList(payload.travel_list);
+              } catch(error) { showCommandFeedback(String(error), 'error'); }
+            }
+            async function removeTravelHotel(code){
+              if (!ACTIVE_TRAVEL_LIST_ID || !code) return;
+              try {
+                const payload = await decisionApi(`/api/v1/travel-lists/${encodeURIComponent(ACTIVE_TRAVEL_LIST_ID)}/hotels/${encodeURIComponent(code)}`, {method:'DELETE'});
+                renderTravelList(payload.travel_list);
+              } catch(error) { showCommandFeedback(String(error), 'error'); }
+            }
+            async function linkTravelResource(type,id){
+              if (!ACTIVE_TRAVEL_LIST_ID || !id) { showCommandFeedback(tx('travelSelectResource'), 'error'); return; }
+              try {
+                const payload = await decisionApi(`/api/v1/travel-lists/${encodeURIComponent(ACTIVE_TRAVEL_LIST_ID)}/links`, {
+                  method:'POST',body:JSON.stringify({resource_type:type,resource_id:id})
+                });
+                renderTravelList(payload.travel_list);
+              } catch(error) { showCommandFeedback(String(error), 'error'); }
+            }
+            async function unlinkTravelResource(type,id){
+              if (!ACTIVE_TRAVEL_LIST_ID) return;
+              try {
+                const payload = await decisionApi(`/api/v1/travel-lists/${encodeURIComponent(ACTIVE_TRAVEL_LIST_ID)}/links`, {
+                  method:'DELETE',body:JSON.stringify({resource_type:type,resource_id:id})
+                });
+                renderTravelList(payload.travel_list);
+              } catch(error) { showCommandFeedback(String(error), 'error'); }
+            }
+            function updateTravelExportLinks(){
+              [['trip-export-json','json'],['trip-export-md','markdown'],['trip-export-html','html']].forEach(([id,format]) => {
+                const link = document.getElementById(id);
+                if (link) link.href = ACTIVE_TRAVEL_LIST_ID ? `/api/v1/travel-lists/${encodeURIComponent(ACTIVE_TRAVEL_LIST_ID)}/summary?format=${format}` : '#';
+              });
+            }
+            function tripSummaryText(summary){
+              const travel = summary?.travel_list || {};
+              const budget = summary?.budget || {};
+              const context = summary?.decision_context || {};
+              const lines = [
+                travel.name || tx('tripSummaryTitle'),
+                `${travel.start_date || '—'} → ${travel.end_date || '—'}`,
+                `${tx('travelBudget')}: ${priceYen(budget.limit)} · ${tx('tripEstimate')}: ${priceYen(budget.estimated_total)} · ${tx('tripRemaining')}: ${priceYen(budget.remaining)}`,
+                '',
+                tx('travelHotels')
+              ];
+              (travel.hotels || []).forEach(item => lines.push(`• P${item.priority} ${item.display_code} ${item.name}`));
+              lines.push('', tx('splitStayTitle'));
+              const plan = (context.split_plans || [])[0];
+              if (plan) (plan.segments || []).forEach(segment => lines.push(`• ${segment.checkin_date} → ${segment.checkout_date} ${segment.name || segment.hotel_code} ${priceYen(segment.subtotal)}`));
+              else lines.push(`• ${tx('splitNoPlan')}`);
+              lines.push('', tx('decisionHistoryTitle'));
+              (context.price_statistics || []).forEach(item => lines.push(`• ${item.name || item.hotel_code}: ${decisionAssessmentLabel(item.assessment?.label)} · ${priceYen(item.current_price)} · ${item.sample_count} samples`));
+              if (travel.notes) lines.push('', travel.notes);
+              return lines.join('\n');
+            }
+            async function loadTripSummary(){
+              if (!ACTIVE_TRAVEL_LIST_ID) return;
+              try {
+                const payload = await decisionApi(`/api/v1/travel-lists/${encodeURIComponent(ACTIVE_TRAVEL_LIST_ID)}/summary?format=json`);
+                const summary = payload.summary || {};
+                setNodeText('#trip-summary-preview', tripSummaryText(summary));
+                const budget = summary.budget || {};
+                const node = document.getElementById('trip-budget');
+                if (node) node.innerHTML = [
+                  [tx('travelBudget'),priceYen(budget.limit)],
+                  [tx('tripEstimate'),priceYen(budget.estimated_total)],
+                  [tx('tripRemaining'),priceYen(budget.remaining)]
+                ].map(([label,value]) => `<article><span>${priceSafe(label)}</span><strong>${priceSafe(value)}</strong></article>`).join('');
+              } catch(error) { setNodeText('#trip-summary-preview', String(error)); }
+            }
+            async function prepareDecisionCenter(force=false){
+              if (force) {
+                DECISION_PRICE_DATA = null;
+                DECISION_FLEXIBLE_JOBS = [];
+                DECISION_ALERT_RULES = [];
+              }
+              await Promise.all([loadDecisionPrices(),loadDecisionFlexibleJobs(),loadDecisionAlertRules(),loadTravelLists()]);
+              localizeDecisionCenter();
+            }
+            function localizeDecisionCenter(){
+              [
+                ['#decision-eyebrow','decisionEyebrow'],['#decision-title','navTravel'],['#decision-subtitle','decisionSubtitle'],['#decision-refresh','decisionRefresh'],
+                ['#decision-low-label','decisionLowHotels'],['#decision-high-label','decisionHighHotels'],['#decision-samples-label','decisionSamples'],['#decision-lists-label','decisionLists'],
+                ['#decision-history-eyebrow','decisionHistoryEyebrow'],['#decision-history-title','decisionHistoryTitle'],['#decision-history-note','decisionHistoryNote'],['#decision-days-label','decisionDays'],
+                ['#decision-hotel-head','decisionHotelHead'],['#decision-current-head','decisionCurrentHead'],['#decision-range-head','decisionRangeHead'],['#decision-percentile-head','decisionPercentileHead'],['#decision-assessment-head','decisionAssessmentHead'],['#decision-sample-head','decisionSampleHead'],
+                ['#split-stay-eyebrow','splitEyebrow'],['#split-stay-title','splitStayTitle'],['#split-stay-note','splitNote'],['#split-job-label','splitJob'],['#split-window-label','splitWindow'],['#split-move-label','splitMoveCost'],['#split-distance-label','splitDistanceCost'],['#split-unknown-label','splitUnknownCost'],['#split-priority-label','splitPriorityBonus'],['#split-run','splitRun'],
+                ['#travel-list-eyebrow','travelEyebrow'],['#travel-list-title','travelTitle'],['#travel-list-note','travelNote'],['#travel-list-create','travelCreate'],['#travel-name-label','travelName'],['#travel-start-label','travelStart'],['#travel-end-label','travelEnd'],['#travel-budget-label','travelBudget'],['#travel-status-label','travelStatus'],['#travel-notes-label','travelNotes'],['#travel-save','travelSave'],['#travel-add-hotels','travelAddHotels'],['#travel-link-task','travelLinkTask'],['#travel-link-comparison','travelLinkComparison'],['#travel-link-alert','travelLinkAlert'],['#travel-delete','travelDelete'],
+                ['#travel-hotel-head','travelHotels'],['#travel-priority-head','travelPriority'],['#travel-hotel-notes-head','travelNotes'],
+                ['#trip-summary-eyebrow','tripEyebrow'],['#trip-summary-title','tripSummaryTitle'],['#trip-summary-note','tripNote'],['#trip-summary-refresh','tripRefresh']
+              ].forEach(([selector,key]) => setNodeText(selector, tx(key)));
+              [['planning','travelPlanning'],['booked','travelBooked'],['completed','travelCompleted'],['archived','travelArchived']].forEach(([value,key]) => {
+                setNodeText(`#travel-status option[value="${value}"]`, tx(key));
+              });
+              renderDecisionAlertRules();
+              if (DECISION_PRICE_DATA) renderDecisionPrices(DECISION_PRICE_DATA);
+              if (DECISION_SPLIT_DATA) renderSplitStaySuggestions(DECISION_SPLIT_DATA);
+              if (ACTIVE_TRAVEL_LIST) renderTravelList(ACTIVE_TRAVEL_LIST);
+            }
             function localizePriceCalendar(){
               [
                 ['#price-calendar-eyebrow','priceEyebrow'],['#price-calendar-title','priceTitle'],['#price-calendar-subtitle','priceSubtitle'],['#price-hotel-label','priceHotel'],
@@ -2926,7 +3367,7 @@
               setNodeText('.sidebar-brand div > span', tx('workspace'));
               setLabelFor('primary_language', tx('language'));
               const navLabels = document.querySelectorAll('.sidebar-nav .nav-label');
-              [tx('navHome'), tx('navSearch'), tx('navTasks'), tx('navMonitor'), tx('navPrice'), tx('searchSettings'), tx('pushSettings')]
+              [tx('navHome'), tx('navSearch'), tx('navTasks'), tx('navMonitor'), tx('navPrice'), tx('navTravel'), tx('searchSettings'), tx('pushSettings')]
                 .forEach((text, idx) => {
                   if (navLabels[idx]) navLabels[idx].textContent = text;
                   const button = navLabels[idx]?.closest('.sidebar-nav-item');
@@ -2966,6 +3407,7 @@
               if (LAST_HOME_PAYLOAD) renderHomeDashboard(LAST_HOME_PAYLOAD);
               if (TASK_CENTER_INITIALIZED) renderTaskCenter();
               localizePriceCalendar();
+              localizeDecisionCenter();
               const viewHeaders = document.querySelectorAll('.app-view > .view-header');
               const viewTitles = [tx('navHome'), tx('navSearch'), tx('navTasks'), tx('navPrice'), tx('navMonitor'), tx('searchSettings'), tx('pushSettings'), tx('interfaceSettings')];
               const viewHelp = ['', tx('searchViewHelp'), tx('taskSubtitle'), tx('priceSubtitle'), tx('monitorViewHelp'), tx('searchSettingsViewHelp'), tx('pushSettingsViewHelp'), tx('interfaceViewHelp')];

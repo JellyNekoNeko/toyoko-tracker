@@ -250,6 +250,47 @@ def flexible_stay_control(job_id: str, action: str) -> Response:
     return _runtime.flexible_stay_control(job_id, action)
 
 
+@app.route("/api/v1/decision/prices")
+def decision_prices_status() -> Response:
+    return _runtime.decision_prices_status()
+
+
+@app.route(
+    "/api/v1/flexible-stays/<job_id>/split-stays",
+    methods=["GET", "POST"],
+)
+def split_stay_suggestions(job_id: str) -> Response:
+    return _runtime.split_stay_suggestions(job_id)
+
+
+@app.route("/api/v1/travel-lists", methods=["GET", "POST"])
+def travel_lists_collection() -> Response:
+    return _runtime.travel_lists_collection()
+
+
+@app.route("/api/v1/travel-lists/<list_id>", methods=["GET", "PATCH", "DELETE"])
+def travel_list_detail(list_id: str) -> Response:
+    return _runtime.travel_list_detail(list_id)
+
+
+@app.route(
+    "/api/v1/travel-lists/<list_id>/hotels/<path:hotel_code>",
+    methods=["PUT", "DELETE"],
+)
+def travel_list_hotel(list_id: str, hotel_code: str) -> Response:
+    return _runtime.travel_list_hotel(list_id, hotel_code)
+
+
+@app.route("/api/v1/travel-lists/<list_id>/links", methods=["POST", "DELETE"])
+def travel_list_links(list_id: str) -> Response:
+    return _runtime.travel_list_links(list_id)
+
+
+@app.route("/api/v1/travel-lists/<list_id>/summary")
+def travel_list_summary(list_id: str) -> Response:
+    return _runtime.travel_list_summary(list_id)
+
+
 @app.route("/api/v1/events")
 def events_status() -> Response:
     return _runtime.events_status()

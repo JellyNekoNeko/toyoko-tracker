@@ -31,7 +31,7 @@ from copy import deepcopy
 from dataclasses import asdict, fields
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import List, Optional, Tuple, Dict, Any
+from typing import List, Optional, Tuple, Dict, Any, Mapping
 
 import requests
 from flask import request, jsonify, Response
@@ -86,6 +86,10 @@ from .analytics import (
     scope_key_for_config as _analytics_scope_key,
     trend_snapshot as _trend_snapshot,
 )
+from .decision_intelligence import (
+    optimize_split_stays as _optimize_split_stays,
+    price_statistics as _decision_price_statistics,
+)
 from .price_calendar import (
     calendar_snapshot as _price_calendar_data_snapshot,
     condition_key as _price_calendar_condition_key,
@@ -106,6 +110,24 @@ from .flexible_stays import (
     recover_active_jobs as _recover_flexible_stay_jobs,
     set_job_state as _set_flexible_stay_job_state,
     update_job_progress as _update_flexible_stay_progress,
+    list_nights as _list_flexible_stay_nights,
+)
+from .travel_lists import (
+    TravelListConflictError as _TravelListConflictError,
+    TravelListNotFoundError as _TravelListNotFoundError,
+    TravelListValidationError as _TravelListValidationError,
+    create_travel_list as _create_travel_list,
+    delete_travel_list as _delete_travel_list,
+    get_travel_list as _get_travel_list,
+    link_resource as _link_travel_resource,
+    list_travel_lists as _list_travel_lists,
+    remove_hotel as _remove_travel_hotel,
+    trip_summary_html as _trip_summary_html,
+    trip_summary_markdown as _trip_summary_markdown,
+    trip_summary_payload as _trip_summary_payload,
+    unlink_resource as _unlink_travel_resource,
+    update_travel_list as _update_travel_list,
+    upsert_hotel as _upsert_travel_hotel,
 )
 from .simulation import run_stress_test as _run_simulation_stress_test
 from .traffic_meter import traffic_snapshot as _traffic_snapshot
@@ -2834,6 +2856,7 @@ def home() -> Response:
 	                <button class="sidebar-nav-item" data-app-view="tasks"><span class="nav-icon">▦</span><span class="nav-label">监控任务 / Monitor Tasks</span></button>
 	                <button class="sidebar-nav-item" data-app-view="monitor"><span class="nav-icon">◉</span><span class="nav-label">空房监控 / Vacancy Monitor</span><span class="nav-live-dot" aria-hidden="true"></span></button>
 	                <button class="sidebar-nav-item" data-app-view="price"><span class="nav-icon">¥</span><span class="nav-label">价格日历 / Price Calendar</span></button>
+	                <button class="sidebar-nav-item" data-app-view="travel"><span class="nav-icon">✦</span><span class="nav-label">行程决策 / Trip Decisions</span></button>
 	                <button class="sidebar-nav-item" data-app-view="search-settings"><span class="nav-icon">≡</span><span class="nav-label">搜索设定 / Search Settings</span></button>
 	                <button class="sidebar-nav-item" data-app-view="push-settings"><span class="nav-icon">✉</span><span class="nav-label">推送设定 / Push Settings</span></button>
 	              </nav>
@@ -3349,6 +3372,65 @@ def home() -> Response:
 	              <section class="price-empty-state" id="price-empty-state" hidden>
 	                <img src="/static/toyoko-chan-mascot.png?v=3" alt="">
 	                <div><h2 id="price-empty-title">先选择酒店</h2><p id="price-empty-copy">在空房检索中勾选酒店后，即可查看价格日历。</p><button id="price-empty-action" class="primary" type="button">前往空房检索</button></div>
+	              </section>
+	            </div>
+	          </section>
+
+	          <section class="app-view" id="view-travel" data-view="travel" aria-label="Trip Decisions" hidden>
+	            <div class="decision-page">
+	              <header class="decision-hero">
+	                <div><span id="decision-eyebrow">Phase 4 决策中心</span><h1 id="decision-title">行程决策</h1><p id="decision-subtitle">用历史价格、逐晚证据、预算与酒店优先级生成可复核的住宿方案。</p></div>
+	                <button class="primary" id="decision-refresh" type="button">刷新决策数据</button>
+	              </header>
+
+	              <section class="decision-summary-grid" id="decision-summary-grid">
+	                <article><span id="decision-low-label">低价酒店</span><strong id="decision-low-count">0</strong></article>
+	                <article><span id="decision-high-label">高价酒店</span><strong id="decision-high-count">0</strong></article>
+	                <article><span id="decision-samples-label">历史样本</span><strong id="decision-sample-count">0</strong></article>
+	                <article><span id="decision-lists-label">旅行清单</span><strong id="decision-list-count">0</strong></article>
+	              </section>
+
+	              <section class="decision-card">
+	                <header><div><span id="decision-history-eyebrow">历史价格统计</span><h2 id="decision-history-title">价格高低判断</h2><p id="decision-history-note">基于当前任务住宿条件，显示样本窗口、百分位与判断方法。</p></div><label><span id="decision-days-label">统计窗口</span><select id="decision-history-days"><option value="30">30 天</option><option value="90">90 天</option><option value="180" selected>180 天</option><option value="365">365 天</option></select></label></header>
+	                <div class="decision-table-scroll"><table class="decision-table"><thead><tr><th id="decision-hotel-head">酒店</th><th id="decision-current-head">当前价</th><th id="decision-range-head">最低 / 平均 / 最高</th><th id="decision-percentile-head">P25 / 中位 / P75</th><th id="decision-assessment-head">判断</th><th id="decision-sample-head">样本</th></tr></thead><tbody id="travel-price-table-body"><tr><td colspan="6">等待历史数据</td></tr></tbody></table></div>
+	              </section>
+
+	              <section class="decision-card">
+	                <header><div><span id="split-stay-eyebrow">逐晚组合优化</span><h2 id="split-stay-title">拆分住宿建议</h2><p id="split-stay-note">评分 = 房费 + 换店成本 + 距离成本 − 酒店优先级奖励。</p></div></header>
+	                <div class="split-controls">
+	                  <label><span id="split-job-label">价格比较任务</span><select id="split-job-select"></select></label>
+	                  <label><span id="split-window-label">入住组合</span><select id="split-window-select"></select></label>
+	                  <label><span id="split-move-label">每次换店成本</span><input id="split-move-penalty" type="number" min="0" value="2500"></label>
+	                  <label><span id="split-distance-label">每公里成本</span><input id="split-distance-cost" type="number" min="0" value="200"></label>
+	                  <label><span id="split-unknown-label">未知距离成本</span><input id="split-unknown-penalty" type="number" min="0" value="1000"></label>
+	                  <label><span id="split-priority-label">每级优先奖励</span><input id="split-priority-bonus" type="number" min="0" value="300"></label>
+	                  <button class="primary" id="split-run" type="button">生成建议</button>
+	                </div>
+	                <div class="split-results" id="split-results"><div class="decision-empty">选择已完成的价格比较任务后生成建议。</div></div>
+	              </section>
+
+	              <section class="travel-workspace">
+	                <section class="decision-card travel-editor-card">
+	                  <header><div><span id="travel-list-eyebrow">旅行清单</span><h2 id="travel-list-title">预算与酒店优先级</h2><p id="travel-list-note">旅行清单可关联监控任务、价格规则和价格比较。</p></div><div class="travel-list-switch"><select id="travel-list-select"></select><button id="travel-list-create" type="button">新建</button></div></header>
+	                  <div class="travel-editor">
+	                    <label><span id="travel-name-label">名称</span><input id="travel-name" type="text" maxlength="120"></label>
+	                    <label><span id="travel-start-label">入住</span><input id="travel-start-date" type="date"></label>
+	                    <label><span id="travel-end-label">退房</span><input id="travel-end-date" type="date"></label>
+	                    <label><span id="travel-budget-label">预算 JPY</span><input id="travel-budget" type="number" min="0"></label>
+	                    <label><span id="travel-status-label">状态</span><select id="travel-status"><option value="planning">规划中</option><option value="booked">已预订</option><option value="completed">已完成</option><option value="archived">已归档</option></select></label>
+	                    <label class="travel-notes-field"><span id="travel-notes-label">备注</span><textarea id="travel-notes" rows="3"></textarea></label>
+	                  </div>
+	                  <div class="travel-actions"><button class="primary" id="travel-save" type="button">保存清单</button><button id="travel-add-hotels" type="button">加入当前已选酒店</button><button id="travel-link-task" type="button">关联当前任务</button><button id="travel-link-comparison" type="button">关联当前比较</button><select id="travel-alert-rule-select" aria-label="价格提醒规则"></select><button id="travel-link-alert" type="button">关联提醒规则</button><button class="danger" id="travel-delete" type="button">删除清单</button></div>
+	                  <div class="travel-hotel-list"><table class="decision-table"><thead><tr><th id="travel-hotel-head">酒店</th><th id="travel-priority-head">优先级</th><th id="travel-hotel-notes-head">备注</th><th></th></tr></thead><tbody id="travel-hotels-body"></tbody></table></div>
+	                  <div class="travel-links" id="travel-links"></div>
+	                </section>
+
+	                <section class="decision-card trip-summary-card">
+	                  <header><div><span id="trip-summary-eyebrow">可导出行程</span><h2 id="trip-summary-title">行程摘要</h2><p id="trip-summary-note">汇总预算、重点酒店、价格判断、拆分方案和关联资源。</p></div></header>
+	                  <div class="trip-budget" id="trip-budget"></div>
+	                  <pre id="trip-summary-preview">请选择或创建旅行清单。</pre>
+	                  <div class="travel-actions"><button id="trip-summary-refresh" type="button">刷新摘要</button><a id="trip-export-json" class="button-like" href="#">JSON</a><a id="trip-export-md" class="button-like" href="#">Markdown</a><a id="trip-export-html" class="button-like" href="#">HTML</a></div>
+	                </section>
 	              </section>
 	            </div>
 	          </section>
@@ -6545,6 +6627,364 @@ def flexible_stay_control(job_id: str, action: str) -> Response:
         return jsonify({"ok": False, "message": str(exc)}), 404
     except _FlexibleStayValidationError as exc:
         return jsonify({"ok": False, "message": str(exc)}), 400
+
+
+def _decision_task_context(task_id: Any = None) -> Tuple[str, AppConfig, Dict[str, Dict[str, Any]]]:
+    resolved = _resolve_task_id(task_id)
+    task = _workspace.get_task(resolved)
+    cfg = _task_config_with_globals(task)
+    metadata = {
+        str(item.get("code") or ""): deepcopy(item)
+        for item in (cfg.selected_hotels or [])
+        if isinstance(item, dict) and item.get("code")
+    }
+    return resolved, cfg, metadata
+
+
+def _decision_current_prices(task_id: str) -> Dict[str, int]:
+    snapshot = _task_service_snapshot(task_id, include_results=True)
+    output: Dict[str, int] = {}
+    for result in (snapshot or {}).get("results", []) or []:
+        if not isinstance(result, dict):
+            continue
+        value = result.get("min_price")
+        if value is None:
+            match = re.search(r"\d[\d,]*", str(result.get("min_price_text") or ""))
+            value = int(match.group(0).replace(",", "")) if match else None
+        if value is not None:
+            output[str(result.get("code") or "")] = int(value)
+    return output
+
+
+def _decision_statistics_for_task(task_id: str, days: int = 180) -> Dict[str, Any]:
+    resolved, cfg, metadata = _decision_task_context(task_id)
+    conditions = {
+        "people": cfg.people,
+        "rooms": cfg.rooms,
+        "smoking": cfg.smoking,
+        "room_requirement": str(
+            getattr(cfg, "room_requirement", None)
+            or getattr(cfg, "om_requirement", "any")
+            or "any"
+        ),
+        "membership_status": cfg.membership_status,
+    }
+    result = _decision_price_statistics(
+        list(cfg.hotel_codes or []),
+        days=days,
+        scope_key=_analytics_scope_key(cfg),
+        condition_key=_price_calendar_condition_key(cfg),
+        conditions=conditions,
+        current_prices=_decision_current_prices(resolved),
+        hotel_metadata=metadata,
+    )
+    result["task_id"] = resolved
+    result["conditions"] = conditions
+    return result
+
+
+def decision_prices_status() -> Response:
+    try:
+        days = max(7, min(730, int(request.args.get("days", 180))))
+        task_id = _resolve_task_id(request.args.get("task_id"))
+        return jsonify({
+            "ok": True,
+            "statistics": _decision_statistics_for_task(task_id, days),
+        })
+    except (TypeError, ValueError, _workspace.TaskNotFoundError) as exc:
+        return jsonify({"ok": False, "message": str(exc)}), 400
+
+
+def _split_stay_payload(job_id: str, payload: Mapping[str, Any]) -> Dict[str, Any]:
+    job = _get_flexible_stay_job(job_id)
+    priorities: Dict[str, int] = {}
+    travel_list_id = str(payload.get("travel_list_id") or "")
+    if travel_list_id:
+        travel = _get_travel_list(travel_list_id)
+        priorities = {
+            str(item["hotel_code"]): int(item["priority"])
+            for item in travel["hotels"]
+        }
+    result = _optimize_split_stays(
+        job,
+        _list_flexible_stay_nights(job_id),
+        window_key=str(payload.get("window_key") or ""),
+        move_penalty=max(0, int(payload.get("move_penalty", 2500))),
+        distance_cost_per_km=max(
+            0,
+            int(payload.get("distance_cost_per_km", 200)),
+        ),
+        unknown_distance_penalty=max(
+            0,
+            int(payload.get("unknown_distance_penalty", 1000)),
+        ),
+        priority_bonus=max(0, int(payload.get("priority_bonus", 300))),
+        priority_by_hotel=priorities,
+        top_k=max(1, min(20, int(payload.get("top_k", 8)))),
+    )
+    return {
+        "ok": True,
+        "job_id": job_id,
+        "travel_list_id": travel_list_id or None,
+        **result,
+    }
+
+
+def split_stay_suggestions(job_id: str) -> Response:
+    payload: Dict[str, Any] = dict(request.args)
+    if request.method == "POST":
+        payload.update(request.get_json(force=True, silent=True) or {})
+    try:
+        return jsonify(_split_stay_payload(job_id, payload))
+    except _FlexibleStayNotFoundError as exc:
+        return jsonify({"ok": False, "message": str(exc)}), 404
+    except _TravelListNotFoundError as exc:
+        return jsonify({"ok": False, "message": str(exc)}), 404
+    except (TypeError, ValueError) as exc:
+        return jsonify({"ok": False, "message": str(exc)}), 400
+
+
+def travel_lists_collection() -> Response:
+    try:
+        if request.method == "POST":
+            payload = request.get_json(force=True, silent=True) or {}
+            travel = _create_travel_list(payload)
+            for index, hotel in enumerate(payload.get("hotels") or []):
+                if not isinstance(hotel, dict) or not hotel.get("code"):
+                    continue
+                _upsert_travel_hotel(
+                    travel["list_id"],
+                    str(hotel["code"]),
+                    {
+                        "hotel": hotel,
+                        "provider": hotel.get("provider"),
+                        "priority": hotel.get("priority", 0),
+                        "sort_order": index,
+                        "notes": hotel.get("notes", ""),
+                    },
+                )
+            travel = _get_travel_list(travel["list_id"])
+            return jsonify({"ok": True, "travel_list": travel}), 201
+        return jsonify({"ok": True, "travel_lists": _list_travel_lists()})
+    except _TravelListValidationError as exc:
+        return jsonify({"ok": False, "message": str(exc)}), 400
+
+
+def travel_list_detail(list_id: str) -> Response:
+    try:
+        if request.method == "PATCH":
+            payload = request.get_json(force=True, silent=True) or {}
+            travel = _update_travel_list(
+                list_id,
+                payload,
+                expected_revision=payload.get("expected_revision"),
+            )
+            return jsonify({"ok": True, "travel_list": travel})
+        if request.method == "DELETE":
+            _delete_travel_list(list_id)
+            return jsonify({"ok": True, "deleted": list_id})
+        return jsonify({"ok": True, "travel_list": _get_travel_list(list_id)})
+    except _TravelListNotFoundError as exc:
+        return jsonify({"ok": False, "message": str(exc)}), 404
+    except _TravelListConflictError as exc:
+        return jsonify({"ok": False, "message": str(exc)}), 409
+    except _TravelListValidationError as exc:
+        return jsonify({"ok": False, "message": str(exc)}), 400
+
+
+def travel_list_hotel(list_id: str, hotel_code: str) -> Response:
+    try:
+        if request.method == "DELETE":
+            _remove_travel_hotel(list_id, hotel_code)
+            return jsonify({
+                "ok": True,
+                "travel_list": _get_travel_list(list_id),
+            })
+        payload = request.get_json(force=True, silent=True) or {}
+        hotel = _upsert_travel_hotel(list_id, hotel_code, payload)
+        return jsonify({
+            "ok": True,
+            "hotel": hotel,
+            "travel_list": _get_travel_list(list_id),
+        })
+    except _TravelListNotFoundError as exc:
+        return jsonify({"ok": False, "message": str(exc)}), 404
+    except (TypeError, ValueError, _TravelListValidationError) as exc:
+        return jsonify({"ok": False, "message": str(exc)}), 400
+
+
+def _validate_travel_resource(resource_type: str, resource_id: str) -> Dict[str, Any]:
+    if resource_type == "task":
+        task = _workspace.get_task(resource_id)
+        return {"name": task["name"], "revision": task["revision"]}
+    if resource_type == "alert_rule":
+        rule = _get_alert_rule(resource_id)
+        return {
+            "name": rule["name"],
+            "task_id": rule.get("task_id"),
+            "rule_type": rule.get("rule_type"),
+        }
+    if resource_type == "comparison":
+        job = _get_flexible_stay_job(resource_id)
+        return {
+            "name": job.get("name") or f"{job['earliest_date']} → {job['latest_date']}",
+            "task_id": job.get("task_id"),
+            "status": job.get("status"),
+        }
+    raise _TravelListValidationError("unsupported resource_type")
+
+
+def travel_list_links(list_id: str) -> Response:
+    payload = request.get_json(force=True, silent=True) or {}
+    resource_type = str(payload.get("resource_type") or "")
+    resource_id = str(payload.get("resource_id") or "")
+    try:
+        if request.method == "DELETE":
+            _unlink_travel_resource(list_id, resource_type, resource_id)
+        else:
+            metadata = _validate_travel_resource(resource_type, resource_id)
+            metadata.update(
+                payload.get("metadata")
+                if isinstance(payload.get("metadata"), dict)
+                else {}
+            )
+            _link_travel_resource(
+                list_id,
+                resource_type,
+                resource_id,
+                metadata,
+            )
+        return jsonify({
+            "ok": True,
+            "travel_list": _get_travel_list(list_id),
+        })
+    except (
+        _TravelListNotFoundError,
+        _workspace.TaskNotFoundError,
+        _AlertNotFoundError,
+        _FlexibleStayNotFoundError,
+    ) as exc:
+        return jsonify({"ok": False, "message": str(exc)}), 404
+    except _TravelListValidationError as exc:
+        return jsonify({"ok": False, "message": str(exc)}), 400
+
+
+def _travel_summary_context(travel: Mapping[str, Any]) -> Dict[str, Any]:
+    priorities = {
+        str(item["hotel_code"]): int(item["priority"])
+        for item in travel.get("hotels") or []
+    }
+    price_items: List[Dict[str, Any]] = []
+    split_plans: List[Dict[str, Any]] = []
+    comparisons: List[Dict[str, Any]] = []
+    alert_rules: List[Dict[str, Any]] = []
+    seen_tasks = set()
+    for link in travel.get("links") or []:
+        kind = str(link.get("resource_type") or "")
+        identifier = str(link.get("resource_id") or "")
+        try:
+            if kind == "task" and identifier not in seen_tasks:
+                seen_tasks.add(identifier)
+                price_items.extend(
+                    _decision_statistics_for_task(identifier, 180)["hotels"]
+                )
+            elif kind == "comparison":
+                comparison = _flexible_comparison_snapshot(identifier)
+                comparisons.append({
+                    "job_id": identifier,
+                    "summary": comparison.get("summary") or {},
+                    "window_count": len(comparison.get("columns") or []),
+                })
+                job = _get_flexible_stay_job(identifier)
+                optimized = _optimize_split_stays(
+                    job,
+                    _list_flexible_stay_nights(identifier),
+                    priority_by_hotel=priorities,
+                    top_k=5,
+                )
+                split_plans.extend(optimized.get("plans") or [])
+            elif kind == "alert_rule":
+                rule = _get_alert_rule(identifier)
+                alert_rules.append({
+                    key: rule.get(key)
+                    for key in (
+                        "rule_id",
+                        "name",
+                        "rule_type",
+                        "hotel_code",
+                        "date_start",
+                        "date_end",
+                        "enabled",
+                    )
+                })
+        except Exception as exc:
+            _log(f"[travel-list] linked resource {kind}/{identifier}: {exc}")
+    split_plans.sort(
+        key=lambda item: (
+            int(item.get("score") or 0),
+            int(item.get("total_price") or 0),
+        )
+    )
+    estimated_total = (
+        int(split_plans[0]["total_price"])
+        if split_plans
+        else min(
+            (
+                int(item["summary"]["lowest_total_price"])
+                for item in comparisons
+                if item.get("summary", {}).get("lowest_total_price") is not None
+            ),
+            default=None,
+        )
+    )
+    return {
+        "estimated_total": estimated_total,
+        "price_statistics": price_items,
+        "split_plans": split_plans[:5],
+        "comparisons": comparisons,
+        "alert_rules": alert_rules,
+    }
+
+
+def travel_list_summary(list_id: str) -> Response:
+    try:
+        travel = _get_travel_list(list_id)
+        summary = _trip_summary_payload(
+            travel,
+            _travel_summary_context(travel),
+        )
+        format_name = str(request.args.get("format") or "json").lower()
+        safe_name = re.sub(r"[^A-Za-z0-9._-]+", "-", travel["name"]).strip("-") or "trip"
+        if format_name in {"md", "markdown"}:
+            response = Response(
+                _trip_summary_markdown(summary),
+                content_type="text/markdown; charset=utf-8",
+            )
+            response.headers["Content-Disposition"] = (
+                f'attachment; filename="{safe_name}-summary.md"'
+            )
+            return response
+        if format_name == "html":
+            response = Response(
+                _trip_summary_html(summary),
+                content_type="text/html; charset=utf-8",
+            )
+            response.headers["Content-Disposition"] = (
+                f'attachment; filename="{safe_name}-summary.html"'
+            )
+            return response
+        if format_name != "json":
+            return jsonify({
+                "ok": False,
+                "message": "format must be json, markdown, or html",
+            }), 400
+        response = jsonify({"ok": True, "summary": summary})
+        response.headers["Content-Disposition"] = (
+            f'attachment; filename="{safe_name}-summary.json"'
+        )
+        return response
+    except _TravelListNotFoundError as exc:
+        return jsonify({"ok": False, "message": str(exc)}), 404
 
 
 def events_status() -> Response:

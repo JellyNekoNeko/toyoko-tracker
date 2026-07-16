@@ -251,15 +251,15 @@ Status: **Delivered**.
 
 ## Current assignment
 
-Phase 1 through Phase 3 are complete. Phase 4 is the next active stage and
-begins with historical price statistics and reproducible decision scoring.
+Phase 1 through Phase 4 are complete. Phase 5 is the next active stage and
+begins with the shared native lifecycle protocol and recovery semantics.
 
 | Lane | Next assignment | Completion signal |
 | --- | --- | --- |
-| A | P4-00 historical-data contract | Sampling and retention rules are frozen |
-| B | P4-01/02 statistics and price labels | Minimum, average, maximum and percentiles pass |
-| C | P4-06 decision-center UI contract | Labels, samples and evidence states are defined |
-| D | P4-08 historical and optimizer fixtures | Percentile and split-stay cases are ready |
+| A | P5-01 lifecycle core and adapter protocol | One cross-platform lifecycle contract |
+| B | P5-06 sleep, wake and network recovery | Repeated recovery events remain idempotent |
+| C | P5-09 desktop settings and i18n | Capability-aware controls are frozen |
+| D | P5-02/03/04 platform adapters | macOS, Windows and Linux behavior passes |
 
 The frozen Phase 1 integration contracts are documented in
 `docs/PHASE1_ARCHITECTURE.md`.
@@ -326,3 +326,20 @@ The frozen Phase 1 integration contracts are documented in
 
 The Phase 3 contracts and user workflow are documented in
 `docs/PHASE3_ARCHITECTURE.md` and `docs/PHASE3_FLEXIBLE_STAYS.md`.
+
+### Phase 4 implementation status
+
+| Work package | Status | Evidence |
+| --- | --- | --- |
+| P4-00 | Implemented | Three-source sampling, 60-second dedupe, bounded windows and IQR contract |
+| P4-01 | Implemented | Min/average/max/median, P10/P25/P75/P90 and current position |
+| P4-02 | Implemented | Explainable low/normal/high labels with sample thresholds |
+| P4-03 | Implemented | Bounded dynamic-programming split optimizer with nightly evidence |
+| P4-04 | Implemented | Workspace schema v4 lists, hotels, priorities, budget and notes |
+| P4-05 | Implemented | Task, alert-rule and comparison link/unlink APIs |
+| P4-06 | Implemented | Five-language responsive Trip Decisions center |
+| P4-07 | Implemented | Versioned JSON and downloadable Markdown/HTML summaries |
+| P4-08 | Implemented | Percentile, anomaly, split-path, schema, API and export tests |
+
+The Phase 4 contracts and user workflow are documented in
+`docs/PHASE4_ARCHITECTURE.md` and `docs/PHASE4_TRIP_DECISIONS.md`.

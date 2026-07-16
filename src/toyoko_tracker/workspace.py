@@ -19,7 +19,7 @@ from .settings import (
 )
 
 
-WORKSPACE_SCHEMA_VERSION = 3
+WORKSPACE_SCHEMA_VERSION = 4
 DEFAULT_TASK_ID = "default"
 _LOCK = threading.RLock()
 
@@ -248,9 +248,14 @@ def _migrate(connection: sqlite3.Connection) -> None:
             end_date TEXT NOT NULL DEFAULT '',
             budget_limit REAL,
             notes TEXT NOT NULL DEFAULT '',
+            currency TEXT NOT NULL DEFAULT 'JPY',
+            status TEXT NOT NULL DEFAULT 'planning',
+            revision INTEGER NOT NULL DEFAULT 1,
             created_at REAL NOT NULL,
             updated_at REAL NOT NULL
         );
+        CREATE INDEX IF NOT EXISTS idx_travel_lists_updated
+            ON travel_lists(updated_at DESC);
 
         CREATE TABLE IF NOT EXISTS travel_list_hotels (
             list_id TEXT NOT NULL,
@@ -265,6 +270,20 @@ def _migrate(connection: sqlite3.Connection) -> None:
             PRIMARY KEY(list_id, hotel_code),
             FOREIGN KEY(list_id) REFERENCES travel_lists(list_id) ON DELETE CASCADE
         );
+        CREATE INDEX IF NOT EXISTS idx_travel_list_hotels_order
+            ON travel_list_hotels(list_id, priority DESC, sort_order, created_at);
+
+        CREATE TABLE IF NOT EXISTS travel_list_links (
+            list_id TEXT NOT NULL,
+            resource_type TEXT NOT NULL,
+            resource_id TEXT NOT NULL,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            created_at REAL NOT NULL,
+            PRIMARY KEY(list_id, resource_type, resource_id),
+            FOREIGN KEY(list_id) REFERENCES travel_lists(list_id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_travel_list_links_resource
+            ON travel_list_links(resource_type, resource_id);
 
         CREATE TABLE IF NOT EXISTS flexible_stay_jobs (
             job_id TEXT PRIMARY KEY,
@@ -338,6 +357,19 @@ def _migrate(connection: sqlite3.Connection) -> None:
             ADD COLUMN runtime_revision INTEGER NOT NULL DEFAULT 0
             """
         )
+    travel_columns = {
+        str(row["name"])
+        for row in connection.execute("PRAGMA table_info(travel_lists)").fetchall()
+    }
+    for column, definition in {
+        "currency": "TEXT NOT NULL DEFAULT 'JPY'",
+        "status": "TEXT NOT NULL DEFAULT 'planning'",
+        "revision": "INTEGER NOT NULL DEFAULT 1",
+    }.items():
+        if column not in travel_columns:
+            connection.execute(
+                f"ALTER TABLE travel_lists ADD COLUMN {column} {definition}"
+            )
     connection.execute(
         """
         INSERT INTO workspace_meta(key, value, updated_at)
