@@ -183,6 +183,11 @@ and `toyoko-tracker.png` for desktop-menu integration.
 Each desktop release contains six native builds: macOS Apple Silicon (arm64),
 macOS Intel (x64), Windows x64, Windows arm64, Linux x64, and Linux arm64.
 The desktop updater selects the matching download for the current OS and CPU.
+The desktop app now includes a tray/menu-bar controller, optional
+close-to-background and launch-at-login behavior, sleep/network recovery,
+notification deep links and persistent unread badges. These options are under
+**Interface Settings → Desktop Background**. See
+[`docs/PHASE5_DESKTOP_LIFECYCLE.md`](docs/PHASE5_DESKTOP_LIFECYCLE.md).
 Release archives receive GitHub Sigstore provenance attestations. When signing
 secrets are configured, Windows executables are Authenticode-signed and macOS
 apps are Developer ID signed and notarized. See

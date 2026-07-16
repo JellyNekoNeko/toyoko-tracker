@@ -533,8 +533,8 @@ def manifest_response() -> Response:
 
 
 def service_worker_response() -> Response:
-    script = """const CACHE='toyoko-chan-shell-v3';
-const DATA='toyoko-chan-data-v3';
+    script = """const CACHE='toyoko-chan-shell-v4';
+const DATA='toyoko-chan-data-v4';
 const SHELL=['/static/app.css?v=__ASSET_REVISION__','/static/app.js?v=__ASSET_REVISION__','/static/toyoko-chan-mascot.png?v=3','/manifest.webmanifest'];
 const DATA_PATHS=['/status','/api/v1/runtime','/api/v1/results','/api/v1/availability-logs','/api/v1/trends','/api/v1/providers'];
 self.addEventListener('install',event=>{event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(SHELL)).catch(()=>{}));self.skipWaiting();});
@@ -547,7 +547,7 @@ if(DATA_PATHS.includes(url.pathname)){event.respondWith(networkFirst(event.reque
 });
 self.addEventListener('message',event=>{if(event.data&&event.data.type==='SKIP_WAITING')self.skipWaiting();});
 """
-    script = script.replace("__ASSET_REVISION__", f"{APP_VERSION}-traffic-1")
+    script = script.replace("__ASSET_REVISION__", f"{APP_VERSION}-phase5-1")
     response = Response(script, mimetype="application/javascript")
     response.headers["Service-Worker-Allowed"] = "/"
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"

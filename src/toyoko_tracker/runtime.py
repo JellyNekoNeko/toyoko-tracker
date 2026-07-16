@@ -576,6 +576,7 @@ def _alert_delivery_handler(
     body: str,
     url: str,
     channels: Optional[List[str]] = None,
+    context: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Dict[str, str]]:
     if channels is not None:
         cfg = deepcopy(cfg)
@@ -588,7 +589,43 @@ def _alert_delivery_handler(
             "serverchan": "enable_serverchan",
         }.items():
             setattr(cfg, field, channel in enabled and bool(getattr(cfg, field, False)))
-    notify_push_channels(cfg, title, body, url or None)
+    desktop_url = None
+    try:
+        from .desktop_lifecycle import build_deep_link, record_desktop_notification
+
+        task_id = str(getattr(cfg, "task_id", "") or "")
+        events = list((context or {}).get("events") or [])
+        first_event = events[0] if events and isinstance(events[0], Mapping) else {}
+        batch = (context or {}).get("batch") or {}
+        desktop_url = build_deep_link(
+            view="monitor",
+            task_id=task_id,
+            hotel_code=str(first_event.get("hotel_code") or ""),
+            stay_date=str(
+                first_event.get("stay_date")
+                or getattr(cfg, "start_date", "")
+                or ""
+            ),
+            event_id=str(first_event.get("alert_event_id") or ""),
+        )
+        dedupe = str(batch.get("batch_id") or "") or hashlib.sha256(
+            f"{task_id}|{title}|{body}|{url}".encode("utf-8")
+        ).hexdigest()
+        record_desktop_notification(
+            title,
+            body,
+            desktop_url,
+            dedupe_key=f"alert:{dedupe}",
+        )
+    except Exception as exc:
+        _log(f"[desktop] alert deep link skipped: {exc}")
+    notify_push_channels(
+        cfg,
+        title,
+        body,
+        url or None,
+        desktop_url=desktop_url,
+    )
     snapshot = notification_status_snapshot(asdict(cfg))
     outcomes: Dict[str, Dict[str, str]] = {}
     for item in snapshot:
@@ -2840,7 +2877,7 @@ def home() -> Response:
     <link rel="icon" type="image/png" href="/static/toyoko-chan-mascot.png?v=3">
     <link rel="apple-touch-icon" href="/static/toyoko-chan-mascot.png?v=3">
     <link rel="manifest" href="/manifest.webmanifest">
-    <link rel="stylesheet" href="/static/app.css?v={APP_VERSION}-traffic-1">
+    <link rel="stylesheet" href="/static/app.css?v={APP_VERSION}-phase5-1">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"></head>
 	        <body data-theme="light" data-app-version="{APP_VERSION}">
 	          <div class="app-shell">
@@ -3847,6 +3884,21 @@ def home() -> Response:
 	                  <button type="button" data-theme-choice="dark" aria-pressed="false">深色 / Dark</button>
 	                </div>
 	              </section>
+	              <section class="interface-card desktop-lifecycle-card" id="desktop-lifecycle-card">
+	                <span class="interface-card-icon">◉</span>
+	                <div><h2 id="desktop-lifecycle-title">桌面后台运行</h2><p id="desktop-lifecycle-help">托盘、登录启动、休眠恢复与通知角标。</p></div>
+	                <div class="desktop-lifecycle-options">
+	                  <label class="inline"><input id="desktop_close_to_background" type="checkbox"> <span id="desktop-close-label">关闭窗口后在后台运行</span></label>
+	                  <label class="inline"><input id="desktop_launch_at_login" type="checkbox"> <span id="desktop-login-label">登录系统时自动启动</span></label>
+	                  <label class="inline"><input id="desktop_badge_enabled" type="checkbox"> <span id="desktop-badge-label">显示未读通知角标</span></label>
+	                  <label class="inline"><input id="desktop_recovery_enabled" type="checkbox"> <span id="desktop-recovery-label">休眠唤醒或网络恢复后继续监控</span></label>
+	                </div>
+	                <div class="interface-card-actions">
+	                  <button type="button" class="primary" id="btn_desktop_lifecycle_save">保存桌面设置</button>
+	                  <button type="button" id="btn_desktop_notifications_read">清除角标</button>
+	                  <span id="desktop-lifecycle-state" aria-live="polite">正在读取桌面能力</span>
+	                </div>
+	              </section>
 	              <section class="interface-card pwa-install-card">
 	                <span class="interface-card-icon">▣</span>
 	                <div><h2 id="pwa-title">手机桌面版</h2><p id="pwa-help">安装到主屏幕，保留最近结果并自动重连。</p></div>
@@ -4012,7 +4064,7 @@ def home() -> Response:
 
     page_html += f"""
           <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-          <script src="/static/app.js?v={APP_VERSION}-traffic-1"></script>
+          <script src="/static/app.js?v={APP_VERSION}-phase5-1"></script>
         </body></html>
         """
     response = Response(page_html, mimetype="text/html")
@@ -5822,6 +5874,47 @@ def _runtime_status_snapshot() -> Dict[str, Any]:
 
 def runtime_status() -> Response:
     return jsonify(_runtime_status_snapshot())
+
+
+def desktop_lifecycle_status() -> Response:
+    from .desktop_lifecycle import desktop_status
+
+    return jsonify(desktop_status())
+
+
+def desktop_lifecycle_update() -> Response:
+    from .desktop_lifecycle import (
+        DEFAULT_PREFERENCES,
+        active_controller,
+        desktop_status,
+        set_autostart,
+        update_preferences,
+    )
+
+    payload = request.get_json(force=True, silent=True) or {}
+    patch = {
+        key: value
+        for key, value in payload.items()
+        if key in DEFAULT_PREFERENCES and isinstance(value, bool)
+    }
+    if not patch:
+        return jsonify({"ok": False, "message": "no supported desktop fields"}), 400
+    try:
+        if "launch_at_login" in patch:
+            set_autostart(bool(patch["launch_at_login"]))
+        preferences = update_preferences(patch)
+        controller = active_controller()
+        if controller is not None:
+            controller.apply_preferences(preferences)
+        return jsonify(desktop_status())
+    except (OSError, ValueError) as exc:
+        return jsonify({"ok": False, "message": str(exc)}), 400
+
+
+def desktop_notifications_read() -> Response:
+    from .desktop_lifecycle import mark_desktop_notifications_read
+
+    return jsonify(mark_desktop_notifications_read())
 
 
 def cache_status() -> Response:

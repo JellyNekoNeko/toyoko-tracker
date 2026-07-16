@@ -2,6 +2,19 @@
 
 ## v0.7.0 - Development
 
+- Completed Phase 5 native desktop lifecycle with cross-platform tray/menu-bar
+  controls, close-to-background behavior and explicit Quit semantics.
+- Added per-user launch-at-login adapters for macOS LaunchAgents, Windows Run
+  registration and Linux XDG autostart.
+- Added sleep/resume and offline-to-online recovery that wakes the existing
+  task scheduler, alert dispatcher and durable flexible-date jobs without
+  duplicating services.
+- Added `toyoko-tracker://` notification deep links to task, hotel, date and
+  event context, including existing-process forwarding and platform protocol
+  registration.
+- Added persistent deduplicated unread counts, tray/window titles, macOS Dock
+  badges and five-language capability-aware desktop settings with WebUI
+  fallback.
 - Completed Phase 4 historical price statistics with three-source evidence
   merging, mirrored-sample deduplication, IQR anomaly handling, R-7
   percentiles and explainable low/normal/high current-price labels.

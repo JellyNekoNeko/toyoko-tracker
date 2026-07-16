@@ -471,11 +471,16 @@ def notify_push_channels(
     url: Optional[str] = None,
     *,
     event_id: str = "",
+    desktop_url: Optional[str] = None,
 ) -> None:
     channels = (
         ("telegram", bool(getattr(cfg, "enable_telegram", False)), lambda: notify_telegram(cfg, body)),
         ("email", bool(getattr(cfg, "enable_email", False)), lambda: notify_email(cfg, title, body, event_id=event_id)),
-        ("local", bool(getattr(cfg, "enable_local", False)), lambda: notify_local(cfg, title, body)),
+        (
+            "local",
+            bool(getattr(cfg, "enable_local", False)),
+            lambda: notify_local(cfg, title, body, desktop_url),
+        ),
         ("bark", bool(getattr(cfg, "enable_bark", False)), lambda: notify_bark(cfg, title, body, url)),
         ("serverchan", bool(getattr(cfg, "enable_serverchan", False)), lambda: notify_serverchan(cfg, title, body)),
     )
@@ -532,8 +537,40 @@ def _publish_and_notify(
         event_payload,
         dedupe_window_seconds=dedupe_window_seconds,
     )
+    desktop_url = ""
+    if enabled and event.created:
+        try:
+            from .desktop_lifecycle import build_deep_link, record_desktop_notification
+
+            desktop_url = build_deep_link(
+                view="monitor",
+                task_id=task_id,
+                hotel_code=str(event_payload.get("code") or ""),
+                stay_date=str(
+                    event_payload.get("stay_date")
+                    or event_payload.get("start_date")
+                    or getattr(cfg, "start_date", "")
+                    or ""
+                ),
+                event_id=event.event_id,
+            )
+            record_desktop_notification(
+                title,
+                body,
+                desktop_url,
+                dedupe_key=event.event_id,
+            )
+        except Exception as exc:
+            _log(f"[desktop] notification state skipped: {exc}")
     if enabled:
-        notify_push_channels(cfg, title, body, url, event_id=event.event_id)
+        notify_push_channels(
+            cfg,
+            title,
+            body,
+            url,
+            event_id=event.event_id,
+            desktop_url=desktop_url or None,
+        )
     if task_id:
         try:
             from .alerting import record_legacy_event
@@ -565,7 +602,12 @@ def _publish_and_notify(
     return event.event_id
 
 
-def notify_local(cfg: AppConfig, title: str, body: str) -> None:
+def notify_local(
+    cfg: AppConfig,
+    title: str,
+    body: str,
+    url: Optional[str] = None,
+) -> None:
     if not getattr(cfg, "enable_local", False):
         _log("[local] skipped: enable_local = False")
         return
@@ -585,8 +627,21 @@ def notify_local(cfg: AppConfig, title: str, body: str) -> None:
             sent = False
             if tn:
                 try:
+                    command = [
+                        tn,
+                        "-title",
+                        title,
+                        "-message",
+                        body,
+                        "-group",
+                        "toyoko-inn-tracker",
+                        "-sound",
+                        "default",
+                    ]
+                    if url:
+                        command.extend(["-open", url])
                     proc = subprocess.run(
-                        [tn, "-title", title, "-message", body, "-group", "toyoko-inn-tracker", "-sound", "default"],
+                        command,
                         stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE,
                         text=True,
@@ -648,13 +703,19 @@ def notify_local(cfg: AppConfig, title: str, body: str) -> None:
                     "$ni.Visible = $true; "
                     "$ni.BalloonTipTitle = $env:TOYOKO_NOTIFICATION_TITLE; "
                     "$ni.BalloonTipText = $env:TOYOKO_NOTIFICATION_BODY; "
+                    "if ($env:TOYOKO_NOTIFICATION_URL) { "
+                    "$ni.add_BalloonTipClicked({ "
+                    "Start-Process $env:TOYOKO_NOTIFICATION_URL; "
+                    "}); "
+                    "} "
                     "$ni.ShowBalloonTip(4000); "  # show for ~4s
-                    "Start-Sleep -Milliseconds 1200; "  # give it a moment to appear, but do not block our process
+                    "Start-Sleep -Milliseconds 6500; "
                     "$ni.Dispose();"
                 )
                 notification_env = os.environ.copy()
                 notification_env["TOYOKO_NOTIFICATION_TITLE"] = title
                 notification_env["TOYOKO_NOTIFICATION_BODY"] = body
+                notification_env["TOYOKO_NOTIFICATION_URL"] = str(url or "")
                 subprocess.Popen(
                     [powershell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script],
                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
@@ -672,8 +733,52 @@ def notify_local(cfg: AppConfig, title: str, body: str) -> None:
                 notify_send = shutil.which("notify-send")
                 if not notify_send:
                     raise FileNotFoundError("notify-send was not found; install libnotify")
+                xdg_open = shutil.which("xdg-open") if url else None
+                if url and xdg_open:
+                    def wait_for_notification_action() -> None:
+                        process = None
+                        try:
+                            process = subprocess.Popen(
+                                [
+                                    notify_send,
+                                    "--app-name=ToyokoTracker",
+                                    "--hint=string:desktop-entry:ToyokoTracker",
+                                    "--action=default=Open",
+                                    title,
+                                    body,
+                                ],
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL,
+                                text=True,
+                            )
+                            action, _ = process.communicate(timeout=300)
+                            if process.returncode == 0 and action.strip() == "default":
+                                subprocess.Popen(
+                                    [xdg_open, url],
+                                    stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL,
+                                )
+                        except Exception as action_error:
+                            if process is not None and process.poll() is None:
+                                process.kill()
+                            _log(f"[local] notify-send action failed: {action_error}")
+
+                    threading.Thread(
+                        target=wait_for_notification_action,
+                        name="toyoko-notify-action",
+                        daemon=True,
+                    ).start()
+                    _set_push_status("local", "success", "notify-send action queued")
+                    _log("[local] notify-send action notification queued")
+                    return
+                command = [
+                    notify_send,
+                    "--hint=string:desktop-entry:ToyokoTracker",
+                    title,
+                    body,
+                ]
                 proc = subprocess.run(
-                    [notify_send, title, body],
+                    command,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,

@@ -251,15 +251,15 @@ Status: **Delivered**.
 
 ## Current assignment
 
-Phase 1 through Phase 4 are complete. Phase 5 is the next active stage and
-begins with the shared native lifecycle protocol and recovery semantics.
+Phase 1 through Phase 5 are complete. Phase 6 is the next active stage and
+begins with backup/export contracts, diagnostics and release-closure testing.
 
 | Lane | Next assignment | Completion signal |
 | --- | --- | --- |
-| A | P5-01 lifecycle core and adapter protocol | One cross-platform lifecycle contract |
-| B | P5-06 sleep, wake and network recovery | Repeated recovery events remain idempotent |
-| C | P5-09 desktop settings and i18n | Capability-aware controls are frozen |
-| D | P5-02/03/04 platform adapters | macOS, Windows and Linux behavior passes |
+| A | P6-01 consistent backup archive | Versioned manifest and integrity hashes |
+| B | P6-05 diagnostic and redaction engine | Copyable reports contain no credentials |
+| C | P6-04 data and storage management UI | Preview, backup and cleanup controls |
+| D | P6-07/08 regression matrix | WebUI and all six desktop targets pass |
 
 The frozen Phase 1 integration contracts are documented in
 `docs/PHASE1_ARCHITECTURE.md`.
@@ -343,3 +343,21 @@ The Phase 3 contracts and user workflow are documented in
 
 The Phase 4 contracts and user workflow are documented in
 `docs/PHASE4_ARCHITECTURE.md` and `docs/PHASE4_TRIP_DECISIONS.md`.
+
+### Phase 5 implementation status
+
+| Work package | Status | Evidence |
+| --- | --- | --- |
+| P5-01 | Implemented | Persistent lifecycle controller, adapter protocol and explicit close/hide/quit semantics |
+| P5-02 | Implemented | macOS menu-bar adapter, Dock badge, LaunchAgent and GURL handler |
+| P5-03 | Implemented | Windows tray, Run registration, URL protocol and QtWebView ARM64 bridge |
+| P5-04 | Implemented | Linux pystray AppIndicator/GTK/Xorg path, XDG autostart and MIME handler |
+| P5-05 | Implemented | Per-user native launch-at-login adapters and background startup |
+| P5-06 | Implemented | Monotonic resume detection, network-return detection and idempotent service wake |
+| P5-07 | Implemented | Event/task/hotel/date deep links with existing-process forwarding |
+| P5-08 | Implemented | Persistent deduplicated unread count, tray/window titles and macOS Dock badge |
+| P5-09 | Implemented | Five-language capability-aware Interface Settings card and WebUI fallback |
+| P5-10 | Implemented | Parser, lifecycle, recovery, notification, API, UI and packaging contract tests |
+
+The Phase 5 contracts and user workflow are documented in
+`docs/PHASE5_ARCHITECTURE.md` and `docs/PHASE5_DESKTOP_LIFECYCLE.md`.

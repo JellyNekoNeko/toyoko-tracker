@@ -27,11 +27,23 @@ else:
 datas = collect_data_files("toyoko_tracker")
 windows_arm64 = sys.platform == "win32" and platform.machine().lower() in {"arm64", "aarch64"}
 hiddenimports = [
-    "PySide6.QtCore",
-    "PySide6.QtGui",
-    "PySide6.QtQml",
-    "PySide6.QtQuick",
-] if windows_arm64 else []
+    "PIL.Image",
+    "pystray",
+    "pystray._base",
+]
+if sys.platform == "darwin":
+    hiddenimports.append("pystray._darwin")
+elif sys.platform == "win32":
+    hiddenimports.append("pystray._win32")
+else:
+    hiddenimports.extend(["pystray._appindicator", "pystray._gtk", "pystray._xorg"])
+if windows_arm64:
+    hiddenimports.extend([
+        "PySide6.QtCore",
+        "PySide6.QtGui",
+        "PySide6.QtQml",
+        "PySide6.QtQuick",
+    ])
 excludes = ["pytest", "ruff", "PyQt5", "PyQt6", "PySide2"]
 extra_binaries = []
 extra_datas = []
@@ -109,5 +121,11 @@ if sys.platform == "darwin":
             "CFBundleShortVersionString": desktop_version,
             "CFBundleVersion": desktop_version,
             "NSHighResolutionCapable": True,
+            "CFBundleURLTypes": [
+                {
+                    "CFBundleURLName": "com.jellyneko.toyoko-tracker",
+                    "CFBundleURLSchemes": ["toyoko-tracker"],
+                }
+            ],
         },
     )

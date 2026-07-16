@@ -1739,6 +1739,11 @@ class AppRouteSecurityTests(unittest.TestCase):
         self.assertEqual(body.count('data-guide-jump='), 5)
         self.assertIn('data-app-version="v0.7.0"', body)
         self.assertIn('data-theme-choice="system"', body)
+        self.assertIn('id="desktop-lifecycle-card"', body)
+        self.assertIn('id="desktop_close_to_background"', body)
+        self.assertIn('id="desktop_launch_at_login"', body)
+        self.assertIn('id="desktop_badge_enabled"', body)
+        self.assertIn('id="desktop_recovery_enabled"', body)
 
     def test_home_dashboard_is_default_and_has_overview_modules(self):
         body = self.client.get("/").get_data(as_text=True)
@@ -1756,8 +1761,8 @@ class AppRouteSecurityTests(unittest.TestCase):
         self.assertIn('data-home-quick="radius"', body)
         self.assertIn('data-app-view="push-settings"><span class="nav-icon">✉</span>', body)
         self.assertIn('data-home-quick="push"><i>✉</i>', body)
-        self.assertIn('/static/app.js?v=v0.7.0-traffic-1', body)
-        self.assertIn('/static/app.css?v=v0.7.0-traffic-1', body)
+        self.assertIn('/static/app.js?v=v0.7.0-phase5-1', body)
+        self.assertIn('/static/app.css?v=v0.7.0-phase5-1', body)
 
     def test_home_renders_after_search_results_exist(self):
         from toyoko_tracker import runtime

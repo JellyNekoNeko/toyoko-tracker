@@ -91,7 +91,13 @@ def stop_runtime_services() -> None:
     runtime._stop_provider_database_scheduler()
 
 
-def write_instance_state(browser_url: str, port: int, lan_enabled: bool) -> None:
+def write_instance_state(
+    browser_url: str,
+    port: int,
+    lan_enabled: bool,
+    *,
+    frontend: str = "webui",
+) -> None:
     runtime._atomic_write_json(
         INSTANCE_STATE_PATH,
         {
@@ -100,6 +106,7 @@ def write_instance_state(browser_url: str, port: int, lan_enabled: bool) -> None
             "pid": os.getpid(),
             "url": browser_url,
             "lan_enabled": lan_enabled,
+            "frontend": str(frontend or "webui"),
             "started_at": datetime.now().isoformat(timespec="seconds"),
         },
     )

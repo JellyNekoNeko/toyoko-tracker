@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from toyoko_tracker import analytics, event_center, notifications, simulation
+from toyoko_tracker import analytics, event_center, notifications, runtime, simulation
 from toyoko_tracker.models import AppConfig, HotelResult
 from toyoko_tracker.providers import capability_matrix, get_provider
 
@@ -67,6 +67,23 @@ class LocalNotificationPlatformTests(unittest.TestCase):
         run.assert_called_once()
         self.assertEqual(run.call_args.args[0][0], "/usr/bin/notify-send")
         self.assertEqual(self._local_status()["state"], "success")
+
+    def test_local_notification_receives_desktop_deep_link(self):
+        cfg = AppConfig(enable_local=True)
+        with patch.object(notifications, "notify_local") as send_local:
+            notifications.notify_push_channels(
+                cfg,
+                "Available",
+                "A room is available",
+                desktop_url="toyoko-tracker://open?view=monitor",
+            )
+
+        send_local.assert_called_once_with(
+            cfg,
+            "Available",
+            "A room is available",
+            "toyoko-tracker://open?view=monitor",
+        )
 
     def test_linux_notification_reports_missing_libnotify(self):
         cfg = AppConfig(enable_local=True)
@@ -179,6 +196,36 @@ class EventAndAnalyticsTests(unittest.TestCase):
 
         send_local.assert_called_once()
 
+    def test_alert_dispatcher_builds_task_hotel_date_deep_link(self):
+        cfg = AppConfig()
+        cfg.task_id = "task-1"
+        with patch(
+            "toyoko_tracker.desktop_lifecycle.record_desktop_notification"
+        ) as record:
+            runtime._alert_delivery_handler(
+                cfg,
+                "Price alert",
+                "Hotel price changed",
+                "https://example.test/booking",
+                context={
+                    "batch": {"batch_id": "batch-1"},
+                    "events": [
+                        {
+                            "alert_event_id": "alert-event-1",
+                            "hotel_code": "00001",
+                            "stay_date": "2026-08-01",
+                        }
+                    ],
+                },
+            )
+
+        deep_link = record.call_args.args[2]
+        self.assertIn("task_id=task-1", deep_link)
+        self.assertIn("hotel_code=00001", deep_link)
+        self.assertIn("stay_date=2026-08-01", deep_link)
+        self.assertIn("event_id=alert-event-1", deep_link)
+        self.assertEqual(record.call_args.kwargs["dedupe_key"], "alert:batch-1")
+
     def test_historical_trends_and_prediction(self):
         cfg = AppConfig(hotel_codes=["00001"])
         unavailable = HotelResult(
@@ -246,8 +293,8 @@ class SimulationAndPwaTests(unittest.TestCase):
         worker = service_worker_response().get_data(as_text=True)
         manifest = manifest_response().get_json()
 
-        self.assertIn("toyoko-chan-data-v3", worker)
-        self.assertIn("app.js?v=v0.7.0-traffic-1", worker)
+        self.assertIn("toyoko-chan-data-v4", worker)
+        self.assertIn("app.js?v=v0.7.0-phase5-1", worker)
         self.assertIn("networkFirst(event.request,CACHE)", worker)
         self.assertIn("/api/v1/results", worker)
         self.assertEqual(manifest["display"], "standalone")

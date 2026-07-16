@@ -11,13 +11,26 @@ def test_desktop_parser_defaults():
     assert args.lan is False
     assert args.local_only is False
     assert args.debug is False
+    assert args.background is False
+    assert args.deep_link == ""
 
 
 def test_desktop_parser_supports_local_mode_and_port():
-    args = _parser().parse_args(["--local-only", "--port", "5180", "--debug"])
+    args = _parser().parse_args(
+        [
+            "--local-only",
+            "--port",
+            "5180",
+            "--debug",
+            "--background",
+            "toyoko-tracker://open?view=monitor",
+        ]
+    )
     assert args.local_only is True
     assert args.port == 5180
     assert args.debug is True
+    assert args.background is True
+    assert args.deep_link.startswith("toyoko-tracker://")
 
 
 def test_windows_arm64_uses_native_qt_backend():
@@ -40,6 +53,7 @@ def test_windows_arm64_shell_uses_qt_webview():
     assert "import QtWebView" in qml
     assert "WebView" in qml
     assert "url: appUrl" in qml
+    assert "property alias currentUrl" in qml
 
 
 def test_qml_component_waits_for_async_imports():
@@ -60,3 +74,14 @@ def test_desktop_entry_persists_unhandled_startup_errors():
 
     assert "desktop-startup-error.log" in entrypoint
     assert "traceback.print_exc" in entrypoint
+
+
+def test_desktop_spec_includes_tray_and_macos_deep_link_metadata():
+    spec = (
+        Path(__file__).resolve().parents[1] / "packaging" / "toyoko-tracker.spec"
+    ).read_text(encoding="utf-8")
+
+    assert '"pystray"' in spec
+    assert '"PIL.Image"' in spec
+    assert '"CFBundleURLTypes"' in spec
+    assert '"toyoko-tracker"' in spec

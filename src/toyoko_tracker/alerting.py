@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import os
 import re
@@ -1845,10 +1846,37 @@ class AlertDispatcher:
                     else None
                 )
                 try:
+                    signature = inspect.signature(self._delivery_handler)
+                    parameters = list(signature.parameters.values())
+                    variable_args = any(
+                        parameter.kind is inspect.Parameter.VAR_POSITIONAL
+                        for parameter in parameters
+                    )
+                    positional_count = sum(
+                        parameter.kind
+                        in {
+                            inspect.Parameter.POSITIONAL_ONLY,
+                            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                        }
+                        for parameter in parameters
+                    )
+                except (TypeError, ValueError):
+                    variable_args = False
+                    positional_count = 5
+                if variable_args or positional_count >= 6:
+                    outcomes = self._delivery_handler(
+                        cfg,
+                        title,
+                        body,
+                        url,
+                        retry_channels,
+                        {"batch": batch, "events": events},
+                    )
+                elif positional_count >= 5:
                     outcomes = self._delivery_handler(
                         cfg, title, body, url, retry_channels
                     )
-                except TypeError:
+                else:
                     outcomes = self._delivery_handler(cfg, title, body, url)
                 finish_batch(
                     str(batch["batch_id"]), outcomes, title=title, body=body, now=now

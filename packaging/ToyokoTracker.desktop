@@ -2,8 +2,9 @@
 Type=Application
 Name=东横酱 Toyoko Chan
 Comment=Toyoko Inn vacancy tracker
-Exec=ToyokoTracker
+Exec=ToyokoTracker %u
 Icon=toyoko-tracker
 Terminal=false
 Categories=Network;Utility;
 StartupWMClass=ToyokoTracker
+MimeType=x-scheme-handler/toyoko-tracker;

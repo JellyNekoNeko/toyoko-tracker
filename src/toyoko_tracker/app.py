@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from flask import Flask, Response
+from flask import Flask, Response, request
 
 from . import runtime as _runtime
 from .app_compat import *  # noqa: F403 - legacy public API lives outside the route layer.
@@ -110,6 +110,18 @@ def status() -> Response:
 @app.route("/api/v1/runtime")
 def runtime_status() -> Response:
     return _runtime.runtime_status()
+
+
+@app.route("/api/v1/desktop/lifecycle", methods=["GET", "PATCH"])
+def desktop_lifecycle() -> Response:
+    if request.method == "PATCH":
+        return _runtime.desktop_lifecycle_update()
+    return _runtime.desktop_lifecycle_status()
+
+
+@app.route("/api/v1/desktop/notifications/read", methods=["POST"])
+def desktop_notifications_read() -> Response:
+    return _runtime.desktop_notifications_read()
 
 
 @app.route("/api/v1/traffic")

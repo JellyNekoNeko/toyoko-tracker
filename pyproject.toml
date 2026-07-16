@@ -56,10 +56,14 @@ mobile = [
 ]
 desktop = [
   "pywebview>=5.4,<7",
+  "pystray>=0.19,<1",
+  "Pillow>=10,<13",
   "PyGObject>=3.48,<4; sys_platform == 'linux'"
 ]
 desktop-build = [
   "pywebview>=5.4,<7",
+  "pystray>=0.19,<1",
+  "Pillow>=10,<13",
   "PyGObject>=3.48,<4; sys_platform == 'linux'",
   "pyinstaller>=6.11,<7"
 ]

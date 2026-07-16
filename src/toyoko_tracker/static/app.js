@@ -35,6 +35,7 @@
             let LAST_PROVIDER_HEALTH = {};
             let LAST_DIAGNOSTICS = {};
             let LAST_MOBILE_ACCESS_STATUS = null;
+            let LAST_DESKTOP_LIFECYCLE = null;
             let PWA_INSTALL_PROMPT = null;
             let LAST_TREND_REFRESH = 0;
             let LAST_TREND_DATA = null;
@@ -1330,7 +1331,19 @@
               ko: {zh_cn:'중국어(간체)', zh_tw:'중국어(번체)', ja:'일본어', ko:'한국어', en:'영어'},
               en: {zh_cn:'Simplified Chinese', zh_tw:'Traditional Chinese', ja:'Japanese', ko:'Korean', en:'English'}
             };
+            const DESKTOP_UI18N = {
+              zh_cn:{title:'桌面后台运行',help:'托盘、登录启动、休眠恢复与通知角标。',close:'关闭窗口后在后台运行',login:'登录系统时自动启动',badge:'显示未读通知角标',recovery:'休眠唤醒或网络恢复后继续监控',save:'保存桌面设置',read:'清除角标',loading:'正在读取桌面能力',webui:'当前为 WebUI；桌面设置会在桌面应用中启用。',ready:'桌面能力已就绪 · 未读 {count}',saved:'桌面设置已保存 · 未读 {count}',error:'桌面设置读取失败：{message}'},
+              zh_tw:{title:'桌面背景執行',help:'系統匣、登入啟動、休眠恢復與通知徽章。',close:'關閉視窗後在背景執行',login:'登入系統時自動啟動',badge:'顯示未讀通知徽章',recovery:'休眠喚醒或網路恢復後繼續監控',save:'儲存桌面設定',read:'清除徽章',loading:'正在讀取桌面能力',webui:'目前為 WebUI；桌面設定會在桌面應用程式中啟用。',ready:'桌面能力已就緒 · 未讀 {count}',saved:'桌面設定已儲存 · 未讀 {count}',error:'桌面設定讀取失敗：{message}'},
+              ja:{title:'デスクトップ常駐',help:'トレイ、ログイン起動、スリープ復帰、通知バッジを管理します。',close:'ウィンドウを閉じてもバックグラウンドで実行',login:'ログイン時に自動起動',badge:'未読通知バッジを表示',recovery:'スリープ復帰・ネットワーク復旧後に監視を再開',save:'デスクトップ設定を保存',read:'バッジを消去',loading:'デスクトップ機能を確認中',webui:'現在は WebUI です。設定はデスクトップアプリで有効になります。',ready:'デスクトップ機能は準備完了 · 未読 {count}',saved:'デスクトップ設定を保存しました · 未読 {count}',error:'デスクトップ設定の取得に失敗：{message}'},
+              ko:{title:'데스크톱 백그라운드',help:'트레이, 로그인 시작, 절전 복구 및 알림 배지를 관리합니다.',close:'창을 닫아도 백그라운드에서 실행',login:'로그인 시 자동 시작',badge:'읽지 않은 알림 배지 표시',recovery:'절전 해제 또는 네트워크 복구 후 모니터링 재개',save:'데스크톱 설정 저장',read:'배지 지우기',loading:'데스크톱 기능 확인 중',webui:'현재 WebUI입니다. 설정은 데스크톱 앱에서 활성화됩니다.',ready:'데스크톱 기능 준비 완료 · 읽지 않음 {count}',saved:'데스크톱 설정 저장됨 · 읽지 않음 {count}',error:'데스크톱 설정을 불러오지 못함: {message}'},
+              en:{title:'Desktop Background',help:'Manage tray, login startup, resume recovery, and notification badges.',close:'Keep running after the window closes',login:'Start automatically at login',badge:'Show unread notification badge',recovery:'Resume monitoring after sleep or network recovery',save:'Save desktop settings',read:'Clear badge',loading:'Checking desktop capabilities',webui:'This is the WebUI; these settings activate in the desktop app.',ready:'Desktop capabilities ready · {count} unread',saved:'Desktop settings saved · {count} unread',error:'Desktop settings failed: {message}'}
+            };
             function currentLang(){ return document.getElementById('primary_language')?.value || 'zh_cn'; }
+            function desktopTx(key, values={}){
+              const table = DESKTOP_UI18N[currentLang()] || DESKTOP_UI18N.en;
+              return String(table[key] || DESKTOP_UI18N.en[key] || key)
+                .replace(/\{(\w+)\}/g, (_, name) => values[name] != null ? String(values[name]) : '');
+            }
             function tx(key){
               const lang = currentLang();
               const override = SINGLE_UI_OVERRIDES[lang]?.[key];
@@ -2214,8 +2227,20 @@
               if (shouldRestoreFocus) document.getElementById('update-open-button')?.focus();
             }
             function initAppShell(){
-              const requestedView = new URLSearchParams(window.location.search).get('view');
+              const deepLinkParams = new URLSearchParams(window.location.search);
+              const requestedView = deepLinkParams.get('view');
               const storedView = APP_VIEWS.includes(requestedView) ? requestedView : 'home';
+              const linkedTaskId = String(deepLinkParams.get('task_id') || '');
+              const linkedHotelCode = String(deepLinkParams.get('hotel_code') || '');
+              if (linkedTaskId) {
+                TASK_CENTER_ACTIVE_ID = linkedTaskId;
+                storageSet(TASK_CENTER_SELECTION_KEY, linkedTaskId);
+              }
+              if (linkedHotelCode) {
+                RESULT_QUERY = linkedHotelCode;
+                const resultQuery = document.getElementById('result_query');
+                if (resultQuery) resultQuery.value = linkedHotelCode;
+              }
               const storedLanguage = storageGet(LANGUAGE_KEY, '');
               const languageSelect = document.getElementById('primary_language');
               if (languageSelect && ['zh_cn','zh_tw','ja','ko','en'].includes(storedLanguage)) languageSelect.value = storedLanguage;
@@ -2358,6 +2383,8 @@
               document.getElementById('btn_mobile_access_apply')?.addEventListener('click', () => saveMobileAccess(false));
               document.getElementById('btn_mobile_access_rotate')?.addEventListener('click', () => saveMobileAccess(true));
               document.getElementById('btn_mobile_access_copy')?.addEventListener('click', copyMobileAccessUrl);
+              document.getElementById('btn_desktop_lifecycle_save')?.addEventListener('click', saveDesktopLifecycle);
+              document.getElementById('btn_desktop_notifications_read')?.addEventListener('click', clearDesktopBadge);
               document.querySelectorAll('[data-mobile-connection]').forEach(button => {
                 button.addEventListener('click', () => selectMobileConnection(button.dataset.mobileConnection || 'lan'));
               });
@@ -2410,6 +2437,10 @@
               setTimeout(() => {
                 if (storageGet(GUIDE_SEEN_KEY, '') !== guideAppVersion()) openGuide(true);
               }, 450);
+              loadDesktopLifecycle();
+              if (deepLinkParams.get('event_id')) {
+                fetch('/api/v1/desktop/notifications/read', {method:'POST'}).catch(()=>{});
+              }
             }
             function priceCalendarHotels(){
               const draft = priceCalendarDraftPayload();
@@ -3430,6 +3461,15 @@
                 if (title) title.textContent = tx('theme');
                 if (help) help.textContent = tx('themeHelp');
               }
+              setNodeText('#desktop-lifecycle-title', desktopTx('title'));
+              setNodeText('#desktop-lifecycle-help', desktopTx('help'));
+              setNodeText('#desktop-close-label', desktopTx('close'));
+              setNodeText('#desktop-login-label', desktopTx('login'));
+              setNodeText('#desktop-badge-label', desktopTx('badge'));
+              setNodeText('#desktop-recovery-label', desktopTx('recovery'));
+              setNodeText('#btn_desktop_lifecycle_save', desktopTx('save'));
+              setNodeText('#btn_desktop_notifications_read', desktopTx('read'));
+              if (LAST_DESKTOP_LIFECYCLE) renderDesktopLifecycle(LAST_DESKTOP_LIFECYCLE);
               setNodeText('#mobile-access-title', tx('mobileAccessTitle'));
               setNodeText('#mobile-access-help', tx('mobileAccessHelp'));
               setNodeText('#mobile-access-enable-label', tx('enableMobileAccess'));
@@ -5981,6 +6021,87 @@
               }).catch(() => {});
             }
 
+            function renderDesktopLifecycle(data, saved=false){
+              LAST_DESKTOP_LIFECYCLE = data || {};
+              const card = document.getElementById('desktop-lifecycle-card');
+              const preferences = data?.preferences || {};
+              const capabilities = data?.capabilities || {};
+              const isDesktop = data?.frontend === 'desktop' && !!capabilities.desktop;
+              if (card) card.dataset.frontend = isDesktop ? 'desktop' : 'webui';
+              [
+                ['desktop_close_to_background','close_to_background'],
+                ['desktop_launch_at_login','launch_at_login'],
+                ['desktop_badge_enabled','badge_enabled'],
+                ['desktop_recovery_enabled','recovery_enabled']
+              ].forEach(([id,key]) => {
+                const input = document.getElementById(id);
+                if (!input) return;
+                input.checked = preferences[key] !== false;
+                input.disabled = !isDesktop;
+              });
+              const save = document.getElementById('btn_desktop_lifecycle_save');
+              if (save) save.disabled = !isDesktop;
+              const read = document.getElementById('btn_desktop_notifications_read');
+              if (read) read.disabled = !isDesktop || Number(data?.state?.unread_count || 0) < 1;
+              const state = document.getElementById('desktop-lifecycle-state');
+              if (state) {
+                state.textContent = isDesktop
+                  ? desktopTx(saved ? 'saved' : 'ready', {count:Number(data?.state?.unread_count || 0)})
+                  : desktopTx('webui');
+              }
+            }
+
+            async function loadDesktopLifecycle(){
+              const state = document.getElementById('desktop-lifecycle-state');
+              if (state) state.textContent = desktopTx('loading');
+              try{
+                const response = await fetch('/api/v1/desktop/lifecycle', {cache:'no-store'});
+                const data = await response.json();
+                if (!response.ok || !data.ok) throw new Error(data.message || `HTTP ${response.status}`);
+                renderDesktopLifecycle(data);
+              }catch(error){
+                if (state) state.textContent = desktopTx('error', {message:String(error)});
+              }
+            }
+
+            async function saveDesktopLifecycle(){
+              const button = document.getElementById('btn_desktop_lifecycle_save');
+              if (button) button.disabled = true;
+              try{
+                const payload = {
+                  close_to_background:!!document.getElementById('desktop_close_to_background')?.checked,
+                  launch_at_login:!!document.getElementById('desktop_launch_at_login')?.checked,
+                  badge_enabled:!!document.getElementById('desktop_badge_enabled')?.checked,
+                  recovery_enabled:!!document.getElementById('desktop_recovery_enabled')?.checked
+                };
+                const response = await fetch('/api/v1/desktop/lifecycle', {
+                  method:'PATCH',
+                  headers:{'Content-Type':'application/json'},
+                  body:JSON.stringify(payload)
+                });
+                const data = await response.json();
+                if (!response.ok || !data.ok) throw new Error(data.message || `HTTP ${response.status}`);
+                renderDesktopLifecycle(data, true);
+              }catch(error){
+                const state = document.getElementById('desktop-lifecycle-state');
+                if (state) state.textContent = desktopTx('error', {message:String(error)});
+              }finally{
+                if (button && LAST_DESKTOP_LIFECYCLE?.frontend === 'desktop') button.disabled = false;
+              }
+            }
+
+            async function clearDesktopBadge(){
+              try{
+                const response = await fetch('/api/v1/desktop/notifications/read', {method:'POST'});
+                const data = await response.json();
+                if (!response.ok || !data.ok) throw new Error(data.message || `HTTP ${response.status}`);
+                renderDesktopLifecycle(data);
+              }catch(error){
+                const state = document.getElementById('desktop-lifecycle-state');
+                if (state) state.textContent = desktopTx('error', {message:String(error)});
+              }
+            }
+
             function pwaStandalone(){
               return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
             }
@@ -6308,6 +6429,8 @@
                     if (sorts.has(saved.sort)) RESULT_SORT = saved.sort;
                     RESULT_QUERY = typeof saved.query === 'string' ? saved.query.slice(0, 120) : '';
                 } catch(e) {}
+                const linkedHotelCode = new URLSearchParams(window.location.search).get('hotel_code');
+                if (linkedHotelCode) RESULT_QUERY = String(linkedHotelCode).slice(0, 120);
                 const query = document.getElementById('result_query');
                 const sort = document.getElementById('results_sort');
                 if (query) query.value = RESULT_QUERY;

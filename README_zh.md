@@ -179,6 +179,9 @@ GitHub Actions 的 `Desktop bundles` 工作流会在桌面版本标签（`deskto
 每个桌面 Release 提供六个原生构建：macOS Apple Silicon（arm64）、macOS
 Intel（x64）、Windows x64、Windows arm64、Linux x64 和 Linux arm64。
 应用会根据当前系统及处理器架构选择对应的下载文件。
+桌面版现已提供托盘/菜单栏、可选关闭后后台运行、登录自启动、休眠/网络恢复、
+通知深链和持久未读角标。可在 **界面设定 → 桌面后台运行** 中配置，详见
+[`docs/PHASE5_DESKTOP_LIFECYCLE.md`](docs/PHASE5_DESKTOP_LIFECYCLE.md)。
 Release 压缩包会生成 GitHub Sigstore 构建来源证明；配置签名 Secrets 后，
 Windows 可执行文件会使用 Authenticode 签名，macOS 应用会使用
 Developer ID 签名并提交公证。详见 [`docs/RELEASING.md`](docs/RELEASING.md)。

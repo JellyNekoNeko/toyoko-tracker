@@ -102,7 +102,7 @@ Acceptance gate:
 Status: **Delivered**. Historical statistics and percentile labels,
 night-by-night split-stay optimization, workspace schema v4 travel lists,
 resource associations, budget summaries and credential-free JSON/Markdown/HTML
-exports are implemented. Phase 5 is the next development stage.
+exports are implemented.
 
 Deliverables:
 
@@ -121,6 +121,12 @@ Acceptance gate:
 - Travel lists survive upgrades and can be exported independently.
 
 ## Phase 5 — native desktop lifecycle
+
+Status: **Delivered**. Cross-platform tray/background behavior,
+launch-at-login adapters, idempotent sleep/network recovery, notification deep
+links, persistent unread badges, capability-aware settings, packaging metadata
+and automated lifecycle/API tests are implemented. Phase 6 is the next
+development stage.
 
 Deliverables:
 

@@ -768,6 +768,9 @@
           .interface-card select,.interface-card .theme-options{grid-column:1 / -1;margin-top:4px;}
           .interface-card-actions,.simulation-controls,.simulation-card pre,.provider-capability-table{grid-column:1 / -1;}
           .interface-card-actions{display:flex;align-items:center;gap:9px;}.interface-card-actions span{color:#667085;font-size:11px;}
+          .desktop-lifecycle-options{grid-column:1 / -1;display:grid;gap:8px;padding:10px;border:1px solid #e4e9f0;border-radius:7px;background:#f8fafc;}
+          .desktop-lifecycle-options label{margin:0;font-size:12px;}
+          .desktop-lifecycle-card[data-frontend="webui"] .desktop-lifecycle-options{opacity:.58;}
           .provider-capability-card,.simulation-card,.mobile-access-card{grid-column:1 / -1;}
           .provider-capability-table{overflow-x:auto;border:1px solid #e2e8f0;border-radius:7px;}
           .provider-capability-table table{margin:0;min-width:700px;font-size:10px;}
