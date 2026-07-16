@@ -152,3 +152,6 @@ Acceptance gate:
 
 Each phase is committed and tested separately. A later phase may add migrations,
 but it must preserve data created by earlier 0.7.0 development builds.
+
+The assignable work-package IDs, owners, dependency waves and current active
+assignments are maintained in `docs/TASK_ALLOCATION_0.7.0.md`.

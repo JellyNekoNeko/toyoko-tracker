@@ -7,6 +7,8 @@
   secret-free import of the existing search configuration as the default task.
 - Added the staged 0.7.0 delivery and compatibility contract in
   `docs/ROADMAP_0.7.0.md`.
+- Added phase-by-phase work-package ownership, dependency waves and acceptance
+  gates in `docs/TASK_ALLOCATION_0.7.0.md`.
 - Added an on-demand price calendar for every selected hotel, including daily
   availability, regular/member prices, monthly summaries, persistent cache,
   paced background refresh, and direct official-booking links.
