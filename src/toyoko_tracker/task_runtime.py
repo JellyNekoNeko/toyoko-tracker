@@ -53,6 +53,7 @@ class TaskRuntimeContext:
         self._draining = False
         self._progress: Dict[str, Any] = {}
         self._results: List[Any] = []
+        self._results_revision = 0
         self._errors: List[Dict[str, Any]] = []
         self._checkpoints: Dict[str, Any] = {}
         if task_record is not None:
@@ -107,6 +108,7 @@ class TaskRuntimeContext:
             )
             self._progress = {}
             self._results = []
+            self._results_revision += 1
             self._errors = []
 
     def end_run(self, run_id: str, *, runtime_state: str) -> None:
@@ -165,10 +167,12 @@ class TaskRuntimeContext:
     def append_result(self, result: Any) -> None:
         with self._lock:
             self._results.append(deepcopy(result))
+            self._results_revision += 1
 
     def replace_results(self, results: List[Any]) -> None:
         with self._lock:
             self._results = deepcopy(list(results))
+            self._results_revision += 1
 
     def append_error(
         self,
@@ -221,6 +225,7 @@ class TaskRuntimeContext:
                 "cancel_requested": self.cancel_event.is_set(),
                 "progress": deepcopy(self._progress),
                 "results": deepcopy(self._results),
+                "results_revision": self._results_revision,
                 "errors": deepcopy(self._errors),
                 "checkpoints": deepcopy(self._checkpoints),
             }

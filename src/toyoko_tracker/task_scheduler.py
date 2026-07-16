@@ -47,6 +47,10 @@ class TaskSchedulerKernel:
         registry: Optional[TaskRuntimeRegistry] = None,
         coordinator: Optional[TaskCoordinator] = None,
         pacer: Any = provider_pacer,
+        on_round_complete: Optional[
+            Callable[[str, Mapping[str, Any], Tuple[Any, ...]], None]
+        ] = None,
+        request_interval: Optional[Callable[[TaskWorkItem], float]] = None,
         wall_clock: Callable[[], float] = time.time,
         monotonic_clock: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -62,6 +66,8 @@ class TaskSchedulerKernel:
         )
         self.coordinator = coordinator or TaskCoordinator()
         self.pacer = pacer
+        self._on_round_complete = on_round_complete
+        self._request_interval = request_interval or (lambda _item: 0.0)
         self._lock = threading.RLock()
         self._run_once_tasks: set[str] = set()
 
@@ -157,6 +163,60 @@ class TaskSchedulerKernel:
                 "scheduler": self.snapshot(),
             }
 
+    def sync_task(self, task_id: str) -> Dict[str, Any]:
+        """Refresh one non-running task after a durable definition mutation."""
+        with self._lock:
+            task = self._repository.get_task(task_id)
+            try:
+                scheduled = self.coordinator.task_snapshot(task_id)
+            except TaskCoordinatorError:
+                scheduled = None
+            if scheduled and scheduled["in_flight"]:
+                raise TaskCoordinatorError(f"task has an active turn: {task_id}")
+            if scheduled:
+                self.coordinator.unregister_task(task_id)
+            context = self.registry.get_or_create(task_id, task_record=task)
+            try:
+                schedule = self._register_record(task)
+            except workspace.TaskValidationError:
+                if task["desired_state"] == "active":
+                    raise
+                schedule = None
+            if task["desired_state"] == "active":
+                runtime = self.registry.mark_queued(task_id)
+            else:
+                runtime = context.snapshot()
+            return {"task": runtime, "schedule": schedule}
+
+    def remove_task(self, task_id: str) -> None:
+        """Remove one idle task from process-local scheduling state."""
+        with self._lock:
+            try:
+                scheduled = self.coordinator.task_snapshot(task_id)
+            except TaskCoordinatorError:
+                return
+            if scheduled["in_flight"]:
+                raise TaskCoordinatorError(f"task has an active turn: {task_id}")
+            self.coordinator.unregister_task(task_id)
+
+    def task_idle(self, task_id: str) -> bool:
+        """Return whether a task has neither a run record nor an issued turn."""
+
+        with self._lock:
+            runtime = self.registry.snapshot(task_id)
+            try:
+                scheduled = self.coordinator.task_snapshot(task_id)
+            except TaskCoordinatorError:
+                scheduled = None
+            return not runtime.get("run_id") and not bool(
+                scheduled and scheduled.get("in_flight")
+            )
+
+    def cancel_in_flight(self) -> int:
+        """Wake issued turns during process shutdown."""
+
+        return self.coordinator.cancel_in_flight()
+
     def activate(self, task_id: str, *, run_once: bool = False) -> Dict[str, Any]:
         """Activate a durable task and make it eligible for a scheduler turn."""
         with self._lock:
@@ -251,6 +311,10 @@ class TaskSchedulerKernel:
                     item.provider,
                     task_id=item.task_id,
                     cancel_event=item.cancel_event,
+                    min_start_interval=max(
+                        0.0,
+                        float(self._request_interval(item)),
+                    ),
                 ):
                     result = self._scan_one(item)
                 status = (
@@ -276,7 +340,7 @@ class TaskSchedulerKernel:
         except Exception as exc:
             with self._lock:
                 if turn.cancel_event.is_set():
-                    self.coordinator.complete_turn(turn)
+                    schedule = self.coordinator.complete_turn(turn)
                     self.registry.finish_run(
                         turn.task_id,
                         state="cancelled",
@@ -286,7 +350,7 @@ class TaskSchedulerKernel:
                                 context.snapshot()["progress"].get("total") or 0
                             ),
                         },
-                        next_run_at=None,
+                        next_run_at=self._to_wall(schedule.get("next_run_at")),
                     )
                     return TaskTurnResult(
                         turn=turn,
@@ -318,6 +382,7 @@ class TaskSchedulerKernel:
                 )
                 raise
 
+        callback_payload: Optional[Tuple[str, Dict[str, Any], Tuple[Any, ...]]] = None
         with self._lock:
             schedule = self.coordinator.complete_turn(
                 turn,
@@ -326,6 +391,12 @@ class TaskSchedulerKernel:
                 int(schedule["rounds_completed"])
                 > int(before["rounds_completed"])
             )
+            if round_completed and self._on_round_complete is not None:
+                callback_payload = (
+                    turn.task_id,
+                    deepcopy(config),
+                    tuple(context.snapshot()["results"]),
+                )
             if round_completed and turn.task_id in self._run_once_tasks:
                 self._run_once_tasks.discard(turn.task_id)
                 schedule = self.coordinator.pause_task(turn.task_id)
@@ -350,13 +421,22 @@ class TaskSchedulerKernel:
                     },
                     next_run_at=self._to_wall(schedule.get("next_run_at")),
                 )
-            return TaskTurnResult(
+            turn_result = TaskTurnResult(
                 turn=turn,
                 run_id=run_id,
                 results=tuple(collected),
                 task=self.registry.snapshot(turn.task_id),
                 round_completed=round_completed,
             )
+        if callback_payload is not None and self._on_round_complete is not None:
+            try:
+                self._on_round_complete(*callback_payload)
+            except Exception as exc:
+                context.append_error(
+                    exc,
+                    details={"stage": "round_complete"},
+                )
+        return turn_result
 
     def snapshot(self) -> Dict[str, Any]:
         return {

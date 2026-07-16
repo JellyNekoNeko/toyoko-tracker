@@ -48,21 +48,23 @@ Status: **Delivered** in commit `592e103`.
 
 ## Phase 1 — multiple monitor tasks
 
+Status: **Delivered**.
+
 ### Assigned work
 
-| ID | Owner | Work package | Depends on | Required output |
+| ID | Owner | Work package | Depends on | Status |
 | --- | --- | --- | --- | --- |
-| P1-01 | A | Task repository and transactions | Phase 0 | CRUD, copy, reorder, revision conflicts, desired/runtime state and run records |
-| P1-02 | A | Task/AppConfig mapping | P1-01 | Search-only serializer, validation and default-field upgrades |
-| P1-03 | B | Installation-wide Provider pacer | Phase 0 | Shared concurrency, minimum interval, cooldown, cancellation and adaptive backoff |
-| P1-04 | B | Fair task coordinator | P1-01/02/03 | Ready queue, fair turns, cadence calculation and bounded priority |
-| P1-05 | B | Per-task runtime context | P1-04 | Progress, results, errors, checkpoints, cancellation and restart recovery |
-| P1-06 | A | Task APIs | P1-01/02/05 | Task CRUD, start/pause, reorder, runs, results and status endpoints |
-| P1-07 | A/B | Legacy route adapter | P1-05/06 | `/start`, `/stop`, `/status` and results projected to selected/default task |
-| P1-08 | C | Task list and editor | P1-06 contract | Create, duplicate, rename, reorder, pause, delete and edit task conditions |
-| P1-09 | C | Task runtime dashboard | P1-05/06 | Per-task progress, results, next run, history and global cooldown display |
-| P1-10 | D | Scheduler and compatibility regression | P1-03–09 | Virtual-clock fairness, cooldown, recovery, concurrent CRUD and legacy API tests |
-| P1-11 | D | Phase documentation | P1-07/08 | State model, pacing behavior, API compatibility and user guide |
+| P1-01 | A | Task repository and transactions | Phase 0 | Done |
+| P1-02 | A | Task/AppConfig mapping | P1-01 | Done |
+| P1-03 | B | Installation-wide Provider pacer | Phase 0 | Done |
+| P1-04 | B | Fair task coordinator | P1-01/02/03 | Done |
+| P1-05 | B | Per-task runtime context | P1-04 | Done |
+| P1-06 | A | Task APIs | P1-01/02/05 | Done |
+| P1-07 | A/B | Legacy route adapter | P1-05/06 | Done |
+| P1-08 | C | Task list and editor | P1-06 contract | Done |
+| P1-09 | C | Task runtime dashboard | P1-05/06 | Done |
+| P1-10 | D | Scheduler and compatibility regression | P1-03–09 | Done |
+| P1-11 | D | Phase documentation | P1-07/08 | Done |
 
 ### Execution waves
 
@@ -249,15 +251,15 @@ Status: **Delivered** in commit `592e103`.
 
 ## Current assignment
 
-Phase 1 is the active phase. Wave 2 has completed its scheduling and runtime
-core; Wave 3 is the next integration target.
+Phase 1 is complete. Phase 2 is the next active stage and begins with the alert
+repository and rule-evaluation contracts.
 
-| Lane | Active assignment | Completion signal |
+| Lane | Next assignment | Completion signal |
 | --- | --- | --- |
-| A | P1-06 task-native APIs | CRUD, control, runs, results and summary contracts pass |
-| B | P1-07 production scan adapter preparation | One scheduler path owns Provider requests |
-| C | Connect P1-08 prototype and build P1-09 dashboard | Task editing and runtime polling use task-native APIs |
-| D | Extend P1-10/P1-11 | API, browser, recovery and legacy projection gates pass |
+| A | P2-01 alert and policy repository | Versioned alert/policy CRUD and queue schema |
+| B | P2-02 rule evaluation engine | Deterministic target/drop/vacancy rule fixtures pass |
+| C | P2-07 rule UI contract draft | Rule editor fields align with the frozen API DTO |
+| D | P2-09 time/idempotency fixtures | Quiet-hour, restart and duplicate-event cases are ready |
 
 The frozen Phase 1 integration contracts are documented in
 `docs/PHASE1_ARCHITECTURE.md`.
@@ -269,9 +271,9 @@ The frozen Phase 1 integration contracts are documented in
 | P1-01 | Implemented | CRUD, copy, delete cascade, reorder and revision-conflict tests |
 | P1-02 | Implemented | Search-only round trip, validation and secret-exclusion tests |
 | P1-03 | Implemented | Virtual-clock pacing, cooldown, cancellation and real-thread capacity tests |
-| P1-08 | Prototype implemented | Five-language responsive task-center UI and stale-selection guards |
-| P1-10 | In progress | Wave 1 contracts are covered; coordinator, API and recovery cases follow their implementations |
-| P1-11 | In progress | State, pacing, API direction and legacy projection are frozen |
+| P1-08 | Implemented | Five-language responsive task-center UI and stale-selection guards |
+| P1-10 | Implemented | Repository and Provider pacing contracts covered |
+| P1-11 | Implemented | State, pacing, API and legacy projection contracts documented |
 
 ### Wave 2 implementation status
 
@@ -279,9 +281,16 @@ The frozen Phase 1 integration contracts are documented in
 | --- | --- | --- |
 | P1-04 | Implemented | Equal-readiness rotation, bounded turns/priorities, no-catch-up cadence and cancellation tests |
 | P1-05 | Implemented | Task-local progress/results/errors/checkpoints, draining pause and restart recovery tests |
-| P1-10 | In progress | Added three-size fairness, cross-thread cancellation, Provider cooldown and isolation integration coverage |
-| P1-11 | In progress | Added schema v2 revision semantics and Wave 2 implementation boundary |
+| P1-10 | Implemented | Added three-size fairness, cross-thread cancellation, Provider cooldown and isolation integration coverage |
+| P1-11 | Implemented | Added schema v2 revision semantics and scheduler boundary |
 
-The scheduler kernel is intentionally not started beside the historical worker.
-Wave 3 will implement P1-06 task APIs, connect the task-center prototype and
-then complete P1-07 legacy-route projection through one production scan path.
+### Wave 3 implementation status
+
+| Work package | Status | Evidence |
+| --- | --- | --- |
+| P1-06 | Implemented | CRUD, summary, start/pause, result-delta and run-history endpoints |
+| P1-07 | Implemented | Legacy routes project the requested/default task through the scheduler |
+| P1-08 | Implemented | Persisted task operations and condition editor/save workflow |
+| P1-09 | Implemented | Progress, next run, results, errors, history and pacing dashboard |
+| P1-10 | Implemented | Service, API, legacy, notification and calendar-pacing regression |
+| P1-11 | Implemented | Architecture and multi-task user guide |

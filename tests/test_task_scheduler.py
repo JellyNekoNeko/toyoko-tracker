@@ -317,6 +317,47 @@ def test_kernel_tasks_share_provider_cooldown_through_the_global_gate():
     assert calls == [("first", 0.0), ("second", 5.0)]
 
 
+def test_kernel_request_interval_is_enforced_across_tasks():
+    wall = Clock(value=0)
+    mono = Clock(value=0)
+    calls = []
+    pacer = ProviderPacer(
+        total_limit=2,
+        per_provider_limit=2,
+        clock=mono,
+        wait=mono.advance,
+    )
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        database = str(Path(tmp_dir) / "workspace.sqlite3")
+        with patch.object(workspace, "HOTEL_DATABASE_PATH", database):
+            workspace.create_task(
+                "First",
+                config(["00001"]),
+                task_id="first",
+                desired_state="active",
+            )
+            workspace.create_task(
+                "Second",
+                config(["00002"]),
+                task_id="second",
+                desired_state="active",
+            )
+            kernel = TaskSchedulerKernel(
+                lambda item: calls.append((item.task_id, mono()))
+                or {"code": item.hotel_code},
+                coordinator=TaskCoordinator(clock=mono, wait=mono.advance),
+                pacer=pacer,
+                request_interval=lambda _item: 3,
+                wall_clock=wall,
+                monotonic_clock=mono,
+            )
+            kernel.reconcile()
+            kernel.run_next_turn(timeout=0)
+            kernel.run_next_turn(timeout=0)
+
+    assert calls == [("first", 0.0), ("second", 3.0)]
+
+
 def test_durable_wall_deadlines_are_mapped_to_monotonic_scheduler_time():
     wall = Clock(value=1_000)
     mono = Clock(value=50)

@@ -96,6 +96,7 @@ class ProviderPacer:
         self._waiting_total = 0
         self._waiting_by_provider: Dict[str, int] = defaultdict(int)
         self._last_started_at: Dict[str, float] = {}
+        self._next_start_at: Dict[str, float] = {}
         self._cooldown_until: Dict[str, float] = {}
         self._failure_streak: Dict[str, int] = defaultdict(int)
         self._acquired_total = 0
@@ -155,6 +156,7 @@ class ProviderPacer:
         *,
         task_id: str = "",
         cancel_event: Optional[Any] = None,
+        min_start_interval: Optional[float] = None,
     ) -> ProviderPermit:
         """Wait for and reserve one request slot.
 
@@ -163,6 +165,13 @@ class ProviderPacer:
         """
 
         name = self._provider_name(provider)
+        requested_interval = (
+            0.0
+            if min_start_interval is None
+            else float(min_start_interval)
+        )
+        if not math.isfinite(requested_interval) or requested_interval < 0:
+            raise ValueError("min_start_interval must be non-negative")
         with self._lock:
             self._waiting_total += 1
             self._waiting_by_provider[name] += 1
@@ -184,9 +193,7 @@ class ProviderPacer:
                     )
                     interval_remaining = max(
                         0.0,
-                        self._last_started_at.get(name, -math.inf)
-                        + self._provider_interval(name)
-                        - now,
+                        self._next_start_at.get(name, -math.inf) - now,
                     )
                     if (
                         capacity_ready
@@ -196,6 +203,11 @@ class ProviderPacer:
                         self._active_total += 1
                         self._active_by_provider[name] += 1
                         self._last_started_at[name] = now
+                        effective_interval = max(
+                            self._provider_interval(name),
+                            requested_interval,
+                        )
+                        self._next_start_at[name] = now + effective_interval
                         self._acquired_total += 1
                         return ProviderPermit(self, name, str(task_id or ""))
 
@@ -294,6 +306,7 @@ class ProviderPacer:
             providers.update(self._active_by_provider)
             providers.update(self._waiting_by_provider)
             providers.update(self._last_started_at)
+            providers.update(self._next_start_at)
             providers.update(self._cooldown_until)
             providers.update(self._failure_streak)
             provider_state = {}
@@ -305,6 +318,11 @@ class ProviderPacer:
                     "concurrency_limit": self._provider_limit(provider),
                     "min_start_interval": self._provider_interval(provider),
                     "last_started_at": self._last_started_at.get(provider),
+                    "next_start_at": self._next_start_at.get(provider),
+                    "spacing_remaining": max(
+                        0.0,
+                        self._next_start_at.get(provider, 0.0) - now,
+                    ),
                     "cooldown_until": (
                         cooldown_until if cooldown_until > now else None
                     ),

@@ -122,6 +122,56 @@ def save_preferences() -> Response:
     return _runtime.save_preferences()
 
 
+@app.route("/api/v1/tasks", methods=["GET", "POST"])
+def tasks_collection() -> Response:
+    return _runtime.tasks_collection()
+
+
+@app.route("/api/v1/tasks/summary")
+def tasks_summary() -> Response:
+    return _runtime.tasks_summary()
+
+
+@app.route("/api/v1/tasks/reorder", methods=["POST"])
+def task_reorder() -> Response:
+    return _runtime.task_reorder()
+
+
+@app.route("/api/v1/tasks/<task_id>", methods=["GET", "PATCH", "DELETE"])
+def task_detail(task_id: str) -> Response:
+    return _runtime.task_detail(task_id)
+
+
+@app.route("/api/v1/tasks/<task_id>/copy", methods=["POST"])
+def task_copy(task_id: str) -> Response:
+    return _runtime.task_copy(task_id)
+
+
+@app.route("/api/v1/tasks/<task_id>/start", methods=["POST"])
+def task_start(task_id: str) -> Response:
+    return _runtime.task_start(task_id)
+
+
+@app.route("/api/v1/tasks/<task_id>/pause", methods=["POST"])
+def task_pause(task_id: str) -> Response:
+    return _runtime.task_pause(task_id)
+
+
+@app.route("/api/v1/tasks/<task_id>/status")
+def task_status(task_id: str) -> Response:
+    return _runtime.task_status(task_id)
+
+
+@app.route("/api/v1/tasks/<task_id>/results")
+def task_results(task_id: str) -> Response:
+    return _runtime.task_results(task_id)
+
+
+@app.route("/api/v1/tasks/<task_id>/runs")
+def task_runs(task_id: str) -> Response:
+    return _runtime.task_runs(task_id)
+
+
 @app.route("/api/v1/cache")
 def cache_status() -> Response:
     return _runtime.cache_status()

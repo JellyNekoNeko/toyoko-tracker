@@ -53,6 +53,9 @@
             let TASK_CENTER_REQUEST_TOKEN = 0;
             let TASK_CENTER_REVISION = 0;
             let TASK_CENTER_INITIALIZED = false;
+            let TASK_CENTER_POLL_TIMER = null;
+            let TASK_CENTER_SUMMARY = {};
+            const TASK_CENTER_SELECTION_KEY = 'toyoko-chan-selected-task-v1';
             let PREFERENCE_SAVE_TIMER = null;
             let PREFERENCE_SAVE_IN_FLIGHT = false;
             let PREFERENCE_SAVE_QUEUED = false;
@@ -1117,49 +1120,54 @@
             Object.assign(EN_UI, PRICE_CALENDAR_UI.en);
             const TASK_CENTER_UI = {
               zh_cn: {
-                navTasks:'监控任务', taskEyebrow:'0.7.0 工作区原型', taskTitle:'监控任务', taskSubtitle:'集中管理不同日期、酒店和检索节奏；当前阶段使用本地原型数据预览多任务操作。',
-                taskCreate:'新建任务', taskTotal:'任务总数', taskActive:'当前任务', taskRunning:'运行中', taskPaused:'已暂停', taskQueue:'任务队列', taskAll:'全部监控任务', taskPrototype:'本地原型',
-                taskFutureTitle:'创建下一个监控任务', taskFutureCopy:'未来可同时安排不同城市、日期和酒店范围。', taskSelected:'当前选中', taskSwitchNote:'切换任务只更新此面板；请求令牌和修订号会阻止较旧的响应覆盖当前选择。',
-                taskDates:'入住日期', taskHotels:'酒店范围', taskGuests:'入住人数', taskCadence:'检索间隔', taskDuplicate:'复制', taskRename:'重命名', taskMoveUp:'上移', taskMoveDown:'下移', taskPause:'暂停', taskResume:'恢复', taskDelete:'删除',
-                taskPrototypeMessage:'此原型不会修改真实监控配置。后续接入任务 API 后，卡片结构与操作位置将保持一致。', taskDefault:'默认监控', taskExampleWeekend:'周末行程（示例）', taskExampleEvent:'活动住宿（示例）',
-                taskStateRunning:'运行中', taskStatePaused:'已暂停', taskStateReady:'待启动', taskStateDraft:'草稿', taskMockLabel:'原型预览 · 未保存', taskHotelsCount:'{count} 家酒店', taskGuestRoom:'{people} 人 · {rooms} 房', taskSeconds:'{count} 秒',
-                taskNewName:'监控任务 {count}', taskCopyName:'{name} 副本', taskRenamePrompt:'输入新的任务名称', taskDeleteConfirm:'删除“{name}”？此操作只影响本地原型。', taskNoSelection:'选择一个任务查看详情'
+                navTasks:'监控任务', taskEyebrow:'0.7.0 多任务工作区', taskTitle:'监控任务', taskSubtitle:'集中管理不同日期、酒店和检索节奏，并查看每个任务的实时进度、结果和运行记录。',
+                taskCreate:'新建任务', taskTotal:'任务总数', taskActive:'当前任务', taskRunning:'运行中', taskPaused:'已暂停', taskPacer:'全局节流', taskQueue:'任务队列', taskAll:'全部监控任务', taskPrototype:'实时任务',
+                taskFutureTitle:'创建下一个监控任务', taskFutureCopy:'可同时安排不同城市、日期和酒店范围。', taskSelected:'当前选中', taskSwitchNote:'切换任务会同步上方操作、搜索条件与结果；请求令牌和修订号会阻止较旧的响应覆盖当前选择。',
+                taskDates:'入住日期', taskHotels:'酒店范围', taskGuests:'入住人数', taskCadence:'检索间隔', taskProgress:'运行进度', taskNext:'下次检索', taskResults:'当前结果', taskLastError:'最近错误', taskEdit:'编辑条件', taskDuplicate:'复制', taskRename:'重命名', taskMoveUp:'上移', taskMoveDown:'下移', taskPause:'暂停', taskResume:'启动', taskDelete:'删除',
+                taskPrototypeMessage:'任务状态会自动刷新。启动、暂停和单次检索都通过全局公平调度器执行。', taskDefault:'默认监控', taskExampleWeekend:'周末行程（示例）', taskExampleEvent:'活动住宿（示例）',
+                taskStateRunning:'运行中', taskStateScanning:'检索中', taskStateQueued:'已排队', taskStateWaiting:'等待下轮', taskStatePausing:'正在暂停', taskStateError:'错误', taskStatePaused:'已暂停', taskStateReady:'待启动', taskStateDraft:'草稿', taskMockLabel:'', taskHotelsCount:'{count} 家酒店', taskGuestRoom:'{people} 人 · {rooms} 房', taskSeconds:'{count} 秒', taskPacerNormal:'正常', taskPacerActive:'{active} 个请求中 · {waiting} 个等待', taskPacerCooldown:'{count} 个来源冷却中',
+                taskNewName:'监控任务 {count}', taskCopyName:'{name} 副本', taskRenamePrompt:'输入新的任务名称', taskDeleteConfirm:'删除“{name}”？运行记录也会一并删除。', taskNoSelection:'选择一个任务查看详情', taskLoading:'正在读取任务…', taskNoRuns:'尚无运行记录', taskRunHistory:'最近运行', taskApiError:'任务操作出现错误',
+                taskSave:'保存任务', taskSaved:'任务条件已保存', taskSaveFailed:'任务保存失败'
               },
               zh_tw: {
-                navTasks:'監控任務', taskEyebrow:'0.7.0 工作區原型', taskTitle:'監控任務', taskSubtitle:'集中管理不同日期、飯店與搜尋節奏；目前使用本機原型資料預覽多任務操作。',
-                taskCreate:'新增任務', taskTotal:'任務總數', taskActive:'目前任務', taskRunning:'執行中', taskPaused:'已暫停', taskQueue:'任務佇列', taskAll:'全部監控任務', taskPrototype:'本機原型',
-                taskFutureTitle:'建立下一個監控任務', taskFutureCopy:'未來可同時安排不同城市、日期和飯店範圍。', taskSelected:'目前選取', taskSwitchNote:'切換任務只會更新此面板；請求權杖與修訂號會阻止較舊回應覆蓋目前選取。',
-                taskDates:'入住日期', taskHotels:'飯店範圍', taskGuests:'入住人數', taskCadence:'搜尋間隔', taskDuplicate:'複製', taskRename:'重新命名', taskMoveUp:'上移', taskMoveDown:'下移', taskPause:'暫停', taskResume:'恢復', taskDelete:'刪除',
-                taskPrototypeMessage:'此原型不會修改真實監控設定。後續接入任務 API 後，卡片結構與操作位置將保持一致。', taskDefault:'預設監控', taskExampleWeekend:'週末行程（範例）', taskExampleEvent:'活動住宿（範例）',
-                taskStateRunning:'執行中', taskStatePaused:'已暫停', taskStateReady:'待啟動', taskStateDraft:'草稿', taskMockLabel:'原型預覽 · 未儲存', taskHotelsCount:'{count} 家飯店', taskGuestRoom:'{people} 人 · {rooms} 房', taskSeconds:'{count} 秒',
-                taskNewName:'監控任務 {count}', taskCopyName:'{name} 副本', taskRenamePrompt:'輸入新的任務名稱', taskDeleteConfirm:'刪除「{name}」？此操作只影響本機原型。', taskNoSelection:'選取一個任務查看詳情'
+                navTasks:'監控任務', taskEyebrow:'0.7.0 多任務工作區', taskTitle:'監控任務', taskSubtitle:'集中管理不同日期、飯店與搜尋節奏，並查看每個任務的即時進度、結果與執行記錄。',
+                taskCreate:'新增任務', taskTotal:'任務總數', taskActive:'目前任務', taskRunning:'執行中', taskPaused:'已暫停', taskPacer:'全域節流', taskQueue:'任務佇列', taskAll:'全部監控任務', taskPrototype:'即時任務',
+                taskFutureTitle:'建立下一個監控任務', taskFutureCopy:'可同時安排不同城市、日期和飯店範圍。', taskSelected:'目前選取', taskSwitchNote:'切換任務會同步上方操作、搜尋條件與結果；請求權杖與修訂號會阻止較舊回應覆蓋目前選取。',
+                taskDates:'入住日期', taskHotels:'飯店範圍', taskGuests:'入住人數', taskCadence:'搜尋間隔', taskProgress:'執行進度', taskNext:'下次搜尋', taskResults:'目前結果', taskLastError:'最近錯誤', taskEdit:'編輯條件', taskDuplicate:'複製', taskRename:'重新命名', taskMoveUp:'上移', taskMoveDown:'下移', taskPause:'暫停', taskResume:'啟動', taskDelete:'刪除',
+                taskPrototypeMessage:'任務狀態會自動更新。啟動、暫停與單次搜尋都使用全域公平排程器。', taskDefault:'預設監控', taskExampleWeekend:'週末行程', taskExampleEvent:'活動住宿',
+                taskStateRunning:'執行中', taskStatePaused:'已暫停', taskStateReady:'待啟動', taskStateDraft:'草稿', taskMockLabel:'', taskHotelsCount:'{count} 家飯店', taskGuestRoom:'{people} 人 · {rooms} 房', taskSeconds:'{count} 秒', taskPacerNormal:'正常', taskPacerActive:'{active} 個執行中 · {waiting} 個等待', taskPacerCooldown:'{count} 個來源冷卻中',
+                taskNewName:'監控任務 {count}', taskCopyName:'{name} 副本', taskRenamePrompt:'輸入新的任務名稱', taskDeleteConfirm:'刪除「{name}」？執行記錄也會一併刪除。', taskNoSelection:'選取一個任務查看詳情', taskStateScanning:'搜尋中', taskStateQueued:'已排隊', taskStateWaiting:'等待下輪', taskStatePausing:'正在暫停', taskStateError:'錯誤', taskLoading:'正在讀取任務…', taskNoRuns:'尚無執行記錄', taskRunHistory:'最近執行', taskApiError:'任務操作發生錯誤',
+                taskSave:'儲存任務', taskSaved:'任務條件已儲存', taskSaveFailed:'任務儲存失敗'
               },
               ja: {
-                navTasks:'監視タスク', taskEyebrow:'0.7.0 ワークスペース試作', taskTitle:'監視タスク', taskSubtitle:'日付、ホテル、検索間隔の異なるタスクを一元管理します。現在はローカル試作データで複数タスク操作を確認できます。',
-                taskCreate:'新規タスク', taskTotal:'タスク数', taskActive:'選択中', taskRunning:'実行中', taskPaused:'一時停止', taskQueue:'タスク一覧', taskAll:'すべての監視タスク', taskPrototype:'ローカル試作',
-                taskFutureTitle:'次の監視タスクを作成', taskFutureCopy:'今後は都市、日付、ホテル範囲ごとに同時設定できます。', taskSelected:'現在の選択', taskSwitchNote:'タスク切替はこのパネルだけを更新します。リクエストトークンとリビジョンで古い応答の上書きを防ぎます。',
-                taskDates:'宿泊日', taskHotels:'ホテル範囲', taskGuests:'人数・部屋', taskCadence:'検索間隔', taskDuplicate:'複製', taskRename:'名前変更', taskMoveUp:'上へ', taskMoveDown:'下へ', taskPause:'一時停止', taskResume:'再開', taskDelete:'削除',
-                taskPrototypeMessage:'この試作は実際の監視設定を変更しません。タスク API 接続後もカード構成と操作位置を維持します。', taskDefault:'既定の監視', taskExampleWeekend:'週末旅行（例）', taskExampleEvent:'イベント宿泊（例）',
-                taskStateRunning:'実行中', taskStatePaused:'一時停止', taskStateReady:'開始待ち', taskStateDraft:'下書き', taskMockLabel:'試作プレビュー · 未保存', taskHotelsCount:'ホテル {count} 件', taskGuestRoom:'{people} 名 · {rooms} 室', taskSeconds:'{count} 秒',
-                taskNewName:'監視タスク {count}', taskCopyName:'{name} のコピー', taskRenamePrompt:'新しいタスク名を入力', taskDeleteConfirm:'「{name}」を削除しますか？ローカル試作だけに反映されます。', taskNoSelection:'タスクを選択して詳細を表示'
+                navTasks:'監視タスク', taskEyebrow:'0.7.0 マルチタスクワークスペース', taskTitle:'監視タスク', taskSubtitle:'日付、ホテル、検索間隔の異なるタスクを一元管理し、進行状況・結果・実行履歴を確認できます。',
+                taskCreate:'新規タスク', taskTotal:'タスク数', taskActive:'選択中', taskRunning:'実行中', taskPaused:'一時停止', taskPacer:'全体ペーシング', taskQueue:'タスク一覧', taskAll:'すべての監視タスク', taskPrototype:'ライブタスク',
+                taskFutureTitle:'次の監視タスクを作成', taskFutureCopy:'都市、日付、ホテル範囲ごとに同時設定できます。', taskSelected:'現在の選択', taskSwitchNote:'タスク切替は上部操作、検索条件、結果にも同期されます。リクエストトークンとリビジョンで古い応答の上書きを防ぎます。',
+                taskDates:'宿泊日', taskHotels:'ホテル範囲', taskGuests:'人数・部屋', taskCadence:'検索間隔', taskProgress:'進行状況', taskNext:'次回検索', taskResults:'現在の結果', taskLastError:'直近のエラー', taskEdit:'条件を編集', taskDuplicate:'複製', taskRename:'名前変更', taskMoveUp:'上へ', taskMoveDown:'下へ', taskPause:'一時停止', taskResume:'開始', taskDelete:'削除',
+                taskPrototypeMessage:'タスク状態は自動更新されます。開始、一時停止、1回検索はすべて共通の公平スケジューラを使用します。', taskDefault:'既定の監視', taskExampleWeekend:'週末旅行', taskExampleEvent:'イベント宿泊',
+                taskStateRunning:'実行中', taskStatePaused:'一時停止', taskStateReady:'開始待ち', taskStateDraft:'下書き', taskMockLabel:'', taskHotelsCount:'ホテル {count} 件', taskGuestRoom:'{people} 名 · {rooms} 室', taskSeconds:'{count} 秒', taskPacerNormal:'正常', taskPacerActive:'実行 {active} · 待機 {waiting}', taskPacerCooldown:'{count} 接続先がクールダウン中',
+                taskNewName:'監視タスク {count}', taskCopyName:'{name} のコピー', taskRenamePrompt:'新しいタスク名を入力', taskDeleteConfirm:'「{name}」と実行履歴を削除しますか？', taskNoSelection:'タスクを選択して詳細を表示', taskStateScanning:'検索中', taskStateQueued:'待機列', taskStateWaiting:'次回待ち', taskStatePausing:'停止処理中', taskStateError:'エラー', taskLoading:'タスクを読み込み中…', taskNoRuns:'実行履歴はありません', taskRunHistory:'最近の実行', taskApiError:'タスク操作エラー',
+                taskSave:'タスクを保存', taskSaved:'タスク条件を保存しました', taskSaveFailed:'タスク保存エラー'
               },
               ko: {
-                navTasks:'모니터 작업', taskEyebrow:'0.7.0 작업 공간 프로토타입', taskTitle:'모니터 작업', taskSubtitle:'날짜, 호텔과 검색 간격이 다른 작업을 한곳에서 관리합니다. 현재는 로컬 프로토타입 데이터로 다중 작업을 미리 봅니다.',
-                taskCreate:'새 작업', taskTotal:'전체 작업', taskActive:'현재 작업', taskRunning:'실행 중', taskPaused:'일시 중지', taskQueue:'작업 대기열', taskAll:'모든 모니터 작업', taskPrototype:'로컬 프로토타입',
-                taskFutureTitle:'다음 모니터 작업 만들기', taskFutureCopy:'앞으로 도시, 날짜와 호텔 범위를 나누어 동시에 설정할 수 있습니다.', taskSelected:'현재 선택', taskSwitchNote:'작업 전환은 이 패널만 갱신합니다. 요청 토큰과 리비전으로 오래된 응답의 덮어쓰기를 막습니다.',
-                taskDates:'숙박 날짜', taskHotels:'호텔 범위', taskGuests:'투숙 인원', taskCadence:'검색 간격', taskDuplicate:'복제', taskRename:'이름 변경', taskMoveUp:'위로', taskMoveDown:'아래로', taskPause:'일시 중지', taskResume:'재개', taskDelete:'삭제',
-                taskPrototypeMessage:'이 프로토타입은 실제 모니터 설정을 변경하지 않습니다. 작업 API 연결 후에도 카드 구조와 작업 위치는 유지됩니다.', taskDefault:'기본 모니터', taskExampleWeekend:'주말 여행(예시)', taskExampleEvent:'이벤트 숙박(예시)',
-                taskStateRunning:'실행 중', taskStatePaused:'일시 중지', taskStateReady:'시작 대기', taskStateDraft:'초안', taskMockLabel:'프로토타입 미리 보기 · 저장 안 됨', taskHotelsCount:'호텔 {count}개', taskGuestRoom:'{people}명 · {rooms}실', taskSeconds:'{count}초',
-                taskNewName:'모니터 작업 {count}', taskCopyName:'{name} 복사본', taskRenamePrompt:'새 작업 이름 입력', taskDeleteConfirm:'“{name}” 작업을 삭제할까요? 로컬 프로토타입에만 반영됩니다.', taskNoSelection:'작업을 선택해 상세 정보 보기'
+                navTasks:'모니터 작업', taskEyebrow:'0.7.0 다중 작업 공간', taskTitle:'모니터 작업', taskSubtitle:'날짜, 호텔과 검색 간격이 다른 작업을 한곳에서 관리하고 진행률, 결과와 실행 기록을 확인합니다.',
+                taskCreate:'새 작업', taskTotal:'전체 작업', taskActive:'현재 작업', taskRunning:'실행 중', taskPaused:'일시 중지', taskPacer:'전체 속도 제어', taskQueue:'작업 대기열', taskAll:'모든 모니터 작업', taskPrototype:'실시간 작업',
+                taskFutureTitle:'다음 모니터 작업 만들기', taskFutureCopy:'도시, 날짜와 호텔 범위를 나누어 동시에 설정할 수 있습니다.', taskSelected:'현재 선택', taskSwitchNote:'작업 전환은 상단 제어, 검색 조건과 결과에도 동기화됩니다. 요청 토큰과 리비전으로 오래된 응답의 덮어쓰기를 막습니다.',
+                taskDates:'숙박 날짜', taskHotels:'호텔 범위', taskGuests:'투숙 인원', taskCadence:'검색 간격', taskProgress:'진행 상태', taskNext:'다음 검색', taskResults:'현재 결과', taskLastError:'최근 오류', taskEdit:'조건 편집', taskDuplicate:'복제', taskRename:'이름 변경', taskMoveUp:'위로', taskMoveDown:'아래로', taskPause:'일시 중지', taskResume:'시작', taskDelete:'삭제',
+                taskPrototypeMessage:'작업 상태는 자동으로 갱신됩니다. 시작, 일시 중지와 1회 검색은 모두 전역 공정 스케줄러를 사용합니다.', taskDefault:'기본 모니터', taskExampleWeekend:'주말 여행', taskExampleEvent:'이벤트 숙박',
+                taskStateRunning:'실행 중', taskStatePaused:'일시 중지', taskStateReady:'시작 대기', taskStateDraft:'초안', taskMockLabel:'', taskHotelsCount:'호텔 {count}개', taskGuestRoom:'{people}명 · {rooms}실', taskSeconds:'{count}초', taskPacerNormal:'정상', taskPacerActive:'실행 {active} · 대기 {waiting}', taskPacerCooldown:'제공자 {count}개 쿨다운 중',
+                taskNewName:'모니터 작업 {count}', taskCopyName:'{name} 복사본', taskRenamePrompt:'새 작업 이름 입력', taskDeleteConfirm:'“{name}” 작업과 실행 기록을 삭제할까요?', taskNoSelection:'작업을 선택해 상세 정보 보기', taskStateScanning:'검색 중', taskStateQueued:'대기열', taskStateWaiting:'다음 검색 대기', taskStatePausing:'중지 중', taskStateError:'오류', taskLoading:'작업 불러오는 중…', taskNoRuns:'실행 기록 없음', taskRunHistory:'최근 실행', taskApiError:'작업 처리 오류',
+                taskSave:'작업 저장', taskSaved:'작업 조건을 저장했습니다', taskSaveFailed:'작업 저장 실패'
               },
               en: {
-                navTasks:'Monitor Tasks', taskEyebrow:'0.7.0 workspace prototype', taskTitle:'Monitor Tasks', taskSubtitle:'Manage different dates, hotels, and scan cadences in one place. This phase previews multi-task operations with local prototype data.',
-                taskCreate:'New task', taskTotal:'Total tasks', taskActive:'Active task', taskRunning:'Running', taskPaused:'Paused', taskQueue:'Task queue', taskAll:'All monitor tasks', taskPrototype:'Local prototype',
-                taskFutureTitle:'Create another monitor task', taskFutureCopy:'Future tasks can cover different cities, dates, and hotel scopes at the same time.', taskSelected:'Selected task', taskSwitchNote:'Switching tasks updates only this panel; request tokens and revisions prevent older responses from replacing the current selection.',
-                taskDates:'Stay dates', taskHotels:'Hotel scope', taskGuests:'Guests', taskCadence:'Scan interval', taskDuplicate:'Duplicate', taskRename:'Rename', taskMoveUp:'Move up', taskMoveDown:'Move down', taskPause:'Pause', taskResume:'Resume', taskDelete:'Delete',
-                taskPrototypeMessage:'This prototype does not modify the real monitoring configuration. The card structure and action positions will remain when the task API is connected.', taskDefault:'Default monitor', taskExampleWeekend:'Weekend trip (example)', taskExampleEvent:'Event stay (example)',
-                taskStateRunning:'Running', taskStatePaused:'Paused', taskStateReady:'Ready to start', taskStateDraft:'Draft', taskMockLabel:'Prototype preview · not saved', taskHotelsCount:'{count} hotels', taskGuestRoom:'{people} guests · {rooms} rooms', taskSeconds:'{count} sec',
-                taskNewName:'Monitor task {count}', taskCopyName:'{name} copy', taskRenamePrompt:'Enter a new task name', taskDeleteConfirm:'Delete “{name}”? This only affects the local prototype.', taskNoSelection:'Select a task to view details'
+                navTasks:'Monitor Tasks', taskEyebrow:'0.7.0 multi-task workspace', taskTitle:'Monitor Tasks', taskSubtitle:'Manage independent dates, hotels, and scan cadences with live progress, results, and run history.',
+                taskCreate:'New task', taskTotal:'Total tasks', taskActive:'Active task', taskRunning:'Running', taskPaused:'Paused', taskPacer:'Global pacing', taskQueue:'Task queue', taskAll:'All monitor tasks', taskPrototype:'Live tasks',
+                taskFutureTitle:'Create another monitor task', taskFutureCopy:'Tasks can cover different cities, dates, and hotel scopes at the same time.', taskSelected:'Selected task', taskSwitchNote:'Switching tasks also updates the top controls, search form, and results. Request tokens and revisions prevent older responses from replacing the current selection.',
+                taskDates:'Stay dates', taskHotels:'Hotel scope', taskGuests:'Guests', taskCadence:'Scan interval', taskProgress:'Progress', taskNext:'Next scan', taskResults:'Current results', taskLastError:'Last error', taskEdit:'Edit conditions', taskDuplicate:'Duplicate', taskRename:'Rename', taskMoveUp:'Move up', taskMoveDown:'Move down', taskPause:'Pause', taskResume:'Start', taskDelete:'Delete',
+                taskPrototypeMessage:'Task status refreshes automatically. Start, pause, and one-time scans all use the global fair scheduler.', taskDefault:'Default monitor', taskExampleWeekend:'Weekend trip (example)', taskExampleEvent:'Event stay (example)',
+                taskStateRunning:'Running', taskStateScanning:'Scanning', taskStateQueued:'Queued', taskStateWaiting:'Waiting', taskStatePausing:'Pausing', taskStateError:'Error', taskStatePaused:'Paused', taskStateReady:'Ready to start', taskStateDraft:'Draft', taskMockLabel:'', taskHotelsCount:'{count} hotels', taskGuestRoom:'{people} guests · {rooms} rooms', taskSeconds:'{count} sec', taskPacerNormal:'Normal', taskPacerActive:'{active} active · {waiting} waiting', taskPacerCooldown:'{count} provider(s) cooling down',
+                taskNewName:'Monitor task {count}', taskCopyName:'{name} copy', taskRenamePrompt:'Enter a new task name', taskDeleteConfirm:'Delete “{name}” and its run history?', taskNoSelection:'Select a task to view details', taskLoading:'Loading tasks…', taskNoRuns:'No runs yet', taskRunHistory:'Recent runs', taskApiError:'Task operation failed',
+                taskSave:'Save task', taskSaved:'Task conditions saved', taskSaveFailed:'Task save failed'
               }
             };
             Object.assign(SINGLE_UI_OVERRIDES.zh_cn, TASK_CENTER_UI.zh_cn);
@@ -1335,43 +1343,44 @@
               if (Array.isArray(config.hotel_codes)) return config.hotel_codes.length;
               return Array.isArray(config.selected_hotels) ? config.selected_hotels.length : 0;
             }
+            function taskCenterNormalize(task){
+              const normalized = taskCenterCloneConfig(task);
+              normalized.id = String(task?.task_id || task?.id || '');
+              normalized.task_id = normalized.id;
+              normalized.config = taskCenterCloneConfig(task?.config || {});
+              return normalized;
+            }
+            function taskCenterUpsert(rawTask){
+              if (!rawTask) return null;
+              const task = taskCenterNormalize(rawTask);
+              const index = TASK_CENTER_TASKS.findIndex(item => item.id === task.id);
+              if (index >= 0) TASK_CENTER_TASKS[index] = task;
+              else if (task.id) TASK_CENTER_TASKS.push(task);
+              return task;
+            }
             function taskCenterSeed(config){
-              const source = taskCenterCloneConfig(config);
-              const weekend = taskCenterCloneConfig(source);
-              const eventStay = taskCenterCloneConfig(source);
-              if (Array.isArray(weekend.hotel_codes)) weekend.hotel_codes = weekend.hotel_codes.slice(0, 3);
-              if (Array.isArray(weekend.selected_hotels)) weekend.selected_hotels = weekend.selected_hotels.slice(0, 3);
-              weekend.loop_interval_seconds = Math.max(120, Number(weekend.loop_interval_seconds || 120));
-              if (Array.isArray(eventStay.hotel_codes)) eventStay.hotel_codes = eventStay.hotel_codes.slice(0, 5);
-              if (Array.isArray(eventStay.selected_hotels)) eventStay.selected_hotels = eventStay.selected_hotels.slice(0, 5);
-              eventStay.people = Math.max(2, Number(eventStay.people || 1));
-              TASK_CENTER_TASKS = [
-                {id:'default', nameKey:'taskDefault', config:source, state:LAST_RUNNING ? 'running' : 'ready', prototype:false},
-                {id:'mock-weekend', nameKey:'taskExampleWeekend', config:weekend, state:'paused', prototype:true},
-                {id:'mock-event', nameKey:'taskExampleEvent', config:eventStay, state:'draft', prototype:true}
-              ];
-              TASK_CENTER_ACTIVE_ID = 'default';
+              TASK_CENTER_TASKS = [];
+              TASK_CENTER_SUMMARY = {};
+              TASK_CENTER_ACTIVE_ID = storageGet(TASK_CENTER_SELECTION_KEY, 'default');
               TASK_CENTER_REVISION += 1;
-              TASK_CENTER_INITIALIZED = true;
+              TASK_CENTER_INITIALIZED = false;
+              const list = document.getElementById('task-card-list');
+              if (list) list.innerHTML = `<div class="home-empty-state">${escText(tx('taskLoading'))}</div>`;
             }
             function syncTaskCenterDefaultTask(config){
-              if (!TASK_CENTER_INITIALIZED) {
-                taskCenterSeed(config);
-                return;
+              if (!TASK_CENTER_INITIALIZED && ACTIVE_APP_VIEW === 'tasks') {
+                prepareTaskCenter();
               }
-              const task = TASK_CENTER_TASKS.find(item => item.id === 'default');
-              if (!task) return;
-              task.config = taskCenterCloneConfig(config);
-              task.state = LAST_RUNNING ? 'running' : (task.state === 'paused' ? 'paused' : 'ready');
-              TASK_CENTER_REVISION += 1;
-              TASK_CENTER_REQUEST_TOKEN += 1;
-              if (ACTIVE_APP_VIEW === 'tasks') renderTaskCenter();
             }
             function taskCenterStateMeta(task){
-              const state = String(task?.state || 'ready');
-              if (state === 'running') return {state, label:tx('taskStateRunning')};
-              if (state === 'paused') return {state, label:tx('taskStatePaused')};
-              if (state === 'draft') return {state, label:tx('taskStateDraft')};
+              const runtime = String(task?.runtime_state || '');
+              if (runtime === 'scanning') return {state:'scanning', label:tx('taskStateScanning')};
+              if (runtime === 'queued') return {state:'queued', label:tx('taskStateQueued')};
+              if (runtime === 'waiting') return {state:'waiting', label:tx('taskStateWaiting')};
+              if (runtime === 'pausing') return {state:'pausing', label:tx('taskStatePausing')};
+              if (runtime === 'error') return {state:'error', label:tx('taskStateError')};
+              if (task?.desired_state === 'paused') return {state:'paused', label:tx('taskStatePaused')};
+              if (task?.desired_state === 'active') return {state:'queued', label:tx('taskStateQueued')};
               return {state:'ready', label:tx('taskStateReady')};
             }
             function taskCenterDateRange(task){
@@ -1389,7 +1398,7 @@
                 const dates = taskCenterDateRange(task);
                 return `<button class="task-card ${active ? 'active' : ''}" type="button" role="option" aria-selected="${active ? 'true' : 'false'}" data-task-id="${escText(task.id)}">
                   <span class="task-card-order">${index + 1}</span>
-                  <span class="task-card-copy"><strong>${escText(taskCenterTaskName(task))}</strong><small>${escText(dates)} · ${escText(fmt('taskHotelsCount', {count:hotelCount}))}</small>${task.prototype ? `<em>${escText(tx('taskMockLabel'))}</em>` : ''}</span>
+                  <span class="task-card-copy"><strong>${escText(taskCenterTaskName(task))}</strong><small>${escText(dates)} · ${escText(fmt('taskHotelsCount', {count:hotelCount}))}</small></span>
                   <span class="task-state-chip ${meta.state}">${escText(meta.label)}</span>
                 </button>`;
               }).join('');
@@ -1422,6 +1431,11 @@
               set('task-detail-hotels', fmt('taskHotelsCount', {count:taskCenterHotelCount(task)}));
               set('task-detail-guests', fmt('taskGuestRoom', {people:Number(config.people || 1), rooms:Number(config.rooms || 1)}));
               set('task-detail-cadence', fmt('taskSeconds', {count:Number(config.loop_interval_seconds || 30)}));
+              const progress = task.progress || {};
+              set('task-detail-progress', `${Number(progress.done || 0)} / ${Number(progress.total || taskCenterHotelCount(task))}`);
+              set('task-detail-next', task.next_run_at ? new Date(Number(task.next_run_at) * 1000).toLocaleString() : '—');
+              set('task-detail-results', Number(task.result_count || 0));
+              set('task-detail-error', task.last_error || '—');
               const position = TASK_CENTER_TASKS.findIndex(item => item.id === task.id);
               buttons.forEach(button => { button.disabled = false; });
               const up = document.getElementById('task-move-up-button');
@@ -1431,14 +1445,13 @@
               if (down) down.disabled = position < 0 || position >= TASK_CENTER_TASKS.length - 1;
               if (remove) remove.disabled = TASK_CENTER_TASKS.length <= 1;
               const pauseLabel = document.querySelector('#task-pause-button span:last-child');
-              if (pauseLabel) pauseLabel.textContent = task.state === 'paused' ? tx('taskResume') : tx('taskPause');
+              if (pauseLabel) pauseLabel.textContent = task.desired_state === 'paused' ? tx('taskResume') : tx('taskPause');
             }
             function renderTaskCenter(){
-              if (!TASK_CENTER_INITIALIZED) taskCenterSeed(LAST_CONFIG);
               renderTaskCenterList();
               renderTaskCenterDetail();
-              const running = TASK_CENTER_TASKS.filter(task => task.state === 'running').length;
-              const paused = TASK_CENTER_TASKS.filter(task => task.state === 'paused').length;
+              const running = TASK_CENTER_TASKS.filter(task => task.runtime_state === 'scanning').length;
+              const paused = TASK_CENTER_TASKS.filter(task => task.desired_state === 'paused').length;
               const active = TASK_CENTER_TASKS.find(task => task.id === TASK_CENTER_ACTIVE_ID);
               const set = (id, value) => {
                 const element = document.getElementById(id);
@@ -1448,94 +1461,168 @@
               set('task-summary-active', active ? taskCenterTaskName(active) : '—');
               set('task-summary-running', running);
               set('task-summary-paused', paused);
+              const pacer = TASK_CENTER_SUMMARY.provider_pacer || {};
+              const providers = Object.values(pacer.providers || {});
+              const cooling = providers.filter(provider => Number(provider?.cooldown_remaining || 0) > 0).length;
+              const activeRequests = Number(pacer.active_total || 0);
+              const waitingRequests = Number(pacer.waiting_total || 0);
+              set(
+                'task-summary-pacer',
+                cooling
+                  ? fmt('taskPacerCooldown', {count:cooling})
+                  : (activeRequests || waitingRequests
+                    ? fmt('taskPacerActive', {active:activeRequests, waiting:waitingRequests})
+                    : tx('taskPacerNormal'))
+              );
             }
-            function taskCenterMockSelectionRequest(taskId, requestToken, revision){
-              return Promise.resolve().then(() => {
-                const task = TASK_CENTER_TASKS.find(item => item.id === taskId);
-                return task ? {task, requestToken, revision} : null;
+            async function taskCenterApi(path, options={}){
+              const response = await fetch(path, {
+                ...options,
+                headers:{'Content-Type':'application/json', ...(options.headers || {})}
               });
+              const payload = await response.json();
+              if (!response.ok || !payload.ok) throw new Error(payload.message || `HTTP ${response.status}`);
+              return payload;
             }
             async function selectTaskCenterTask(taskId){
               const requestToken = ++TASK_CENTER_REQUEST_TOKEN;
               const revision = TASK_CENTER_REVISION;
-              const response = await taskCenterMockSelectionRequest(taskId, requestToken, revision);
-              if (!response || requestToken !== TASK_CENTER_REQUEST_TOKEN || revision !== TASK_CENTER_REVISION) return;
-              TASK_CENTER_ACTIVE_ID = response.task.id;
-              renderTaskCenter();
+              try {
+                const response = await taskCenterApi(`/api/v1/tasks/${encodeURIComponent(taskId)}`);
+                if (!response || requestToken !== TASK_CENTER_REQUEST_TOKEN || revision !== TASK_CENTER_REVISION) return;
+                const task = taskCenterUpsert(response.task);
+                if (!task) return;
+                TASK_CENTER_ACTIVE_ID = task.id;
+                storageSet(TASK_CENTER_SELECTION_KEY, task.id);
+                RESULTS_REVISION = -1;
+                AVAILABILITY_LOGS_REVISION = -1;
+                STATUS_BOOTSTRAPPED = false;
+                renderTaskCenter();
+                loadTaskRunHistory(task.id);
+                refreshStatus(true);
+              } catch(error) {
+                showCommandFeedback(`${tx('taskApiError')}: ${error}`, 'error');
+              }
             }
-            function mutateTaskCenter(mutator){
-              mutator();
-              TASK_CENTER_REVISION += 1;
-              TASK_CENTER_REQUEST_TOKEN += 1;
-              renderTaskCenter();
+            async function loadTaskRunHistory(taskId){
+              const history = document.getElementById('task-run-history');
+              if (!history || !taskId) return;
+              try {
+                const payload = await taskCenterApi(`/api/v1/tasks/${encodeURIComponent(taskId)}/runs?limit=5`);
+                const runs = Array.isArray(payload.runs) ? payload.runs : [];
+                history.innerHTML = runs.length
+                  ? `<strong>${escText(tx('taskRunHistory'))}</strong>` + runs.map(run => {
+                      const started = run.started_at ? new Date(Number(run.started_at) * 1000).toLocaleString() : '—';
+                      const summary = run.result_summary || {};
+                      return `<div class="task-run-history-item"><strong>${escText(run.state || '—')}</strong><span>${escText(started)}</span><small>${escText(`${Number(summary.completed || summary.available || 0)} / ${Number(summary.total || 0)} · ${run.error || ''}`)}</small></div>`;
+                    }).join('')
+                  : `<div class="home-empty-state">${escText(tx('taskNoRuns'))}</div>`;
+              } catch(error) {
+                history.innerHTML = `<div class="home-empty-state">${escText(tx('taskApiError'))}</div>`;
+              }
             }
-            function createTaskCenterTask(){
+            function scheduleTaskCenterPoll(){
+              if (TASK_CENTER_POLL_TIMER) clearTimeout(TASK_CENTER_POLL_TIMER);
+              TASK_CENTER_POLL_TIMER = null;
+              if (ACTIVE_APP_VIEW !== 'tasks') return;
+              TASK_CENTER_POLL_TIMER = setTimeout(() => loadTaskCenter(true), 2000);
+            }
+            async function loadTaskCenter(background=false){
+              const requestToken = ++TASK_CENTER_REQUEST_TOKEN;
+              const revision = TASK_CENTER_REVISION;
+              try {
+                const response = await taskCenterApi('/api/v1/tasks/summary');
+                if (requestToken !== TASK_CENTER_REQUEST_TOKEN || revision !== TASK_CENTER_REVISION) return;
+                TASK_CENTER_TASKS = (response.tasks || []).map(taskCenterNormalize);
+                TASK_CENTER_SUMMARY = response.summary || {};
+                if (!TASK_CENTER_TASKS.some(task => task.id === TASK_CENTER_ACTIVE_ID)) {
+                  TASK_CENTER_ACTIVE_ID = TASK_CENTER_TASKS[0]?.id || '';
+                }
+                TASK_CENTER_INITIALIZED = true;
+                renderTaskCenter();
+                if (TASK_CENTER_ACTIVE_ID && !background) loadTaskRunHistory(TASK_CENTER_ACTIVE_ID);
+              } catch(error) {
+                if (!background) showCommandFeedback(`${tx('taskApiError')}: ${error}`, 'error');
+              } finally {
+                scheduleTaskCenterPoll();
+              }
+            }
+            async function createTaskCenterTask(){
               const source = TASK_CENTER_TASKS.find(task => task.id === TASK_CENTER_ACTIVE_ID) || TASK_CENTER_TASKS[0];
-              const id = `mock-${Date.now()}-${TASK_CENTER_REVISION + 1}`;
-              mutateTaskCenter(() => {
-                TASK_CENTER_TASKS.push({
-                  id,
-                  name:fmt('taskNewName', {count:TASK_CENTER_TASKS.length + 1}),
-                  config:taskCenterCloneConfig(source?.config || LAST_CONFIG),
-                  state:'draft',
-                  prototype:true
-                });
-                TASK_CENTER_ACTIVE_ID = id;
-              });
+              try {
+                const payload = source
+                  ? {source_task_id:source.id, name:fmt('taskNewName', {count:TASK_CENTER_TASKS.length + 1})}
+                  : {name:fmt('taskNewName', {count:1}), config:taskCenterCloneConfig(LAST_CONFIG)};
+                const response = await taskCenterApi('/api/v1/tasks', {method:'POST', body:JSON.stringify(payload)});
+                TASK_CENTER_ACTIVE_ID = String(response.task.task_id);
+                storageSet(TASK_CENTER_SELECTION_KEY, TASK_CENTER_ACTIVE_ID);
+                TASK_CENTER_REVISION += 1;
+                await loadTaskCenter();
+              } catch(error) {
+                showCommandFeedback(`${tx('taskApiError')}: ${error}`, 'error');
+              }
             }
-            function taskCenterAction(action){
+            async function taskCenterAction(action){
               const task = TASK_CENTER_TASKS.find(item => item.id === TASK_CENTER_ACTIVE_ID);
               if (!task) return;
               const index = TASK_CENTER_TASKS.findIndex(item => item.id === task.id);
-              if (action === 'duplicate') {
-                const id = `mock-${Date.now()}-${TASK_CENTER_REVISION + 1}`;
-                mutateTaskCenter(() => {
-                  TASK_CENTER_TASKS.splice(index + 1, 0, {
-                    ...task,
-                    id,
-                    nameKey:'',
-                    name:fmt('taskCopyName', {name:taskCenterTaskName(task)}),
-                    config:taskCenterCloneConfig(task.config),
-                    state:'draft',
-                    prototype:true
+              if (action === 'edit') {
+                applySearchHistory(task.config || {});
+                switchAppView('search', {instant:true});
+                return;
+              }
+              try {
+                if (action === 'duplicate') {
+                  const response = await taskCenterApi(`/api/v1/tasks/${encodeURIComponent(task.id)}/copy`, {
+                    method:'POST',
+                    body:JSON.stringify({name:fmt('taskCopyName', {name:taskCenterTaskName(task)})})
                   });
-                  TASK_CENTER_ACTIVE_ID = id;
-                });
-                return;
-              }
-              if (action === 'rename') {
-                const name = window.prompt(tx('taskRenamePrompt'), taskCenterTaskName(task));
-                if (!name?.trim()) return;
-                mutateTaskCenter(() => { task.nameKey = ''; task.name = name.trim().slice(0, 80); });
-                return;
-              }
-              if (action === 'move-up' && index > 0) {
-                mutateTaskCenter(() => {
-                  [TASK_CENTER_TASKS[index - 1], TASK_CENTER_TASKS[index]] = [TASK_CENTER_TASKS[index], TASK_CENTER_TASKS[index - 1]];
-                });
-                return;
-              }
-              if (action === 'move-down' && index >= 0 && index < TASK_CENTER_TASKS.length - 1) {
-                mutateTaskCenter(() => {
-                  [TASK_CENTER_TASKS[index], TASK_CENTER_TASKS[index + 1]] = [TASK_CENTER_TASKS[index + 1], TASK_CENTER_TASKS[index]];
-                });
-                return;
-              }
-              if (action === 'pause') {
-                mutateTaskCenter(() => { task.state = task.state === 'paused' ? 'ready' : 'paused'; });
-                return;
-              }
-              if (action === 'delete' && TASK_CENTER_TASKS.length > 1) {
-                if (!window.confirm(fmt('taskDeleteConfirm', {name:taskCenterTaskName(task)}))) return;
-                mutateTaskCenter(() => {
-                  TASK_CENTER_TASKS.splice(index, 1);
-                  TASK_CENTER_ACTIVE_ID = TASK_CENTER_TASKS[Math.min(index, TASK_CENTER_TASKS.length - 1)]?.id || '';
-                });
+                  TASK_CENTER_ACTIVE_ID = String(response.task.task_id);
+                } else if (action === 'rename') {
+                  const name = window.prompt(tx('taskRenamePrompt'), taskCenterTaskName(task));
+                  if (!name?.trim()) return;
+                  await taskCenterApi(`/api/v1/tasks/${encodeURIComponent(task.id)}`, {
+                    method:'PATCH',
+                    body:JSON.stringify({name:name.trim().slice(0, 120), expected_revision:task.revision})
+                  });
+                } else if (
+                  (action === 'move-up' && index > 0)
+                  || (action === 'move-down' && index >= 0 && index < TASK_CENTER_TASKS.length - 1)
+                ) {
+                  const ordered = TASK_CENTER_TASKS.map(item => item.id);
+                  const target = action === 'move-up' ? index - 1 : index + 1;
+                  [ordered[index], ordered[target]] = [ordered[target], ordered[index]];
+                  await taskCenterApi('/api/v1/tasks/reorder', {
+                    method:'POST',
+                    body:JSON.stringify({
+                      task_ids:ordered,
+                      expected_revisions:Object.fromEntries(TASK_CENTER_TASKS.map(item => [item.id, item.revision]))
+                    })
+                  });
+                } else if (action === 'pause') {
+                  const endpoint = task.desired_state === 'paused' ? 'start' : 'pause';
+                  await taskCenterApi(`/api/v1/tasks/${encodeURIComponent(task.id)}/${endpoint}`, {
+                    method:'POST',
+                    body:JSON.stringify({expected_revision:task.revision})
+                  });
+                } else if (action === 'delete' && TASK_CENTER_TASKS.length > 1) {
+                  if (!window.confirm(fmt('taskDeleteConfirm', {name:taskCenterTaskName(task)}))) return;
+                  await taskCenterApi(`/api/v1/tasks/${encodeURIComponent(task.id)}`, {
+                    method:'DELETE',
+                    body:JSON.stringify({expected_revision:task.revision})
+                  });
+                  TASK_CENTER_ACTIVE_ID = TASK_CENTER_TASKS[Math.min(index, TASK_CENTER_TASKS.length - 2)]?.id || '';
+                }
+                storageSet(TASK_CENTER_SELECTION_KEY, TASK_CENTER_ACTIVE_ID);
+                TASK_CENTER_REVISION += 1;
+                await loadTaskCenter();
+              } catch(error) {
+                showCommandFeedback(`${tx('taskApiError')}: ${error}`, 'error');
               }
             }
             function prepareTaskCenter(){
               if (!TASK_CENTER_INITIALIZED) taskCenterSeed(LAST_CONFIG);
-              renderTaskCenter();
+              loadTaskCenter();
             }
             function switchAppView(view, options={}){
               const next = APP_VIEWS.includes(view) ? view : 'home';
@@ -1565,6 +1652,10 @@
                 refreshHomeInsights(true);
               }
               if (next === 'tasks') prepareTaskCenter();
+              else if (TASK_CENTER_POLL_TIMER) {
+                clearTimeout(TASK_CENTER_POLL_TIMER);
+                TASK_CENTER_POLL_TIMER = null;
+              }
               if (next === 'price') {
                 preparePriceCalendar();
               } else if (PRICE_CALENDAR_POLL_TIMER) {
@@ -2313,10 +2404,12 @@
               ].forEach(([selector,key]) => setNodeText(selector, tx(key)));
               [
                 ['#task-center-eyebrow','taskEyebrow'], ['#task-center-title','taskTitle'], ['#task-center-subtitle','taskSubtitle'], ['#task-create-label','taskCreate'],
-                ['#task-summary-total-label','taskTotal'], ['#task-summary-active-label','taskActive'], ['#task-summary-running-label','taskRunning'], ['#task-summary-paused-label','taskPaused'],
+                ['#task-summary-total-label','taskTotal'], ['#task-summary-active-label','taskActive'], ['#task-summary-running-label','taskRunning'], ['#task-summary-paused-label','taskPaused'], ['#task-summary-pacer-label','taskPacer'],
                 ['#task-list-kicker','taskQueue'], ['#task-list-title','taskAll'], ['#task-prototype-badge','taskPrototype'],
                 ['#task-future-title','taskFutureTitle'], ['#task-future-copy','taskFutureCopy'], ['#task-detail-kicker','taskSelected'], ['#task-detail-note','taskSwitchNote'],
                 ['#task-detail-dates-label','taskDates'], ['#task-detail-hotels-label','taskHotels'], ['#task-detail-guests-label','taskGuests'], ['#task-detail-cadence-label','taskCadence'],
+                ['#task-detail-progress-label','taskProgress'], ['#task-detail-next-label','taskNext'], ['#task-detail-results-label','taskResults'], ['#task-detail-error-label','taskLastError'],
+                ['#task-edit-button span:last-child','taskEdit'],
                 ['#task-duplicate-button span:last-child','taskDuplicate'], ['#task-rename-button span:last-child','taskRename'], ['#task-move-up-button span:last-child','taskMoveUp'],
                 ['#task-move-down-button span:last-child','taskMoveDown'], ['#task-delete-button span:last-child','taskDelete'], ['#task-prototype-message','taskPrototypeMessage']
               ].forEach(([selector,key]) => setNodeText(selector, tx(key)));
@@ -2610,6 +2703,7 @@
               setAllText('.result-log-table th', [tx('code'), tx('hotel'), tx('availableSince'), tx('duration'), tx('minPrice'), tx('roomType')]);
               setNodeText('.push-subtitle', tx('pushSubtitle'));
               setNodeText('#btn_scan_once', tx('scanOnce'));
+              setNodeText('#btn_save_task', tx('taskSave'));
               setNodeText('#btn_start', LAST_RUNNING ? tx('restart') : tx('start'));
               setNodeText('#btn_stop', tx('stop'));
               setNodeText('#btn_default', tx('defaults'));
@@ -4380,16 +4474,53 @@
               }
               return payload;
             }
+            async function callSaveTask(){
+              const payload = preflightSearch();
+              if (!payload) return;
+              const taskId = TASK_CENTER_ACTIVE_ID || 'default';
+              const selectedTask = TASK_CENTER_TASKS.find(task => task.id === taskId);
+              setButtonBusy('btn_save_task', true);
+              try {
+                const response = await taskCenterApi(`/api/v1/tasks/${encodeURIComponent(taskId)}`, {
+                  method:'PATCH',
+                  body:JSON.stringify({
+                    config:payload,
+                    replace_config:true,
+                    expected_revision:selectedTask?.revision
+                  })
+                });
+                const task = taskCenterUpsert(response.task);
+                if (task) {
+                  LAST_CONFIG = taskCenterCloneConfig(task.config);
+                  renderSummary(task.config);
+                }
+                Object.keys(EDIT_TS).forEach(key => delete EDIT_TS[key]);
+                BLOCK_REMOTE_OVERWRITE = false;
+                setConfigDirty(false);
+                showCommandFeedback(tx('taskSaved'), 'success');
+                TASK_CENTER_REVISION += 1;
+                if (ACTIVE_APP_VIEW === 'tasks') prepareTaskCenter();
+                await refreshStatus(true);
+              } catch(error) {
+                showCommandFeedback(`${tx('taskSaveFailed')}: ${error}`, 'error');
+              } finally {
+                setButtonBusy('btn_save_task', false);
+              }
+            }
             async function callStart(runOnce=false){
               const payload = preflightSearch();
               if (!payload) return;
               payload.run_once = !!runOnce;
+              const selectedTask = TASK_CENTER_TASKS.find(task => task.id === TASK_CENTER_ACTIVE_ID);
+              if (TASK_CENTER_ACTIVE_ID) payload.task_id = TASK_CENTER_ACTIVE_ID;
+              if (selectedTask?.revision != null) payload.expected_revision = selectedTask.revision;
               const buttonId = runOnce ? 'btn_scan_once' : 'btn_start';
               setButtonBusy(buttonId, true);
               try {
                 const r = await fetch('/start', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
                 const j = await r.json();
                 if (j.ok) {
+                  taskCenterUpsert(j.task);
                   const detail = runOnce
                     ? tx('scanningOnce')
                     : (j.restarted ? tx('restartedMessage') : tx('startedMessage'));
@@ -4407,6 +4538,9 @@
 	                  if (changeNote) changeNote.hidden = true;
 	                  collapseSearchPanels();
 	                  refreshSearchHistory();
+	                  TASK_CENTER_REVISION += 1;
+	                  TASK_CENTER_INITIALIZED = false;
+	                  if (ACTIVE_APP_VIEW === 'tasks') prepareTaskCenter();
                 } else {
                   const detail = j.error || j.message || tx('failedToStart');
                   document.getElementById('err').textContent = detail;
@@ -4426,15 +4560,27 @@
             async function callStop(){
               setButtonBusy('btn_stop', true);
               try {
-                const r = await fetch('/stop', {method:'POST'});
+                const selectedTask = TASK_CENTER_TASKS.find(task => task.id === TASK_CENTER_ACTIVE_ID);
+                const r = await fetch('/stop', {
+                  method:'POST',
+                  headers:{'Content-Type':'application/json'},
+                  body:JSON.stringify({
+                    task_id:TASK_CENTER_ACTIVE_ID || 'default',
+                    expected_revision:selectedTask?.revision
+                  })
+                });
                 const j = await r.json();
                 if (j.ok) {
+                  taskCenterUpsert(j.task);
                   const detail = tx('stoppedMessage');
                   document.getElementById('msg').textContent = detail;
                   document.getElementById('err').textContent = '';
 	                  showCommandFeedback(detail, 'success');
 	                  setRunning(false);
 	                  expandSearchAreaPicker();
+	                  TASK_CENTER_REVISION += 1;
+	                  TASK_CENTER_INITIALIZED = false;
+	                  if (ACTIVE_APP_VIEW === 'tasks') prepareTaskCenter();
                 } else {
                   const detail = j.error || j.message || tx('failedToStop');
                   document.getElementById('err').textContent = detail;
@@ -5558,7 +5704,8 @@
               const revision = Number(serverRevision);
               if (!force && Number.isFinite(revision) && revision === RESULTS_REVISION) return;
               const since = force ? -1 : RESULTS_REVISION;
-              const response = await fetch(`/api/v1/results?since=${encodeURIComponent(since)}`);
+              const taskId = TASK_CENTER_ACTIVE_ID || 'default';
+              const response = await fetch(`/api/v1/results?since=${encodeURIComponent(since)}&task_id=${encodeURIComponent(taskId)}`);
               if (!response.ok) throw new Error(`HTTP ${response.status}`);
               const payload = await response.json();
               if (payload.changed) renderRows(payload.results || []);
@@ -5569,7 +5716,8 @@
               const revision = Number(serverRevision);
               if (!force && Number.isFinite(revision) && revision === AVAILABILITY_LOGS_REVISION) return;
               const since = force ? -1 : AVAILABILITY_LOGS_REVISION;
-              const response = await fetch(`/api/v1/availability-logs?since=${encodeURIComponent(since)}`);
+              const taskId = TASK_CENTER_ACTIVE_ID || 'default';
+              const response = await fetch(`/api/v1/availability-logs?since=${encodeURIComponent(since)}&task_id=${encodeURIComponent(taskId)}`);
               if (!response.ok) throw new Error(`HTTP ${response.status}`);
               const payload = await response.json();
               if (payload.changed) renderAvailabilityLogs(payload.availability_logs || []);
@@ -5604,18 +5752,25 @@
               STATUS_REFRESH_IN_FLIGHT = true;
               if (manual) setButtonBusy('btn_results_refresh', true);
               try{
-                const endpoint = STATUS_BOOTSTRAPPED ? '/api/v1/runtime' : '/status';
+                const taskId = TASK_CENTER_ACTIVE_ID || 'default';
+                const baseEndpoint = STATUS_BOOTSTRAPPED ? '/api/v1/runtime' : '/status';
+                const endpoint = `${baseEndpoint}?task_id=${encodeURIComponent(taskId)}`;
                 let r = await fetch(endpoint);
                 if (!r.ok) throw new Error(`HTTP ${r.status}`);
                 let j = await r.json();
-                if (endpoint !== '/status' && SERVER_INSTANCE_ID && j.instance_id !== SERVER_INSTANCE_ID) {
-                  r = await fetch('/status');
+                if (baseEndpoint !== '/status' && SERVER_INSTANCE_ID && j.instance_id !== SERVER_INSTANCE_ID) {
+                  r = await fetch(`/status?task_id=${encodeURIComponent(taskId)}`);
                   if (!r.ok) throw new Error(`HTTP ${r.status}`);
                   j = await r.json();
                   RESULTS_REVISION = -1;
                   AVAILABILITY_LOGS_REVISION = -1;
                 }
                 SERVER_INSTANCE_ID = String(j.instance_id || SERVER_INSTANCE_ID);
+                if (j.task_id && j.task_id !== TASK_CENTER_ACTIVE_ID) {
+                  TASK_CENTER_ACTIVE_ID = String(j.task_id);
+                  storageSet(TASK_CENTER_SELECTION_KEY, TASK_CENTER_ACTIVE_ID);
+                }
+                if (j.task) taskCenterUpsert(j.task);
                 setConnectionOnline(true);
                 setRunning(!!j.running);
                 renderProgress(j.progress);
@@ -5751,6 +5906,7 @@
               }
             }
 
+            document.getElementById('btn_save_task')?.addEventListener('click', (e)=>{e.preventDefault(); callSaveTask();});
             document.getElementById('btn_scan_once').addEventListener('click', (e)=>{e.preventDefault(); callStart(true);});
             document.getElementById('btn_start').addEventListener('click', (e)=>{e.preventDefault(); callStart(false);});
             document.getElementById('btn_stop').addEventListener('click', (e)=>{e.preventDefault(); callStop();});

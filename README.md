@@ -26,6 +26,7 @@ It supports:
 - 🧭 Optional Playwright browser-rendering engine for compatibility
 - 🏨 Area-based hotel picker
 - 🕘 Search history
+- 🗂 Multiple persisted monitor tasks with fair scheduling and independent results
 - 🛏 Room type filtering: Single / Double / Twin
 - 💳 Member / non-member price display
 - 📅 On-demand monthly price calendar for every selected hotel
@@ -36,6 +37,9 @@ It supports:
 - 📧 SMTP email alerts
 - 🚀 Smart parallel scanning for large hotel lists
 - ⇅ Real-time WebUI traffic totals, request counts, and 10-second transfer rates
+
+For the 0.7.0 multi-task workflow, see
+[`docs/PHASE1_MULTI_TASK_GUIDE.md`](docs/PHASE1_MULTI_TASK_GUIDE.md).
 
 ---
 

@@ -477,7 +477,7 @@
           .task-center-hero h1{margin:0;color:#1a314e;font-size:26px;line-height:1.18;}
           .task-center-hero p{max-width:700px;margin:7px 0 0;color:#66768a;font-size:12px;line-height:1.6;}
           .task-create-button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-width:120px;white-space:nowrap;}
-          .task-center-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));overflow:hidden;border:1px solid #dce4ee;border-radius:11px;background:#fff;box-shadow:0 5px 18px rgba(25,44,68,.04);}
+          .task-center-summary{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));overflow:hidden;border:1px solid #dce4ee;border-radius:11px;background:#fff;box-shadow:0 5px 18px rgba(25,44,68,.04);}
           .task-center-summary > div{display:flex;align-items:center;justify-content:space-between;gap:10px;min-width:0;padding:13px 16px;}
           .task-center-summary > div + div{border-left:1px solid #edf1f5;}
           .task-center-summary span{overflow:hidden;color:#7b8795;font-size:10px;text-overflow:ellipsis;white-space:nowrap;}
@@ -502,6 +502,10 @@
           .task-card-copy em{margin-top:3px;color:#8c6a32;font-size:8.5px;font-style:normal;}
           .task-state-chip{display:inline-flex;align-items:center;justify-content:center;min-width:54px;padding:4px 7px;border-radius:999px;background:#edf1f5;color:#677486;font-size:9px;font-weight:750;white-space:nowrap;}
           .task-state-chip.running{background:#e7f5ea;color:#28733b;}
+          .task-state-chip.scanning{background:#e7f5ea;color:#28733b;}
+          .task-state-chip.queued,.task-state-chip.waiting{background:#e9f2ff;color:#2662a4;}
+          .task-state-chip.pausing{background:#fff3dd;color:#9b6215;}
+          .task-state-chip.error{background:#fdecec;color:#b23a35;}
           .task-state-chip.paused{background:#fff3dd;color:#9b6215;}
           .task-state-chip.draft{background:#f0ecfb;color:#6d4da6;}
           .task-state-chip.ready{background:#e9f2ff;color:#2662a4;}
@@ -518,12 +522,17 @@
           .task-detail-grid span,.task-detail-grid strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
           .task-detail-grid span{color:#7c8898;font-size:9px;}
           .task-detail-grid strong{margin-top:5px;color:#263e5a;font-size:12px;}
-          .task-detail-actions{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:7px;margin-top:14px;}
+          .task-detail-actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(88px,1fr));gap:7px;margin-top:14px;}
           .task-detail-actions button{display:flex;align-items:center;justify-content:center;gap:5px;min-width:0;padding-inline:7px;font-size:9.5px;white-space:nowrap;}
           .task-detail-actions button span:first-child{font-size:12px;}
           .task-prototype-message{display:grid;grid-template-columns:22px minmax(0,1fr);gap:8px;align-items:start;margin-top:14px;padding:10px;border:1px solid #dbe7f4;border-radius:9px;background:#f4f8fd;color:#60738a;}
           .task-prototype-message > span{display:grid;place-items:center;width:20px;height:20px;border-radius:50%;background:#dcecff;color:#1764c4;font-size:10px;font-weight:800;}
           .task-prototype-message p{margin:1px 0 0;font-size:9.5px;line-height:1.55;}
+          .task-run-history{display:grid;gap:6px;margin-top:12px;}
+          .task-run-history-item{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 10px;padding:8px 10px;border:1px solid #e3e9f0;border-radius:8px;background:#fafbfd;}
+          .task-run-history-item strong{color:#33465d;font-size:9.5px;}
+          .task-run-history-item span{color:#728096;font-size:9px;}
+          .task-run-history-item small{grid-column:1 / -1;color:#8a94a3;font-size:8.5px;}
           @keyframes viewEnter{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 
           /* Home overview */
@@ -1228,6 +1237,7 @@
             .task-center-summary > div + div{border-left:0;}
             .task-center-summary > div:nth-child(even){border-left:1px solid #edf1f5;}
             .task-center-summary > div:nth-child(n+3){border-top:1px solid #edf1f5;}
+            .task-center-summary > div:last-child:nth-child(odd){grid-column:1 / -1;}
             .task-card{grid-template-columns:25px minmax(0,1fr);}
             .task-card > .task-state-chip{grid-column:2;justify-self:start;}
             .task-detail-panel{padding:13px;}

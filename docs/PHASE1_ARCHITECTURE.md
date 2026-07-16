@@ -114,7 +114,7 @@ value.
 Startup marks orphaned `queued` or `running` records as `interrupted` before
 new work is scheduled.
 
-## Wave 2 implementation boundary
+## Production implementation
 
 The Phase 1 scheduling core is split into three layers:
 
@@ -123,16 +123,25 @@ The Phase 1 scheduling core is split into three layers:
 - `TaskRuntimeRegistry` owns one isolated context per durable task and performs
   orphaned-run recovery;
 - `TaskSchedulerKernel` joins storage, contexts, the coordinator and the shared
-  Provider pacer through an injected single-hotel scan callback.
+  Provider pacer through an injected single-hotel scan callback;
+- `TaskSchedulerService` owns the single process-wide scheduler thread,
+  serializes task mutations and controls startup/shutdown draining;
+- `runtime.py` supplies the production Provider adapter, notification and
+  analytics completion hooks, legacy route projection and application
+  lifecycle integration.
 
 Durable `next_run_at` values are wall-clock timestamps. The kernel converts
 them to monotonic deadlines while scheduling and converts the next deadline
 back before persistence.
 
-The kernel remains behind the task-native API and legacy adapter boundary in
-this wave. Process bootstrap continues using the historical single-task worker
-until P1-06/P1-07 connect one production scan callback; this avoids running the
-default task twice during the transition.
+Application bootstrap starts the task service after workspace migration and
+default-task import. The historical worker loop remains only as compatibility
+code and is no longer created by `/start`; all recurring and one-time task work
+uses the same coordinator.
+
+Shutdown signals issued turns, waits for the coordinator to drain and preserves
+the durable `active` intent so the next application start can reconcile and
+resume the task. A second start call reuses the existing coordinator thread.
 
 ## Fair scheduling contract
 
@@ -161,23 +170,45 @@ The pacer enforces:
 Playwright-backed requests use an effective global concurrency of one unless a
 future Provider adapter explicitly proves independent browser contexts safe.
 
-## API direction
+## Task API
 
-Phase 1 adds task-native endpoints under `/api/v1/tasks`. Every task-specific
-request carries a `task_id`; browser selection is client state, not a mutable
-server-global "current task".
+Phase 1 adds these task-native endpoints:
 
-Expected resource groups:
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET`, `POST` | `/api/v1/tasks` | List tasks or create/copy a task |
+| `GET` | `/api/v1/tasks/summary` | Poll all task states and global pacing |
+| `POST` | `/api/v1/tasks/reorder` | Persist the full task order |
+| `GET`, `PATCH`, `DELETE` | `/api/v1/tasks/<task_id>` | Read, edit or delete one task |
+| `POST` | `/api/v1/tasks/<task_id>/copy` | Duplicate a task |
+| `POST` | `/api/v1/tasks/<task_id>/start` | Start recurring work or one run |
+| `POST` | `/api/v1/tasks/<task_id>/pause` | Pause one task |
+| `GET` | `/api/v1/tasks/<task_id>/status` | Read runtime state and pacing |
+| `GET` | `/api/v1/tasks/<task_id>/results` | Read revisioned task results |
+| `GET` | `/api/v1/tasks/<task_id>/runs` | Read durable run history |
 
-- task list and creation;
-- task detail update, copy and deletion;
-- reorder;
-- start, pause and one-time run;
-- task status, results and run history;
-- one summary endpoint for efficient multi-task polling.
+Every task-specific request carries a `task_id`; browser selection is client
+state, not a mutable server-global "current task".
 
-Updates include the last observed revision. A stale revision returns a conflict
-with the current public task record.
+Definition updates, reorder, start, pause and deletion may include the last
+observed revision. A stale revision returns HTTP 409 with the current public
+task record when that record still exists.
+
+## WebUI contract
+
+The Monitor Tasks workspace is backed by the task API and includes:
+
+- create, duplicate, rename, reorder, pause/resume and delete actions;
+- an Edit Conditions action that loads the selected task into Vacancy Search;
+- a Save Task action that persists edited conditions without starting a scan;
+- selected-task progress, result count, next scan, last error and run history;
+- installation-wide active/waiting request counts and Provider cooldown state;
+- two-second background polling with request-token and revision guards.
+
+Selecting a task also changes the top command controls, Vacancy Search form,
+Vacancy Monitor status/results and Price Calendar draft scope. Browser storage
+remembers the selected task, while a deleted or unknown selection falls back to
+the default task.
 
 ## Legacy endpoint compatibility
 
@@ -205,3 +236,7 @@ fixtures:
 - optimistic update conflicts and concurrent reorder operations;
 - no cross-task result, progress or notification checkpoint leakage;
 - unchanged legacy route response fields.
+
+Phase 1 completion is covered by repository, runtime-context, coordinator,
+service-lifecycle, task-API, legacy-route, notification-isolation, shared
+price-calendar pacing and static WebUI contract tests.

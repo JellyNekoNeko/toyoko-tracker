@@ -1265,6 +1265,44 @@ class AppParserTests(unittest.TestCase):
         self.assertEqual(newly_available, ["00001"])
         mock_notify.assert_not_called()
 
+    def test_notification_checkpoints_are_isolated_by_task(self):
+        from toyoko_tracker import notifications
+
+        notifications.clear_alert_state()
+        first_cfg = tracker_app.AppConfig()
+        second_cfg = tracker_app.AppConfig()
+        setattr(first_cfg, "task_id", "tokyo")
+        setattr(second_cfg, "task_id", "osaka")
+        result = tracker_app.HotelResult(
+            code="00001",
+            name="Test",
+            url="https://example.test",
+            available=True,
+        )
+
+        with patch.object(notifications, "notify_push_channels") as mock_notify:
+            first = notifications.process_notifications(
+                first_cfg,
+                [result],
+                "2026-05-16",
+                "2026-05-17",
+            )
+            second = notifications.process_notifications(
+                second_cfg,
+                [result],
+                "2026-05-16",
+                "2026-05-17",
+            )
+
+        checkpoint = notifications.notification_checkpoint_snapshot()
+        logs = notifications.availability_log_snapshot()
+        self.assertEqual(first, ["00001"])
+        self.assertEqual(second, ["00001"])
+        self.assertEqual(mock_notify.call_count, 2)
+        self.assertEqual({entry["task_id"] for entry in logs}, {"tokyo", "osaka"})
+        self.assertIn("tokyo|00001|2026-05-16|2026-05-17", checkpoint["alert_state"])
+        self.assertIn("osaka|00001|2026-05-16|2026-05-17", checkpoint["alert_state"])
+
     def test_unvalidated_cached_result_does_not_advance_notifications(self):
         from toyoko_tracker import notifications
 
@@ -1591,6 +1629,27 @@ class AppRouteSecurityTests(unittest.TestCase):
         self.assertEqual(changed["revision"], 7)
         self.assertEqual(changed["results"][0]["code"], "00001")
 
+    def test_availability_log_delta_filters_the_selected_task(self):
+        from toyoko_tracker import runtime
+
+        logs = [
+            {"task_id": "tokyo", "code": "00001"},
+            {"task_id": "osaka", "code": "00002"},
+            {"task_id": None, "code": "legacy"},
+        ]
+        with patch.object(runtime, "availability_log_revision", return_value=9), \
+             patch.object(runtime, "availability_log_snapshot", return_value=logs):
+            selected = self.client.get(
+                "/api/v1/availability-logs?task_id=osaka&since=-1"
+            ).get_json()
+            default = self.client.get(
+                "/api/v1/availability-logs?task_id=default&since=-1"
+            ).get_json()
+
+        self.assertEqual(selected["task_id"], "osaka")
+        self.assertEqual(selected["availability_logs"], [logs[1]])
+        self.assertEqual(default["availability_logs"], [logs[2]])
+
     def test_log_cursor_returns_only_new_lines(self):
         from toyoko_tracker import runtime
 
@@ -1791,27 +1850,20 @@ class AppRouteSecurityTests(unittest.TestCase):
 
         self.assertEqual(payload, {"version": 2, "ready": True})
 
-    def test_start_route_passes_single_scan_flag_to_worker(self):
+    def test_start_route_passes_single_scan_flag_to_task_scheduler(self):
         from toyoko_tracker import runtime
 
-        created_threads = []
-
-        class FakeThread:
-            def __init__(self, *, target, args, name, daemon):
-                self.target = target
-                self.args = args
-                self.name = name
-                self.daemon = daemon
-                self.started = False
-                created_threads.append(self)
-
-            def start(self):
-                self.started = True
-
-            def is_alive(self):
-                return False
-
         cfg = tracker_app.AppConfig()
+        service = Mock()
+        service.replace_config_and_start.return_value = {
+            "task": {
+                "task_id": "default",
+                "desired_state": "paused",
+                "runtime_state": "queued",
+            },
+            "restarted": False,
+            "run_once": True,
+        }
         payload = {
             "run_once": True,
             "start_date": "2026-07-17",
@@ -1820,11 +1872,10 @@ class AppRouteSecurityTests(unittest.TestCase):
             "selected_hotels": [{"code": "00001", "name": "Test Hotel"}],
         }
         with patch.object(runtime, "_CONFIG", cfg), \
-             patch.object(runtime, "_worker_thread", None), \
-             patch.object(runtime.threading, "Thread", FakeThread), \
+             patch.object(runtime, "_resolve_task_id", return_value="default"), \
+             patch.object(runtime, "_ensure_task_service", return_value=service), \
              patch.object(runtime, "_save_config_to_file"), \
              patch.object(runtime, "_remember_search"), \
-             patch.object(runtime, "clear_alert_state"), \
              patch.object(runtime, "send_start_notifications"):
             response = self.client.post("/start", json=payload)
 
@@ -1833,8 +1884,12 @@ class AppRouteSecurityTests(unittest.TestCase):
         self.assertTrue(body["ok"])
         self.assertTrue(body["run_once"])
         self.assertEqual(body["message"], "scan_once_started")
-        self.assertEqual(created_threads[0].args, (True,))
-        self.assertTrue(created_threads[0].started)
+        self.assertEqual(body["task_id"], "default")
+        service.replace_config_and_start.assert_called_once()
+        args, kwargs = service.replace_config_and_start.call_args
+        self.assertEqual(args[0], "default")
+        self.assertEqual(args[1]["hotel_codes"], ["00001"])
+        self.assertTrue(kwargs["run_once"])
 
     def test_preferences_route_persists_zero_repeat_count(self):
         from toyoko_tracker import runtime

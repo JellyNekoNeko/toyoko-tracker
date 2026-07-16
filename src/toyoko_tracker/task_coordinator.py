@@ -307,6 +307,18 @@ class TaskCoordinator:
                 task.runtime_state = "idle"
             return self._task_snapshot(task)
 
+    def cancel_in_flight(self) -> int:
+        """Signal every issued turn without changing durable desired state."""
+
+        with self._lock:
+            cancelled = 0
+            for task in self._tasks.values():
+                if task.in_flight_turn_id is None:
+                    continue
+                task.cancel_event.set()
+                cancelled += 1
+            return cancelled
+
     def _valid_heap_entry(
         self, entry: Tuple[float, int, str, int]
     ) -> Optional[_TaskSchedule]:

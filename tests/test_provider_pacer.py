@@ -149,10 +149,34 @@ def test_virtual_clock_makes_spacing_and_snapshot_deterministic():
         "concurrency_limit": 2,
         "min_start_interval": 3,
         "last_started_at": 103,
+        "next_start_at": 106,
+        "spacing_remaining": 3,
         "cooldown_until": None,
         "cooldown_remaining": 0,
         "failure_streak": 0,
     }
+
+
+def test_request_specific_spacing_is_shared_with_the_next_feature():
+    virtual = VirtualClock()
+    pacer = ProviderPacer(
+        min_start_interval=0,
+        clock=virtual.clock,
+        wait=virtual.wait,
+    )
+
+    with pacer.acquire(
+        "toyoko",
+        task_id="monitor-task",
+        min_start_interval=4,
+    ):
+        pass
+    with pacer.acquire("toyoko", task_id="price-calendar"):
+        assert virtual.now == 4
+
+    snapshot = pacer.snapshot()["providers"]["toyoko"]
+    assert snapshot["last_started_at"] == 4
+    assert snapshot["spacing_remaining"] == 0
 
 
 def test_context_manager_and_manual_release_are_idempotent():

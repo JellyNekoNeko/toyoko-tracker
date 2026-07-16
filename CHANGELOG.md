@@ -2,6 +2,20 @@
 
 ## v0.7.0 - Development
 
+- Completed Phase 1 multi-task monitoring with one process-wide scheduler,
+  task-native CRUD/control/results/run APIs and selected-task compatibility for
+  the original Start, Stop, Status and results routes.
+- Connected the multilingual Monitor Tasks workspace to live persisted data,
+  including create, copy, rename, reorder, edit/save conditions, pause/resume,
+  delete, progress, next scan, results, errors, run history and global Provider
+  pacing status.
+- Routed recurring tasks, one-time scans and price-calendar requests through
+  the installation-wide Provider gate, with shared cooldown handling and
+  task-local cancellation.
+- Added lifecycle recovery and shutdown draining so restart resumes durable
+  active tasks through one coordinator without duplicating workers.
+- Isolated notification checkpoints and in-memory results by task while
+  retaining global notification destinations and credentials.
 - Added the Phase 1 fair task coordinator with rotating ready queues, bounded
   hotel batches and priorities, target-start cadence and cancellable turns.
 - Added isolated per-task runtime contexts for progress, results, errors,
@@ -15,8 +29,8 @@
   search-only `AppConfig` mapping.
 - Added the installation-wide Provider pacer foundation for shared
   concurrency, per-Provider spacing, 429/503 cooldown and cancellable waits.
-- Added a multilingual, responsive monitor-task center prototype for creating,
-  copying, renaming, reordering, pausing and deleting local preview tasks.
+- Added a multilingual, responsive monitor-task center for managing persisted
+  monitoring tasks.
 - Added the frozen Phase 1 state, pacing, coordinator and legacy-route
   integration contract in `docs/PHASE1_ARCHITECTURE.md`.
 - Phase 0 established the versioned 0.7.0 workspace schema for monitor tasks,

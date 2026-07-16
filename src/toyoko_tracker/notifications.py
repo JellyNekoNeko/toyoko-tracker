@@ -1107,6 +1107,7 @@ def _upsert_availability_log(cfg: AppConfig, r: HotelResult, start_date: str, en
                 return
         _AVAILABILITY_LOGS.append({
             "key": key,
+            "task_id": str(getattr(cfg, "task_id", "") or "") or None,
             "code": r.display_code or _selected_hotel_info(cfg, r.code).get("display_code") or r.code,
             "hotel": _hotel_name_for_log(cfg, r),
             "appeared_ts": now,
@@ -1180,6 +1181,7 @@ def _build_result_push_message(
 
 def process_notifications(cfg: AppConfig, results: List[HotelResult], start_date: str, end_date: str) -> List[str]:
     newly_available: List[str] = []
+    task_scope = str(getattr(cfg, "task_id", "") or "")
     for r in results:
         # A TTL cache hit keeps the UI responsive, but only live or conditionally
         # revalidated data is allowed to advance alert state.
@@ -1187,7 +1189,8 @@ def process_notifications(cfg: AppConfig, results: List[HotelResult], start_date
             continue
         if getattr(r, "requirement_unmet", False):
             continue
-        key = f"{r.code}|{start_date}|{end_date}"
+        key_prefix = f"{task_scope}|" if task_scope else ""
+        key = f"{key_prefix}{r.code}|{start_date}|{end_date}"
         st = _alert_state_snapshot(key)
         was_available = bool(st.get("available", False))
         is_available = bool(r.available)
@@ -1211,7 +1214,12 @@ def process_notifications(cfg: AppConfig, results: List[HotelResult], start_date
             _publish_and_notify(
                 cfg, "availability.available", f"{key}|available", title, msg, r.url,
                 enabled=notify_enabled,
-                payload={"code": r.code, "count": current_count, "provider": r.provider},
+                payload={
+                    "task_id": task_scope or None,
+                    "code": r.code,
+                    "count": current_count,
+                    "provider": r.provider,
+                },
             )
             st = {
                 "available": True, "sent": 1 if notify_enabled else 0,
@@ -1242,6 +1250,7 @@ def process_notifications(cfg: AppConfig, results: List[HotelResult], start_date
                     title, msg, r.url,
                     enabled=bool(getattr(cfg, "notify_availability_count_change", True)),
                     payload={
+                        "task_id": task_scope or None,
                         "code": r.code, "previous_count": previous_count,
                         "current_count": current_count, "provider": r.provider,
                     },
@@ -1284,7 +1293,12 @@ def process_notifications(cfg: AppConfig, results: List[HotelResult], start_date
                 _publish_and_notify(
                     cfg, "availability.reminder",
                     f"{key}|reminder|{next_reminder}", title, msg, r.url,
-                    payload={"code": r.code, "reminder": next_reminder, "provider": r.provider},
+                    payload={
+                        "task_id": task_scope or None,
+                        "code": r.code,
+                        "reminder": next_reminder,
+                        "provider": r.provider,
+                    },
                 )
                 st["sent"] = sent + 1
                 st["last"] = now
@@ -1304,7 +1318,11 @@ def process_notifications(cfg: AppConfig, results: List[HotelResult], start_date
                 cfg, "availability.unavailable", f"{key}|unavailable",
                 title, msg, r.url,
                 enabled=bool(getattr(cfg, "notify_unavailable", True)),
-                payload={"code": r.code, "provider": r.provider},
+                payload={
+                    "task_id": task_scope or None,
+                    "code": r.code,
+                    "provider": r.provider,
+                },
             )
             st = {"available": False, "sent": 0, "last": now, "count": 0}
 
@@ -1326,6 +1344,7 @@ def process_notifications(cfg: AppConfig, results: List[HotelResult], start_date
                 enabled=bool(getattr(cfg, "notify_search_error", False)),
                 dedupe_window_seconds=300,
                 payload={
+                    "task_id": task_scope or None,
                     "code": r.code, "provider": r.provider,
                     "http_status": r.http_status, "error": r.error_summary,
                 },

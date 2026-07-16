@@ -73,6 +73,7 @@ def initialize_runtime(lan_enabled: Optional[bool] = None) -> bool:
         initialize_workspace()
         with runtime._CONFIG_LOCK:
             ensure_default_task(runtime._CONFIG)
+        runtime.start_task_scheduler()
     except Exception as exc:
         runtime._log(f"[boot] workspace initialization skipped: {exc}")
     runtime._check_latest_async()
@@ -82,6 +83,7 @@ def initialize_runtime(lan_enabled: Optional[bool] = None) -> bool:
 
 
 def stop_runtime_services() -> None:
+    runtime.stop_task_scheduler()
     runtime._stop_catalog_scheduler()
     runtime._stop_provider_database_scheduler()
 

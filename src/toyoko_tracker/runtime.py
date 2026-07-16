@@ -98,7 +98,7 @@ from .hotel_database import (
 from .notifications import (
     availability_log_revision,
     availability_log_snapshot,
-    clear_alert_state,
+    clear_alert_state,  # noqa: F401 - retained for app_compat and extension hooks.
     notification_status_snapshot,
     notification_checkpoint_snapshot,
     notify_local,
@@ -182,6 +182,14 @@ from .settings import (
     TIMEOUT,
 )
 from .desktop_version import DESKTOP_VERSION
+from . import workspace as _workspace
+from .provider_pacer import provider_pacer as _provider_pacer
+from .task_service import (
+    LastTaskError as _LastTaskError,
+    TaskBusyError as _TaskBusyError,
+    TaskSchedulerService as _TaskSchedulerService,
+)
+from .task_scheduler import TaskWorkItem as _TaskWorkItem
 
 # ---- precise timing helpers (monotonic) ----
 def _now_wall() -> float:
@@ -245,6 +253,8 @@ _SECRET_CONFIG_FIELDS = {"bot_token", "bark_key", "serverchan_sendkey", "smtp_pa
 _worker_thread: Optional[threading.Thread] = None
 _stop_event = threading.Event()
 _RUN_REQUESTED = False  # only set True by /start; set False by /stop
+_TASK_SERVICE_LOCK = threading.RLock()
+_TASK_SERVICE: Optional[_TaskSchedulerService] = None
 
 # ========= Utility Functions / Helper Functions =========
 def _safe_print(text: str) -> None:
@@ -302,6 +312,156 @@ def _public_config_dict(cfg: AppConfig) -> Dict[str, Any]:
     for key in _SECRET_CONFIG_FIELDS:
         data.pop(key, None)
     return data
+
+
+def _resolve_task_id(value: Any = None) -> str:
+    requested = str(value or "").strip()
+    if requested:
+        _workspace.get_task(requested)
+        return requested
+    try:
+        _workspace.get_task(_workspace.DEFAULT_TASK_ID)
+        return _workspace.DEFAULT_TASK_ID
+    except _workspace.TaskNotFoundError:
+        tasks = _workspace.list_tasks()
+        if tasks:
+            return str(tasks[0]["task_id"])
+    with _CONFIG_LOCK:
+        return _workspace.ensure_default_task(_CONFIG)
+
+
+def _task_config_with_globals(task: Dict[str, Any]) -> AppConfig:
+    with _CONFIG_LOCK:
+        base = deepcopy(_CONFIG)
+    cfg = _workspace.app_config_from_task_config(task["config"], base=base)
+    setattr(cfg, "task_id", str(task["task_id"]))
+    return cfg
+
+
+def _task_request_interval(item: _TaskWorkItem) -> float:
+    base_delay = max(
+        1.0,
+        min(60.0, float(item.config.get("per_hotel_delay_seconds") or 1)),
+    )
+    adaptive_delay = _provider_dynamic_spacing(item.provider, base_delay)
+    jitter = max(
+        0,
+        min(100, int(item.config.get("request_jitter_percent") or 0)),
+    )
+    return _jittered_spacing(adaptive_delay, jitter)
+
+
+def _task_scan_one(item: _TaskWorkItem) -> Dict[str, Any]:
+    task = {"task_id": item.task_id, "config": item.config}
+    cfg = _task_config_with_globals(task)
+    if item.cancel_event.is_set():
+        raise RuntimeError("task scan cancelled")
+    _set_action(
+        f"[task:{item.task_id}] checking {item.hotel_code} "
+        f"for {cfg.start_date} → {cfg.end_date}"
+    )
+    _log(
+        f"[task:{item.task_id}:{item.provider}] checking "
+        f"{item.hotel_code} for {cfg.start_date} → {cfg.end_date}"
+    )
+    result = _check_hotel_cached(
+        cfg,
+        None,
+        item.hotel_code,
+        cfg.start_date,
+        cfg.end_date,
+        allow_cache=True,
+    )
+    result.provider = item.provider
+    _record_provider_result(item.provider, result)
+    _record_hotel_runtime_result(result)
+    return asdict(result)
+
+
+def _task_round_complete(
+    task_id: str,
+    config: Dict[str, Any],
+    raw_results: Tuple[Any, ...],
+) -> None:
+    global _RUN_REQUESTED
+    task = {"task_id": task_id, "config": config}
+    cfg = _task_config_with_globals(task)
+    results = [
+        _hotel_result_from_dict(dict(result))
+        for result in raw_results
+        if isinstance(result, dict)
+    ]
+    try:
+        process_notifications(cfg, results, cfg.start_date, cfg.end_date)
+    except Exception as exc:
+        _log(f"[task:{task_id}] notifications skipped: {exc}")
+    try:
+        _record_analytics_results(cfg, results)
+    except Exception as exc:
+        _log(f"[task:{task_id}] analytics skipped: {exc}")
+    try:
+        default_task_id = _resolve_task_id()
+    except Exception:
+        default_task_id = _workspace.DEFAULT_TASK_ID
+    if task_id == default_task_id:
+        global _LAST_RESULTS, _RESULTS_REVISION
+        with _RESULTS_LOCK:
+            _LAST_RESULTS = results
+            _RESULTS_REVISION += 1
+    with _TASK_SERVICE_LOCK:
+        service = _TASK_SERVICE
+    if service is not None:
+        _RUN_REQUESTED = bool(service.summary()["active_count"])
+    _log(
+        f"[task:{task_id}] round complete: "
+        f"{sum(1 for result in results if result.available is True)}/"
+        f"{len(results)} available"
+    )
+
+
+def _ensure_task_service(*, start_service: bool = True) -> _TaskSchedulerService:
+    global _TASK_SERVICE
+    with _TASK_SERVICE_LOCK:
+        if _TASK_SERVICE is None:
+            _workspace.initialize_workspace()
+            with _CONFIG_LOCK:
+                _workspace.ensure_default_task(_CONFIG)
+            _TASK_SERVICE = _TaskSchedulerService(
+                _task_scan_one,
+                on_round_complete=_task_round_complete,
+                request_interval=_task_request_interval,
+                log=_log,
+            )
+        service = _TASK_SERVICE
+    if start_service:
+        service.start()
+    return service
+
+
+def start_task_scheduler() -> Dict[str, Any]:
+    return _ensure_task_service(start_service=True).summary()
+
+
+def stop_task_scheduler() -> None:
+    with _TASK_SERVICE_LOCK:
+        service = _TASK_SERVICE
+    if service is not None:
+        service.shutdown()
+
+
+def _task_service_snapshot(
+    task_id: str,
+    *,
+    include_results: bool = False,
+) -> Optional[Dict[str, Any]]:
+    with _TASK_SERVICE_LOCK:
+        service = _TASK_SERVICE
+    if service is None:
+        return None
+    try:
+        return service.public_task(task_id, include_results=include_results)
+    except _workspace.TaskNotFoundError:
+        return None
 
 
 def _html_attr(value: Any) -> str:
@@ -2529,6 +2689,7 @@ def home() -> Response:
               </div>
             </div>
             <div class="run-actions">
+	              <button id="btn_save_task" type="button">保存任务 Save Task</button>
 	              <button id="btn_scan_once" type="button">单次检索 Scan Once</button>
 	              <button class="primary" id="btn_start" type="button">启动 Start</button>
 	              <button class="danger" id="btn_stop" type="button" disabled>停止 Stop</button>
@@ -2839,9 +3000,9 @@ def home() -> Response:
 	            <div class="task-center-page">
 	              <header class="task-center-hero">
 	                <div>
-	                  <span class="task-center-eyebrow" id="task-center-eyebrow">0.7.0 工作区原型</span>
+	                  <span class="task-center-eyebrow" id="task-center-eyebrow">0.7.0 多任务工作区</span>
 	                  <h1 id="task-center-title">监控任务</h1>
-	                  <p id="task-center-subtitle">集中管理不同日期、酒店和检索节奏；当前阶段使用本地原型数据预览多任务操作。</p>
+	                  <p id="task-center-subtitle">集中管理不同日期、酒店和检索节奏，并查看每个任务的实时进度、结果和运行记录。</p>
 	                </div>
 	                <button class="primary task-create-button" id="task-create-button" type="button"><span aria-hidden="true">＋</span><span id="task-create-label">新建任务</span></button>
 	              </header>
@@ -2851,13 +3012,14 @@ def home() -> Response:
 	                <div><span id="task-summary-active-label">当前任务</span><strong id="task-summary-active">—</strong></div>
 	                <div><span id="task-summary-running-label">运行中</span><strong id="task-summary-running">0</strong></div>
 	                <div><span id="task-summary-paused-label">已暂停</span><strong id="task-summary-paused">0</strong></div>
+	                <div><span id="task-summary-pacer-label">全局节流</span><strong id="task-summary-pacer">正常</strong></div>
 	              </section>
 
 	              <div class="task-center-layout">
 	                <section class="task-list-panel" aria-labelledby="task-list-title">
 	                  <header>
 	                    <div><span id="task-list-kicker">任务队列</span><h2 id="task-list-title">全部监控任务</h2></div>
-	                    <span class="task-prototype-badge" id="task-prototype-badge">本地原型</span>
+	                    <span class="task-prototype-badge" id="task-prototype-badge">实时任务</span>
 	                  </header>
 	                  <div class="task-card-list" id="task-card-list" role="listbox" aria-label="Monitor tasks"></div>
 	                  <button class="task-future-card" id="task-future-card" type="button">
@@ -2881,8 +3043,13 @@ def home() -> Response:
 	                    <div><span id="task-detail-hotels-label">酒店范围</span><strong id="task-detail-hotels">0</strong></div>
 	                    <div><span id="task-detail-guests-label">入住人数</span><strong id="task-detail-guests">1 人 · 1 房</strong></div>
 	                    <div><span id="task-detail-cadence-label">检索间隔</span><strong id="task-detail-cadence">30 秒</strong></div>
+	                    <div><span id="task-detail-progress-label">运行进度</span><strong id="task-detail-progress">0 / 0</strong></div>
+	                    <div><span id="task-detail-next-label">下次检索</span><strong id="task-detail-next">—</strong></div>
+	                    <div><span id="task-detail-results-label">当前结果</span><strong id="task-detail-results">0</strong></div>
+	                    <div><span id="task-detail-error-label">最近错误</span><strong id="task-detail-error">—</strong></div>
 	                  </div>
 	                  <div class="task-detail-actions" aria-label="Task actions">
+	                    <button id="task-edit-button" type="button" data-task-action="edit"><span aria-hidden="true">⚙</span><span>编辑条件</span></button>
 	                    <button id="task-duplicate-button" type="button" data-task-action="duplicate"><span aria-hidden="true">⧉</span><span>复制</span></button>
 	                    <button id="task-rename-button" type="button" data-task-action="rename"><span aria-hidden="true">✎</span><span>重命名</span></button>
 	                    <button id="task-move-up-button" type="button" data-task-action="move-up"><span aria-hidden="true">↑</span><span>上移</span></button>
@@ -2891,9 +3058,10 @@ def home() -> Response:
 	                    <button class="danger" id="task-delete-button" type="button" data-task-action="delete"><span aria-hidden="true">×</span><span>删除</span></button>
 	                  </div>
 	                  <div class="task-prototype-message">
-	                    <span aria-hidden="true">i</span>
-	                    <p id="task-prototype-message">此原型不会修改真实监控配置。后续接入任务 API 后，卡片结构与操作位置将保持一致。</p>
+	                    <span aria-hidden="true">↻</span>
+	                    <p id="task-prototype-message">任务状态会自动刷新。启动、暂停和单次检索都通过全局公平调度器执行。</p>
 	                  </div>
+	                  <div class="task-run-history" id="task-run-history" aria-live="polite"></div>
 	                </section>
 	              </div>
 	            </div>
@@ -4503,129 +4671,324 @@ def save_preferences() -> Response:
     return jsonify({"ok": True, "saved": sorted(patch)})
 
 
-def start() -> Response:
-        global _worker_thread, _RUN_REQUESTED, _LAST_RESULTS, _RESULTS_REVISION
-        payload = request.get_json(force=True, silent=True) or {}
-        run_once = bool(payload.get("run_once", False))
-        restarted = False
-
+def _task_api_error(
+    exc: Exception,
+    *,
+    task_id: str = "",
+) -> Tuple[Response, int]:
+    if isinstance(exc, _workspace.TaskNotFoundError):
+        status = 404
+    elif isinstance(
+        exc,
+        (
+            _workspace.TaskConflictError,
+            _TaskBusyError,
+            _LastTaskError,
+        ),
+    ):
+        status = 409
+    elif isinstance(exc, (ValueError, _workspace.TaskValidationError)):
+        status = 400
+    else:
+        status = 500
+        _log(f"[tasks] API error: {exc}")
+    payload: Dict[str, Any] = {"ok": False, "message": str(exc)}
+    if status == 409 and task_id:
         try:
-            with _CONFIG_LOCK:
-                candidate = deepcopy(_CONFIG)
-                _apply_payload_to_config(candidate, payload)
-                if not candidate.hotel_codes:
-                    return jsonify({
-                        "ok": False,
-                        "message": "Please load and select hotels in Area Hotel Picker first.",
-                    }), 400
-        except ValueError as e:
-            return jsonify({"ok": False, "message": str(e), "error": str(e)}), 400
+            payload["task"] = _ensure_task_service().public_task(task_id)
+        except Exception:
+            pass
+    return jsonify(payload), status
 
-        if _worker_thread and _worker_thread.is_alive():
-            restarted = True
-            _RUN_REQUESTED = False
-            _stop_event.set()
-            _worker_thread.join(timeout=5)
-            if _worker_thread and _worker_thread.is_alive():
-                return jsonify({"ok": False, "message": "Could not stop current worker for restart"}), 409
-            _worker_thread = None
-            _stop_event.clear()
 
-        with _CONFIG_LOCK:
-            _CONFIG.__dict__.clear()
-            _CONFIG.__dict__.update(candidate.__dict__)
-
-        # Mark that user explicitly wants the worker to run
-        _RUN_REQUESTED = True
-
-        # Start save to auto_save.json
-        _save_config_to_file(AUTO_SAVE_PATH)
-        _remember_search(payload, _CONFIG)
-
-        # Reset and Restart worker
-        _set_action(
-            f"[start] hotels={len(_CONFIG.hotel_codes)} | {_CONFIG.start_date} → {_CONFIG.end_date} | people={_CONFIG.people}, rooms={_CONFIG.rooms}, smoking={_CONFIG.smoking}")
-
-        _stop_event.set()
-        if _worker_thread and _worker_thread.is_alive():
-            _worker_thread.join(timeout=2)
-        _stop_event.clear()
-
-        with _CONFIG_LOCK:
-            cfg_snapshot = deepcopy(_CONFIG)
-        restored_checkpoint = bool(not run_once and _restore_runtime_checkpoint(cfg_snapshot))
-        if not restored_checkpoint:
-            with _RESULTS_LOCK:
-                _LAST_RESULTS = []
-                _RESULTS_REVISION += 1
-            clear_alert_state()
-        if not restored_checkpoint:
-            with _PROGRESS_LOCK:
-                _PROGRESS["backoff_multiplier"] = 1
-                _PROGRESS["unknown_ratio_percent"] = 0
-                _PROGRESS["consecutive_unhealthy_rounds"] = 0
-                _PROGRESS["effective_interval_sec"] = int(_CONFIG.loop_interval_seconds)
-
-        _worker_thread = threading.Thread(
-            target=_worker_loop,
-            args=(run_once,),
-            name="checker-thread",
-            daemon=True,
-        )
-        _worker_thread.start()
-        _log("Started worker.")
-        _log(f"{APP_NAME} {APP_VERSION} · Author: {APP_AUTHOR}")
-
-        try:
-            with _CONFIG_LOCK:
-                cfg_snapshot = deepcopy(_CONFIG)
-            send_start_notifications(cfg_snapshot)
-        except Exception as e:
-            _log(f"[start] could not send start notifications: {e}")
-
-        message = "scan_once_started" if run_once else ("restarted" if restarted else "started")
+def tasks_collection() -> Response:
+    service = _ensure_task_service()
+    if request.method == "GET":
         return jsonify({
             "ok": True,
-            "message": message,
-            "restarted": restarted,
-            "run_once": run_once,
-            "config": _public_config_dict(_CONFIG),
+            "tasks": service.list_tasks(),
+            "summary": service.summary(),
         })
+    payload = request.get_json(force=True, silent=True) or {}
+    try:
+        source_task_id = str(payload.get("source_task_id") or "").strip()
+        if source_task_id:
+            task = service.duplicate_task(
+                source_task_id,
+                name=payload.get("name"),
+            )
+        else:
+            if "config" in payload and not isinstance(payload.get("config"), dict):
+                raise _workspace.TaskValidationError("config must be an object")
+            config = payload.get("config")
+            if not isinstance(config, dict):
+                with _CONFIG_LOCK:
+                    config = _workspace.task_config_snapshot(_CONFIG)
+            task = service.create_task(
+                payload.get("name") or "New monitor task",
+                config,
+                task_id=payload.get("task_id"),
+            )
+        return jsonify({"ok": True, "task": task}), 201
+    except Exception as exc:
+        return _task_api_error(exc)
+
+
+def tasks_summary() -> Response:
+    service = _ensure_task_service()
+    return jsonify({
+        "ok": True,
+        "tasks": service.list_tasks(),
+        "summary": service.summary(),
+    })
+
+
+def task_detail(task_id: str) -> Response:
+    service = _ensure_task_service()
+    try:
+        if request.method == "GET":
+            return jsonify({
+                "ok": True,
+                "task": service.public_task(task_id, include_results=True),
+            })
+        if request.method == "DELETE":
+            payload = request.get_json(silent=True) or {}
+            deleted = service.delete_task(
+                task_id,
+                expected_revision=payload.get(
+                    "expected_revision",
+                    request.args.get("expected_revision"),
+                ),
+            )
+            return jsonify({"ok": True, "task": deleted})
+        payload = request.get_json(force=True, silent=True) or {}
+        if "config" in payload and not isinstance(payload.get("config"), dict):
+            raise _workspace.TaskValidationError("config must be an object")
+        task = service.update_task(
+            task_id,
+            name=payload.get("name"),
+            config=payload.get("config"),
+            replace_config=bool(payload.get("replace_config", False)),
+            expected_revision=payload.get("expected_revision"),
+        )
+        return jsonify({"ok": True, "task": task})
+    except Exception as exc:
+        return _task_api_error(exc, task_id=task_id)
+
+
+def task_copy(task_id: str) -> Response:
+    payload = request.get_json(silent=True) or {}
+    try:
+        task = _ensure_task_service().duplicate_task(
+            task_id,
+            name=payload.get("name"),
+        )
+        return jsonify({"ok": True, "task": task}), 201
+    except Exception as exc:
+        return _task_api_error(exc, task_id=task_id)
+
+
+def task_reorder() -> Response:
+    payload = request.get_json(force=True, silent=True) or {}
+    try:
+        task_ids = payload.get("task_ids")
+        if not isinstance(task_ids, list):
+            raise _workspace.TaskValidationError("task_ids must be a list")
+        expected_revisions = payload.get("expected_revisions")
+        if expected_revisions is not None and not isinstance(
+            expected_revisions, dict
+        ):
+            raise _workspace.TaskValidationError(
+                "expected_revisions must be an object"
+            )
+        tasks = _ensure_task_service().reorder(
+            [str(task_id) for task_id in task_ids],
+            expected_revisions=expected_revisions,
+        )
+        return jsonify({"ok": True, "tasks": tasks})
+    except Exception as exc:
+        return _task_api_error(exc)
+
+
+def task_start(task_id: str) -> Response:
+    payload = request.get_json(silent=True) or {}
+    try:
+        result = _ensure_task_service().activate(
+            task_id,
+            run_once=bool(payload.get("run_once", False)),
+            expected_revision=payload.get("expected_revision"),
+        )
+        try:
+            cfg = _task_config_with_globals(_workspace.get_task(task_id))
+            send_start_notifications(cfg)
+        except Exception as exc:
+            _log(f"[task:{task_id}] start notification skipped: {exc}")
+        return jsonify({"ok": True, **result})
+    except Exception as exc:
+        return _task_api_error(exc, task_id=task_id)
+
+
+def task_pause(task_id: str) -> Response:
+    payload = request.get_json(silent=True) or {}
+    try:
+        result = _ensure_task_service().pause(
+            task_id,
+            expected_revision=payload.get("expected_revision"),
+        )
+        try:
+            cfg = _task_config_with_globals(_workspace.get_task(task_id))
+            send_stop_notifications(cfg)
+        except Exception as exc:
+            _log(f"[task:{task_id}] stop notification skipped: {exc}")
+        return jsonify({"ok": True, **result})
+    except Exception as exc:
+        return _task_api_error(exc, task_id=task_id)
+
+
+def task_status(task_id: str) -> Response:
+    try:
+        service = _ensure_task_service()
+        task = service.public_task(task_id)
+        return jsonify({
+            "ok": True,
+            "task": task,
+            "provider_pacer": service.kernel.pacer.snapshot(),
+        })
+    except Exception as exc:
+        return _task_api_error(exc, task_id=task_id)
+
+
+def task_results(task_id: str) -> Response:
+    try:
+        since = int(request.args.get("since", -1))
+    except (TypeError, ValueError):
+        since = -1
+    try:
+        task = _ensure_task_service().public_task(
+            task_id,
+            include_results=True,
+        )
+        revision = int(task["results_revision"])
+        changed = revision != since
+        payload: Dict[str, Any] = {
+            "ok": True,
+            "task_id": task_id,
+            "changed": changed,
+            "revision": revision,
+        }
+        if changed:
+            payload["results"] = task.get("results", [])
+        return jsonify(payload)
+    except Exception as exc:
+        return _task_api_error(exc, task_id=task_id)
+
+
+def task_runs(task_id: str) -> Response:
+    try:
+        limit = max(1, min(500, int(request.args.get("limit", 50))))
+        _workspace.get_task(task_id)
+        return jsonify({
+            "ok": True,
+            "task_id": task_id,
+            "runs": _workspace.list_task_runs(task_id, limit=limit),
+        })
+    except Exception as exc:
+        return _task_api_error(exc, task_id=task_id)
+
+
+def start() -> Response:
+    global _RUN_REQUESTED, _LAST_RESULTS, _RESULTS_REVISION
+    payload = request.get_json(force=True, silent=True) or {}
+    run_once = bool(payload.get("run_once", False))
+    try:
+        task_id = _resolve_task_id(payload.get("task_id"))
+        with _CONFIG_LOCK:
+            candidate = deepcopy(_CONFIG)
+            _apply_payload_to_config(candidate, payload)
+        if not candidate.hotel_codes:
+            return jsonify({
+                "ok": False,
+                "message": "Please load and select hotels in Area Hotel Picker first.",
+            }), 400
+        service = _ensure_task_service()
+        started = service.replace_config_and_start(
+            task_id,
+            _workspace.task_config_snapshot(candidate),
+            run_once=run_once,
+            expected_revision=payload.get("expected_revision"),
+        )
+    except (_workspace.TaskValidationError, ValueError) as exc:
+        return jsonify({"ok": False, "message": str(exc), "error": str(exc)}), 400
+    except (_workspace.TaskConflictError, _TaskBusyError) as exc:
+        return jsonify({"ok": False, "message": str(exc), "error": str(exc)}), 409
+    except _workspace.TaskNotFoundError as exc:
+        return jsonify({"ok": False, "message": str(exc), "error": str(exc)}), 404
+
+    with _CONFIG_LOCK:
+        _CONFIG.__dict__.clear()
+        _CONFIG.__dict__.update(candidate.__dict__)
+        cfg_snapshot = deepcopy(_CONFIG)
+    _RUN_REQUESTED = True
+    _save_config_to_file(AUTO_SAVE_PATH)
+    _remember_search(payload, cfg_snapshot)
+    with _RESULTS_LOCK:
+        _LAST_RESULTS = []
+        _RESULTS_REVISION += 1
+    _set_action(
+        f"[task:{task_id}] start requested | hotels={len(candidate.hotel_codes)} "
+        f"| {candidate.start_date} → {candidate.end_date}"
+    )
+    try:
+        setattr(cfg_snapshot, "task_id", task_id)
+        send_start_notifications(cfg_snapshot)
+    except Exception as exc:
+        _log(f"[task:{task_id}] start notification skipped: {exc}")
+    message = (
+        "scan_once_started"
+        if run_once
+        else ("restarted" if started["restarted"] else "started")
+    )
+    return jsonify({
+        "ok": True,
+        "message": message,
+        "restarted": started["restarted"],
+        "run_once": run_once,
+        "task_id": task_id,
+        "task": started["task"],
+        "config": _public_config_dict(candidate),
+    })
 
 def stop() -> Response:
-        global _worker_thread, _RUN_REQUESTED
-        _RUN_REQUESTED = False  # prevent worker from continuing or restarting
-        _stop_event.set()
-        if _worker_thread and _worker_thread.is_alive():
-            _worker_thread.join(timeout=2)
-        _worker_thread = None
-        _persist_runtime_checkpoint()
-        with _PROGRESS_LOCK:
-            _PROGRESS["round"] = 0
-            _PROGRESS["done"] = 0
-            _PROGRESS["total"] = 0
-            _PROGRESS["phase"] = "idle"
-            _PROGRESS["wait_started_mono"] = 0.0
-            _PROGRESS["wait_total_sec"] = 0
-            _PROGRESS["wait_elapsed_sec"] = 0
-            _PROGRESS["round_started"] = 0.0
-            _PROGRESS["round_started_mono"] = 0.0
-            _PROGRESS["backoff_multiplier"] = 1
-            _PROGRESS["unknown_ratio_percent"] = 0
-            _PROGRESS["consecutive_unhealthy_rounds"] = 0
-            _PROGRESS["effective_interval_sec"] = 0
-        global _UPTIME_STARTED, _UPTIME_STARTED_MONO
-        _UPTIME_STARTED = None
-        _UPTIME_STARTED_MONO = None
-        _set_action("Stopped worker.")
-        _log("Stopped worker.")
-        try:
-            with _CONFIG_LOCK:
-                cfg_snapshot = deepcopy(_CONFIG)
-            send_stop_notifications(cfg_snapshot)
-        except Exception as e:
-            _log(f"[stop] could not send stop notifications: {e}")
-        return jsonify({"ok": True, "message": "stopped"})
+    global _RUN_REQUESTED
+    payload = request.get_json(silent=True) or {}
+    try:
+        task_id = _resolve_task_id(
+            payload.get("task_id") or request.args.get("task_id")
+        )
+        service = _ensure_task_service()
+        paused = service.pause(
+            task_id,
+            expected_revision=payload.get("expected_revision"),
+        )
+        task = _workspace.get_task(task_id)
+        cfg_snapshot = _task_config_with_globals(task)
+    except _workspace.TaskNotFoundError as exc:
+        return jsonify({"ok": False, "message": str(exc)}), 404
+    except (_workspace.TaskConflictError, _TaskBusyError) as exc:
+        return jsonify({"ok": False, "message": str(exc)}), 409
+    _RUN_REQUESTED = bool(service.summary()["active_count"])
+    _set_action(f"[task:{task_id}] paused")
+    _log(f"[task:{task_id}] paused")
+    try:
+        send_stop_notifications(cfg_snapshot)
+    except Exception as exc:
+        _log(f"[task:{task_id}] stop notification skipped: {exc}")
+    return jsonify({
+        "ok": True,
+        "message": "stopped",
+        "task_id": task_id,
+        "task": paused["task"],
+    })
 
 
 def local_notify_test() -> Response:
@@ -4785,15 +5148,92 @@ def _runtime_diagnostics_snapshot(
 
 
 def _runtime_status_snapshot() -> Dict[str, Any]:
-    with _PROGRESS_LOCK:
-        progress = dict(_PROGRESS)
+    requested_task_id = ""
+    try:
+        requested_task_id = _resolve_task_id(request.args.get("task_id"))
+    except Exception:
+        try:
+            requested_task_id = _resolve_task_id()
+        except Exception:
+            requested_task_id = ""
+    task_snapshot = (
+        _task_service_snapshot(requested_task_id)
+        if requested_task_id
+        else None
+    )
+    if task_snapshot is not None:
+        progress = dict(task_snapshot.get("progress") or {})
+        progress.setdefault("round", 0)
+        progress.setdefault("done", 0)
+        progress.setdefault(
+            "total",
+            len(task_snapshot.get("config", {}).get("hotel_codes") or []),
+        )
+        progress.setdefault("queue_pending", 0)
+        progress.setdefault("in_flight", 0)
+        progress.setdefault("priority_pending", 0)
+        if task_snapshot["runtime_state"] == "scanning":
+            progress["queue_pending"] = max(
+                0,
+                int(progress.get("total") or 0) - int(progress.get("done") or 0),
+            )
+            progress["in_flight"] = 1
+        if task_snapshot["runtime_state"] == "waiting":
+            progress["phase"] = "waiting"
+        elif task_snapshot["runtime_state"] in {"queued", "scanning", "pausing"}:
+            progress["phase"] = "scanning"
+        else:
+            progress["phase"] = "idle"
+    else:
+        with _PROGRESS_LOCK:
+            progress = dict(_PROGRESS)
     now_ts = _now_wall()
     now_mono = _now_mono()
-    running = bool(_RUN_REQUESTED and _worker_thread and _worker_thread.is_alive())
+    running = (
+        bool(
+            task_snapshot
+            and (
+                task_snapshot["desired_state"] == "active"
+                or task_snapshot["runtime_state"]
+                in {"queued", "scanning", "waiting", "pausing"}
+            )
+        )
+        if task_snapshot is not None
+        else bool(_RUN_REQUESTED and _worker_thread and _worker_thread.is_alive())
+    )
     round_started_mono = float(progress.get("round_started_mono") or 0.0)
 
-    progress["uptime_sec"] = int(now_mono - _UPTIME_STARTED_MONO) if running and _UPTIME_STARTED_MONO else 0
-    progress["round_elapsed_sec"] = int(now_mono - round_started_mono) if running and round_started_mono else 0
+    if task_snapshot is not None:
+        started_at = task_snapshot.get("run_started_at")
+        last_started_at = task_snapshot.get("last_started_at")
+        progress["uptime_sec"] = (
+            max(0, int(now_ts - float(started_at or last_started_at)))
+            if running and (started_at or last_started_at)
+            else 0
+        )
+        progress["round_elapsed_sec"] = (
+            max(0, int(now_ts - float(started_at)))
+            if running and started_at
+            else 0
+        )
+        if running and progress.get("phase") == "waiting":
+            remaining = max(
+                0,
+                int(float(task_snapshot.get("next_run_at") or now_ts) - now_ts),
+            )
+            progress["wait_total_sec"] = remaining
+            progress["wait_elapsed_sec"] = 0
+    else:
+        progress["uptime_sec"] = (
+            int(now_mono - _UPTIME_STARTED_MONO)
+            if running and _UPTIME_STARTED_MONO
+            else 0
+        )
+        progress["round_elapsed_sec"] = (
+            int(now_mono - round_started_mono)
+            if running and round_started_mono
+            else 0
+        )
     if running and progress.get("phase") == "waiting":
         wait_started = float(progress.get("wait_started_mono") or 0.0)
         wait_total = int(progress.get("wait_total_sec") or 0)
@@ -4811,8 +5251,11 @@ def _runtime_status_snapshot() -> Dict[str, Any]:
     with _ACTION_LOCK:
         action = _CURRENT_ACTION
         action_ts = _ACTION_TS
-    with _RESULTS_LOCK:
-        results_revision = _RESULTS_REVISION
+    if task_snapshot is not None:
+        results_revision = int(task_snapshot.get("results_revision") or 0)
+    else:
+        with _RESULTS_LOCK:
+            results_revision = _RESULTS_REVISION
     with _CONFIG_LOCK:
         channel_config = {
             key: bool(getattr(_CONFIG, key, False))
@@ -4821,9 +5264,10 @@ def _runtime_status_snapshot() -> Dict[str, Any]:
     push_status = notification_status_snapshot(channel_config)
     provider_health = provider_health_snapshot()
 
-    return {
+    payload = {
         "ok": True,
         "instance_id": f"{os.getpid()}:{int(_START_TIME)}",
+        "task_id": requested_task_id or None,
         "running": running,
         "progress": progress,
         "action": action,
@@ -4836,6 +5280,14 @@ def _runtime_status_snapshot() -> Dict[str, Any]:
         "results_revision": results_revision,
         "availability_logs_revision": availability_log_revision(),
     }
+    if task_snapshot is not None:
+        payload["task"] = task_snapshot
+        payload["next_run_at"] = task_snapshot.get("next_run_at")
+    with _TASK_SERVICE_LOCK:
+        service = _TASK_SERVICE
+    if service is not None:
+        payload["tasks_summary"] = service.summary()
+    return payload
 
 
 def runtime_status() -> Response:
@@ -5092,16 +5544,37 @@ def _run_price_calendar_job(
             cfg.start_date = stay_date
             cfg.end_date = checkout_date
             try:
-                result = _check_hotel_cached(
-                    cfg,
-                    None,
-                    hotel_code,
-                    stay_date,
-                    checkout_date,
-                    allow_cache=not force,
-                    force_refresh=force,
+                base_delay = max(
+                    0.75,
+                    min(5.0, float(cfg.per_hotel_delay_seconds or 1)),
                 )
+                if _RUN_REQUESTED:
+                    base_delay = max(2.0, base_delay)
+                request_interval = _jittered_spacing(
+                    _provider_dynamic_spacing(provider, base_delay),
+                    min(25, cfg.request_jitter_percent),
+                )
+                with _provider_pacer.acquire(
+                    provider,
+                    task_id=f"price-calendar:{hotel_code}:{month}",
+                    min_start_interval=request_interval,
+                ):
+                    result = _check_hotel_cached(
+                        cfg,
+                        None,
+                        hotel_code,
+                        stay_date,
+                        checkout_date,
+                        allow_cache=not force,
+                        force_refresh=force,
+                    )
                 result.provider = provider
+                if result.http_status is not None:
+                    _provider_pacer.report_response(
+                        provider,
+                        int(result.http_status),
+                        retry_after=result.retry_after_sec,
+                    )
                 _record_provider_result(provider, result)
                 _record_price_calendar_day(
                     cfg, hotel_code, provider, stay_date, checkout_date, result
@@ -5160,12 +5633,6 @@ def _run_price_calendar_job(
                         completed_at=_now_wall(),
                     )
                     return
-
-            if index < len(dates) - 1:
-                base_delay = max(0.75, min(5.0, float(cfg.per_hotel_delay_seconds or 1)))
-                if _RUN_REQUESTED:
-                    base_delay = max(2.0, base_delay)
-                time.sleep(_jittered_spacing(base_delay, min(25, cfg.request_jitter_percent)))
 
         with _PRICE_CALENDAR_JOB_LOCK:
             error_count = int(_PRICE_CALENDAR_JOB.get("errors") or 0)
@@ -5347,14 +5814,50 @@ def results_status() -> Response:
         since = int(request.args.get("since", -1))
     except (TypeError, ValueError):
         since = -1
-    with _RESULTS_LOCK:
-        revision = _RESULTS_REVISION
+    try:
+        task_id = _resolve_task_id(request.args.get("task_id"))
+    except Exception:
+        try:
+            task_id = _resolve_task_id()
+        except Exception:
+            task_id = ""
+    task_snapshot = (
+        _task_service_snapshot(task_id, include_results=True)
+        if task_id
+        else None
+    )
+    if task_snapshot is not None:
+        revision = int(task_snapshot.get("results_revision") or 0)
         changed = since != revision
-        results = [asdict(result) for result in _LAST_RESULTS] if changed else None
-    payload: Dict[str, Any] = {"ok": True, "changed": changed, "revision": revision}
+        results = task_snapshot.get("results", []) if changed else None
+    else:
+        with _RESULTS_LOCK:
+            revision = _RESULTS_REVISION
+            changed = since != revision
+            results = [asdict(result) for result in _LAST_RESULTS] if changed else None
+    payload: Dict[str, Any] = {
+        "ok": True,
+        "task_id": task_id or None,
+        "changed": changed,
+        "revision": revision,
+    }
     if results is not None:
         payload["results"] = results
     return jsonify(payload)
+
+
+def _availability_logs_for_task(task_id: str) -> List[Dict[str, Any]]:
+    logs = availability_log_snapshot()
+    selected = str(task_id or "").strip()
+    if not selected:
+        return logs
+    include_unscoped = selected == _workspace.DEFAULT_TASK_ID
+    return [
+        entry
+        for entry in logs
+        if str(entry.get("task_id") or "") == selected
+        or (include_unscoped and not entry.get("task_id"))
+    ]
 
 
 def availability_logs_status() -> Response:
@@ -5364,9 +5867,15 @@ def availability_logs_status() -> Response:
         since = -1
     revision = availability_log_revision()
     changed = since != revision
-    payload: Dict[str, Any] = {"ok": True, "changed": changed, "revision": revision}
+    task_id = str(request.args.get("task_id") or "").strip()
+    payload: Dict[str, Any] = {
+        "ok": True,
+        "task_id": task_id or None,
+        "changed": changed,
+        "revision": revision,
+    }
     if changed:
-        payload["availability_logs"] = availability_log_snapshot()
+        payload["availability_logs"] = _availability_logs_for_task(task_id)
     return jsonify(payload)
 
 
@@ -5389,10 +5898,21 @@ def logs_status() -> Response:
 
 def status() -> Response:
     runtime_payload = _runtime_status_snapshot()
-    with _CONFIG_LOCK:
-        cfg = _public_config_dict(_CONFIG)
-    with _RESULTS_LOCK:
-        results = [asdict(result) for result in _LAST_RESULTS]
+    task_id = str(runtime_payload.get("task_id") or "")
+    task_snapshot = (
+        _task_service_snapshot(task_id, include_results=True)
+        if task_id
+        else None
+    )
+    if task_snapshot is not None:
+        task = _workspace.get_task(task_id)
+        cfg = _public_config_dict(_task_config_with_globals(task))
+        results = task_snapshot.get("results", [])
+    else:
+        with _CONFIG_LOCK:
+            cfg = _public_config_dict(_CONFIG)
+        with _RESULTS_LOCK:
+            results = [asdict(result) for result in _LAST_RESULTS]
     with _LOG_LOCK:
         logs = list(_LOG_LINES[-300:])
         log_cursor = _LOG_SEQUENCE
@@ -5401,7 +5921,7 @@ def status() -> Response:
         "results": results,
         "logs": logs,
         "log_cursor": log_cursor,
-        "availability_logs": availability_log_snapshot(),
+        "availability_logs": _availability_logs_for_task(task_id),
         "hotel_catalog": _catalog_status_snapshot(),
         "provider_catalog": {**_db_status_snapshot(), "checking": _PROVIDER_DATABASE_LOCK.locked()},
     })
@@ -5428,7 +5948,13 @@ def hotel_info() -> Response:
 
 
 def health() -> Response:
-        running = bool(_RUN_REQUESTED and _worker_thread and _worker_thread.is_alive())
+        with _TASK_SERVICE_LOCK:
+            service = _TASK_SERVICE
+        running = (
+            bool(service.summary()["active_count"])
+            if service is not None
+            else bool(_RUN_REQUESTED and _worker_thread and _worker_thread.is_alive())
+        )
         return jsonify({
             "ok": True,
             "app": "toyoko-tracker",

@@ -15,12 +15,16 @@
 - ⚡ 軽量な HTTP/API 検索エンジン
 - 🧭 互換性のための Playwright エンジン（オプション）
 - 🏨 地域または半径からホテルを選択
+- 🗂 条件と結果を分離した複数の永続監視タスクと公平スケジューリング
 - 🛏 シングル・ダブル・ツインの部屋タイプ絞り込み
 - 💳 会員価格と一般価格の表示
 - 📅 選択した各ホテルの月間料金カレンダーを必要時に更新
 - 🔔 デスクトップ通知
 - 🤖 Telegram、📱 Bark、💬 Server Chan、📧 SMTP メール通知
 - 🚀 複数ホテルを効率的に検索するスマート並列処理
+
+0.7.0 のマルチタスク操作は
+[`docs/PHASE1_MULTI_TASK_GUIDE.md`](docs/PHASE1_MULTI_TASK_GUIDE.md)を参照してください。
 
 ## 必要環境
 
@@ -193,4 +197,3 @@ brew install terminal-notifier
 - 作者: JellyNeko / bilibili @果冻猫猫丶
 - [GitHub](https://github.com/JellyNekoNeko/toyoko-tracker)
 - [PyPI](https://pypi.org/project/toyoko-tracker/)
-

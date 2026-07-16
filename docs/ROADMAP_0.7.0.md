@@ -31,6 +31,10 @@ Acceptance gate:
 
 ## Phase 1 — multiple monitor tasks
 
+Status: **Delivered**. The task repository, fair scheduler, single lifecycle
+service, task-native API, selected-task compatibility projection and live
+WebUI task center are implemented. Phase 2 is the next development stage.
+
 Deliverables:
 
 - Task list and task editor in the WebUI.

@@ -2,6 +2,7 @@ import json
 import sqlite3
 import sys
 import tempfile
+from contextlib import nullcontext
 from copy import deepcopy
 from datetime import date, timedelta
 from pathlib import Path
@@ -270,11 +271,14 @@ def test_price_calendar_worker_scans_each_future_night_without_notifications():
         }
     checker = Mock(side_effect=[_result(first), _result(second, available=False)])
     recorder = Mock()
+    pacer = Mock()
+    pacer.acquire.side_effect = lambda *args, **kwargs: nullcontext()
     with patch.object(runtime, "_price_calendar_month_dates", return_value=[first, second]), \
          patch.object(runtime, "_price_calendar_data_snapshot", return_value={"days": []}), \
          patch.object(runtime, "_check_hotel_cached", checker), \
          patch.object(runtime, "_record_price_calendar_day", recorder), \
          patch.object(runtime, "_record_provider_result"), \
+         patch.object(runtime, "_provider_pacer", pacer), \
          patch.object(runtime, "_provider_cooldown_until", return_value=0), \
          patch.object(runtime.time, "sleep"):
         runtime._run_price_calendar_job(job_id, deepcopy(cfg), "00001", first[:7], False)
@@ -282,6 +286,13 @@ def test_price_calendar_worker_scans_each_future_night_without_notifications():
     with runtime._PRICE_CALENDAR_JOB_LOCK:
         job = deepcopy(runtime._PRICE_CALENDAR_JOB)
     assert checker.call_count == 2
+    assert pacer.acquire.call_count == 2
+    assert all(
+        call.args[0] == "toyoko"
+        and call.kwargs["task_id"].startswith("price-calendar:00001:")
+        and call.kwargs["min_start_interval"] >= 0.75
+        for call in pacer.acquire.call_args_list
+    )
     assert recorder.call_count == 2
     assert job["state"] == "complete"
     assert job["done"] == 2
