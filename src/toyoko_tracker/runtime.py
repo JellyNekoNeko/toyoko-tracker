@@ -2485,6 +2485,7 @@ def home() -> Response:
 	              <nav class="sidebar-nav">
 	                <button class="sidebar-nav-item active" data-app-view="home" aria-current="page"><span class="nav-icon">⌂</span><span class="nav-label">首页 / Home</span></button>
 	                <button class="sidebar-nav-item" data-app-view="search"><span class="nav-icon">⌕</span><span class="nav-label">空房检索 / Vacancy Search</span></button>
+	                <button class="sidebar-nav-item" data-app-view="tasks"><span class="nav-icon">▦</span><span class="nav-label">监控任务 / Monitor Tasks</span></button>
 	                <button class="sidebar-nav-item" data-app-view="monitor"><span class="nav-icon">◉</span><span class="nav-label">空房监控 / Vacancy Monitor</span><span class="nav-live-dot" aria-hidden="true"></span></button>
 	                <button class="sidebar-nav-item" data-app-view="price"><span class="nav-icon">¥</span><span class="nav-label">价格日历 / Price Calendar</span></button>
 	                <button class="sidebar-nav-item" data-app-view="search-settings"><span class="nav-icon">≡</span><span class="nav-label">搜索设定 / Search Settings</span></button>
@@ -2832,6 +2833,70 @@ def home() -> Response:
                </div>
              </details>
 	           </details>
+	          </section>
+
+	          <section class="app-view" id="view-tasks" data-view="tasks" aria-label="Monitor Tasks" hidden>
+	            <div class="task-center-page">
+	              <header class="task-center-hero">
+	                <div>
+	                  <span class="task-center-eyebrow" id="task-center-eyebrow">0.7.0 工作区原型</span>
+	                  <h1 id="task-center-title">监控任务</h1>
+	                  <p id="task-center-subtitle">集中管理不同日期、酒店和检索节奏；当前阶段使用本地原型数据预览多任务操作。</p>
+	                </div>
+	                <button class="primary task-create-button" id="task-create-button" type="button"><span aria-hidden="true">＋</span><span id="task-create-label">新建任务</span></button>
+	              </header>
+
+	              <section class="task-center-summary" aria-label="Task overview">
+	                <div><span id="task-summary-total-label">任务总数</span><strong id="task-summary-total">0</strong></div>
+	                <div><span id="task-summary-active-label">当前任务</span><strong id="task-summary-active">—</strong></div>
+	                <div><span id="task-summary-running-label">运行中</span><strong id="task-summary-running">0</strong></div>
+	                <div><span id="task-summary-paused-label">已暂停</span><strong id="task-summary-paused">0</strong></div>
+	              </section>
+
+	              <div class="task-center-layout">
+	                <section class="task-list-panel" aria-labelledby="task-list-title">
+	                  <header>
+	                    <div><span id="task-list-kicker">任务队列</span><h2 id="task-list-title">全部监控任务</h2></div>
+	                    <span class="task-prototype-badge" id="task-prototype-badge">本地原型</span>
+	                  </header>
+	                  <div class="task-card-list" id="task-card-list" role="listbox" aria-label="Monitor tasks"></div>
+	                  <button class="task-future-card" id="task-future-card" type="button">
+	                    <span aria-hidden="true">＋</span>
+	                    <strong id="task-future-title">创建下一个监控任务</strong>
+	                    <small id="task-future-copy">未来可同时安排不同城市、日期和酒店范围。</small>
+	                  </button>
+	                </section>
+
+	                <section class="task-detail-panel" id="task-detail-panel" aria-live="polite">
+	                  <header class="task-detail-header">
+	                    <div>
+	                      <span class="task-detail-kicker" id="task-detail-kicker">当前选中</span>
+	                      <h2 id="task-detail-name">默认监控</h2>
+	                    </div>
+	                    <span class="task-state-chip ready" id="task-detail-state">待启动</span>
+	                  </header>
+	                  <p class="task-detail-note" id="task-detail-note">切换任务只更新此面板；请求令牌和修订号会阻止较旧的响应覆盖当前选择。</p>
+	                  <div class="task-detail-grid">
+	                    <div><span id="task-detail-dates-label">入住日期</span><strong id="task-detail-dates">—</strong></div>
+	                    <div><span id="task-detail-hotels-label">酒店范围</span><strong id="task-detail-hotels">0</strong></div>
+	                    <div><span id="task-detail-guests-label">入住人数</span><strong id="task-detail-guests">1 人 · 1 房</strong></div>
+	                    <div><span id="task-detail-cadence-label">检索间隔</span><strong id="task-detail-cadence">30 秒</strong></div>
+	                  </div>
+	                  <div class="task-detail-actions" aria-label="Task actions">
+	                    <button id="task-duplicate-button" type="button" data-task-action="duplicate"><span aria-hidden="true">⧉</span><span>复制</span></button>
+	                    <button id="task-rename-button" type="button" data-task-action="rename"><span aria-hidden="true">✎</span><span>重命名</span></button>
+	                    <button id="task-move-up-button" type="button" data-task-action="move-up"><span aria-hidden="true">↑</span><span>上移</span></button>
+	                    <button id="task-move-down-button" type="button" data-task-action="move-down"><span aria-hidden="true">↓</span><span>下移</span></button>
+	                    <button id="task-pause-button" type="button" data-task-action="pause"><span aria-hidden="true">Ⅱ</span><span>暂停</span></button>
+	                    <button class="danger" id="task-delete-button" type="button" data-task-action="delete"><span aria-hidden="true">×</span><span>删除</span></button>
+	                  </div>
+	                  <div class="task-prototype-message">
+	                    <span aria-hidden="true">i</span>
+	                    <p id="task-prototype-message">此原型不会修改真实监控配置。后续接入任务 API 后，卡片结构与操作位置将保持一致。</p>
+	                  </div>
+	                </section>
+	              </div>
+	            </div>
 	          </section>
 
 	          <section class="app-view" id="view-price" data-view="price" aria-label="Price Calendar" hidden>

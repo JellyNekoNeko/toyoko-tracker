@@ -2,6 +2,15 @@
 
 ## v0.7.0 - Development
 
+- Started Phase 1 multi-task monitoring with transactional task CRUD, copy,
+  reorder, revision conflicts, desired/runtime state, run history and
+  search-only `AppConfig` mapping.
+- Added the installation-wide Provider pacer foundation for shared
+  concurrency, per-Provider spacing, 429/503 cooldown and cancellable waits.
+- Added a multilingual, responsive monitor-task center prototype for creating,
+  copying, renaming, reordering, pausing and deleting local preview tasks.
+- Added the frozen Phase 1 state, pacing, coordinator and legacy-route
+  integration contract in `docs/PHASE1_ARCHITECTURE.md`.
 - Phase 0 established the versioned 0.7.0 workspace schema for monitor tasks,
   task runs, price alerts, notification policies and travel lists, including a
   secret-free import of the existing search configuration as the default task.

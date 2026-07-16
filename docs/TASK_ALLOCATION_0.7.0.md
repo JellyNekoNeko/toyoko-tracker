@@ -255,8 +255,24 @@ Phase 1 is the active phase. The first work wave is assigned as follows:
 | --- | --- | --- |
 | A | P1-01 task repository, followed by P1-02 mapping | Transactional CRUD and config round-trip tests pass |
 | B | P1-03 installation-wide Provider pacer | Three simulated tasks share concurrency and cooldown |
-| C | P1-08 task-center mock/prototype | Task switching and dirty-state behavior pass browser checks |
+| C | P1-08 task-center mock/prototype | Task switching, ordering and local mutations pass UI contract checks |
 | D | P1-10 test harness and P1-11 document skeleton | Virtual clock, provider fixtures and legacy contract suite ready |
 
 P1-04 begins only after P1-01/02/03 interfaces are reviewed together.
 
+The frozen Phase 1 integration contracts are documented in
+`docs/PHASE1_ARCHITECTURE.md`.
+
+### Wave 1 implementation status
+
+| Work package | Status | Evidence |
+| --- | --- | --- |
+| P1-01 | Implemented | CRUD, copy, delete cascade, reorder and revision-conflict tests |
+| P1-02 | Implemented | Search-only round trip, validation and secret-exclusion tests |
+| P1-03 | Implemented | Virtual-clock pacing, cooldown, cancellation and real-thread capacity tests |
+| P1-08 | Prototype implemented | Five-language responsive task-center UI and stale-selection guards |
+| P1-10 | In progress | Wave 1 contracts are covered; coordinator, API and recovery cases follow their implementations |
+| P1-11 | In progress | State, pacing, API direction and legacy projection are frozen |
+
+The next implementation wave starts with P1-04 and P1-05, then connects P1-06
+and the task-center prototype to persisted task records.
