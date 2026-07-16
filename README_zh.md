@@ -30,6 +30,8 @@
 - 🛏 房型筛选：Single / Double / Twin
 - 💳 会员价 / 非会员价显示
 - 📅 为每家已选酒店提供按需刷新的月度价格日历
+- 🎯 目标价、会员价、降价和空房变化提醒
+- 🌙 静默时段、消息聚合、每日摘要与紧急规则
 - 🔔 本地桌面通知
 - 🤖 Telegram Bot 推送
 - 📱 Bark 推送，适合 iPhone / iPad
@@ -40,6 +42,8 @@
 
 0.7.0 多任务工作区的详细操作见
 [`docs/PHASE1_MULTI_TASK_GUIDE.md`](docs/PHASE1_MULTI_TASK_GUIDE.md)。
+价格提醒与通知策略见
+[`docs/PHASE2_ALERTS_GUIDE.md`](docs/PHASE2_ALERTS_GUIDE.md)。
 
 ---
 

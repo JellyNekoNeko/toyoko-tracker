@@ -517,7 +517,13 @@ def _publish_and_notify(
     dedupe_window_seconds: int = 30,
     payload: Optional[Dict[str, Any]] = None,
 ) -> str:
-    event_payload = {"title": title, "body": body, "url": url or ""}
+    task_id = str(getattr(cfg, "task_id", "") or "")
+    event_payload = {
+        "title": title,
+        "body": body,
+        "url": url or "",
+        "task_id": task_id or None,
+    }
     if payload:
         event_payload.update(payload)
     event = publish_event(
@@ -528,6 +534,34 @@ def _publish_and_notify(
     )
     if enabled:
         notify_push_channels(cfg, title, body, url, event_id=event.event_id)
+    if task_id:
+        try:
+            from .alerting import record_legacy_event
+
+            outcomes: Dict[str, Dict[str, str]] = {}
+            for item in notification_status_snapshot(asdict(cfg)):
+                if not item.get("enabled") or not enabled:
+                    continue
+                state = str(item.get("state") or "queued")
+                outcomes[str(item["key"])] = {
+                    "state": (
+                        "sent"
+                        if state == "success"
+                        else "queued"
+                        if state in {"pushing", "waiting", "queued"}
+                        else "failed"
+                    ),
+                    "detail": str(item.get("message") or ""),
+                }
+            record_legacy_event(
+                source_event_id=event.event_id,
+                task_id=task_id,
+                event_type=event_type,
+                payload=event_payload,
+                outcomes=outcomes,
+            )
+        except Exception as exc:
+            _log(f"[alerts] legacy event mirror skipped: {exc}")
     return event.event_id
 
 

@@ -35,6 +35,9 @@ hiddenimports = [
 excludes = ["pytest", "ruff", "PyQt5", "PyQt6", "PySide2"]
 extra_binaries = []
 extra_datas = []
+if sys.platform == "win32":
+    hiddenimports.append("tzdata")
+    extra_datas.extend(collect_data_files("tzdata"))
 if windows_arm64:
     excludes.extend(["clr", "clr_loader", "pythonnet", "webview"])
     import PySide6

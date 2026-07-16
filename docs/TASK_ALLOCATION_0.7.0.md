@@ -251,15 +251,15 @@ Status: **Delivered**.
 
 ## Current assignment
 
-Phase 1 is complete. Phase 2 is the next active stage and begins with the alert
-repository and rule-evaluation contracts.
+Phase 1 and Phase 2 are complete. Phase 3 is the next active stage and begins
+with flexible-date generation and continuous-stay evaluation.
 
 | Lane | Next assignment | Completion signal |
 | --- | --- | --- |
-| A | P2-01 alert and policy repository | Versioned alert/policy CRUD and queue schema |
-| B | P2-02 rule evaluation engine | Deterministic target/drop/vacancy rule fixtures pass |
-| C | P2-07 rule UI contract draft | Rule editor fields align with the frozen API DTO |
-| D | P2-09 time/idempotency fixtures | Quiet-hour, restart and duplicate-event cases are ready |
+| A | P3-01 flexible-date request model | Date window and stay-length DTOs are frozen |
+| B | P3-02 stay combination engine | Deterministic, deduplicated combinations pass |
+| C | P3-06 comparison UI contract | Calendar and hotel comparison states are defined |
+| D | P3-09 continuity fixtures | Continuous-stay and room-change cases are ready |
 
 The frozen Phase 1 integration contracts are documented in
 `docs/PHASE1_ARCHITECTURE.md`.
@@ -294,3 +294,18 @@ The frozen Phase 1 integration contracts are documented in
 | P1-09 | Implemented | Progress, next run, results, errors, history and pacing dashboard |
 | P1-10 | Implemented | Service, API, legacy, notification and calendar-pacing regression |
 | P1-11 | Implemented | Architecture and multi-task user guide |
+
+### Phase 2 implementation status
+
+| Work package | Status | Evidence |
+| --- | --- | --- |
+| P2-01 | Implemented | Revisioned rule/policy CRUD, observations, events, batches and deliveries |
+| P2-02 | Implemented | Target, member-price, price-drop and vacancy-transition evaluation |
+| P2-03 | Implemented | Timezone-aware quiet windows, aggregation, daily digest and critical override |
+| P2-04 | Implemented | Persistent dispatcher, redacted outcomes and failed-channel-only retry |
+| P2-05 | Implemented | Legacy availability events mirror into unified history without a second send |
+| P2-06 | Implemented | Rule, preview, policy, history, retry and calendar-badge APIs |
+| P2-07 | Implemented | Task-scoped rule and notification-policy editor in Push Settings |
+| P2-08 | Implemented | Per-channel alert history and price-calendar badges |
+| P2-09 | Implemented | Baseline, cooldown, cross-midnight, digest, restart and partial-channel tests |
+| P2-10 | Implemented | `docs/PHASE2_ALERTS_GUIDE.md` and roadmap/readme updates |

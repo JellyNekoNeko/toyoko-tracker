@@ -19,12 +19,16 @@
 - 🛏 싱글·더블·트윈 객실 유형 필터
 - 💳 회원가와 비회원가 표시
 - 📅 선택한 각 호텔의 월간 가격 달력을 필요할 때 새로고침
+- 🎯 목표가·회원가·가격 인하·객실 상태 변화 알림
+- 🌙 방해 금지 시간, 메시지 묶음, 일일 요약, 긴급 규칙
 - 🔔 로컬 데스크톱 알림
 - 🤖 Telegram, 📱 Bark, 💬 Server Chan, 📧 SMTP 이메일 알림
 - 🚀 여러 호텔을 효율적으로 검색하는 스마트 병렬 스캔
 
 0.7.0 다중 작업 사용법은
 [`docs/PHASE1_MULTI_TASK_GUIDE.md`](docs/PHASE1_MULTI_TASK_GUIDE.md)를 참고하세요.
+가격 알림과 알림 정책은
+[`docs/PHASE2_ALERTS_GUIDE.md`](docs/PHASE2_ALERTS_GUIDE.md)를 참고하세요.
 
 ## 요구 사항
 

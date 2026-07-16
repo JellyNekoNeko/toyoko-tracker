@@ -60,6 +60,26 @@ from .hotel_catalog import (
 from .models import AppConfig, HotelResult
 from .providers import capability_matrix as _provider_capability_matrix, get_provider as _get_provider_plugin
 from .event_center import event_status_snapshot as _event_status_snapshot, list_events as _list_events
+from .alerting import (
+    AlertConflictError as _AlertConflictError,
+    AlertDispatcher as _AlertDispatcher,
+    AlertNotFoundError as _AlertNotFoundError,
+    AlertValidationError as _AlertValidationError,
+    alert_summary as _alert_summary,
+    calendar_badges as _alert_calendar_badges,
+    create_rule as _create_alert_rule,
+    delete_rule as _delete_alert_rule,
+    evaluate_results as _evaluate_alert_results,
+    get_policy as _get_alert_policy,
+    get_rule as _get_alert_rule,
+    initialize_alerting as _initialize_alerting,
+    list_history as _list_alert_history,
+    list_rules as _list_alert_rules,
+    preview_rule as _preview_alert_rule,
+    retry_batch as _retry_alert_batch,
+    update_policy as _update_alert_policy,
+    update_rule as _update_alert_rule,
+)
 from .analytics import (
     analytics_status_snapshot as _analytics_status_snapshot,
     record_results as _record_analytics_results,
@@ -102,6 +122,7 @@ from .notifications import (
     notification_status_snapshot,
     notification_checkpoint_snapshot,
     notify_local,
+    notify_push_channels,
     process_notifications,
     restore_notification_checkpoint,
     send_start_notifications,
@@ -255,6 +276,8 @@ _stop_event = threading.Event()
 _RUN_REQUESTED = False  # only set True by /start; set False by /stop
 _TASK_SERVICE_LOCK = threading.RLock()
 _TASK_SERVICE: Optional[_TaskSchedulerService] = None
+_ALERT_DISPATCHER_LOCK = threading.RLock()
+_ALERT_DISPATCHER: Optional[_AlertDispatcher] = None
 
 # ========= Utility Functions / Helper Functions =========
 def _safe_print(text: str) -> None:
@@ -378,6 +401,48 @@ def _task_scan_one(item: _TaskWorkItem) -> Dict[str, Any]:
     return asdict(result)
 
 
+def _process_legacy_notifications(
+    task_id: str,
+    cfg: AppConfig,
+    results: List[HotelResult],
+    start_date: str,
+    end_date: str,
+) -> List[str]:
+    vacancy_rules = [
+        rule
+        for rule in _list_alert_rules(task_id, enabled_only=True)
+        if rule["rule_type"] == "vacancy_transition"
+    ]
+    if not vacancy_rules:
+        return process_notifications(cfg, results, start_date, end_date)
+
+    covered: List[HotelResult] = []
+    uncovered: List[HotelResult] = []
+    for result in results:
+        code = str(result.code or "")
+        matches = any(
+            (not rule["hotel_code"] or rule["hotel_code"] == code)
+            and (not rule["date_start"] or start_date >= rule["date_start"])
+            and (not rule["date_end"] or start_date <= rule["date_end"])
+            for rule in vacancy_rules
+        )
+        (covered if matches else uncovered).append(result)
+
+    newly_available: List[str] = []
+    if uncovered:
+        newly_available.extend(
+            process_notifications(cfg, uncovered, start_date, end_date)
+        )
+    if covered:
+        suppressed = deepcopy(cfg)
+        suppressed.notify_available = False
+        suppressed.notify_unavailable = False
+        newly_available.extend(
+            process_notifications(suppressed, covered, start_date, end_date)
+        )
+    return newly_available
+
+
 def _task_round_complete(
     task_id: str,
     config: Dict[str, Any],
@@ -392,9 +457,25 @@ def _task_round_complete(
         if isinstance(result, dict)
     ]
     try:
-        process_notifications(cfg, results, cfg.start_date, cfg.end_date)
+        _process_legacy_notifications(
+            task_id, cfg, results, cfg.start_date, cfg.end_date
+        )
     except Exception as exc:
         _log(f"[task:{task_id}] notifications skipped: {exc}")
+    try:
+        created_alerts = _evaluate_alert_results(
+            task_id,
+            results,
+            cfg.start_date,
+            cfg.end_date,
+        )
+        if created_alerts:
+            _ensure_alert_dispatcher().wake()
+            _log(
+                f"[task:{task_id}] queued {len(created_alerts)} Phase 2 alert event(s)"
+            )
+    except Exception as exc:
+        _log(f"[task:{task_id}] price alert evaluation skipped: {exc}")
     try:
         _record_analytics_results(cfg, results)
     except Exception as exc:
@@ -447,6 +528,76 @@ def stop_task_scheduler() -> None:
         service = _TASK_SERVICE
     if service is not None:
         service.shutdown()
+
+
+def _alert_delivery_handler(
+    cfg: AppConfig,
+    title: str,
+    body: str,
+    url: str,
+    channels: Optional[List[str]] = None,
+) -> Dict[str, Dict[str, str]]:
+    if channels is not None:
+        cfg = deepcopy(cfg)
+        enabled = set(channels)
+        for channel, field in {
+            "telegram": "enable_telegram",
+            "email": "enable_email",
+            "local": "enable_local",
+            "bark": "enable_bark",
+            "serverchan": "enable_serverchan",
+        }.items():
+            setattr(cfg, field, channel in enabled and bool(getattr(cfg, field, False)))
+    notify_push_channels(cfg, title, body, url or None)
+    snapshot = notification_status_snapshot(asdict(cfg))
+    outcomes: Dict[str, Dict[str, str]] = {}
+    for item in snapshot:
+        if not item.get("enabled"):
+            continue
+        state = str(item.get("state") or "queued")
+        if state in {"success", "sent"}:
+            normalized = "sent"
+        elif state in {"pushing", "waiting", "queued"}:
+            normalized = "queued"
+        else:
+            normalized = "failed"
+        outcomes[str(item["key"])] = {
+            "state": normalized,
+            "detail": str(item.get("message") or ""),
+        }
+    return outcomes
+
+
+def _alert_config_provider(task_id: str) -> AppConfig:
+    return _task_config_with_globals(_workspace.get_task(task_id))
+
+
+def _ensure_alert_dispatcher(*, start_service: bool = True) -> _AlertDispatcher:
+    global _ALERT_DISPATCHER
+    with _ALERT_DISPATCHER_LOCK:
+        if _ALERT_DISPATCHER is None:
+            _ALERT_DISPATCHER = _AlertDispatcher(
+                _alert_config_provider,
+                _alert_delivery_handler,
+                log=_log,
+            )
+        dispatcher = _ALERT_DISPATCHER
+    if start_service:
+        dispatcher.start()
+    return dispatcher
+
+
+def start_alert_dispatcher() -> Dict[str, Any]:
+    _initialize_alerting()
+    dispatcher = _ensure_alert_dispatcher(start_service=True)
+    return {"running": dispatcher.running, **_alert_summary()}
+
+
+def stop_alert_dispatcher() -> None:
+    with _ALERT_DISPATCHER_LOCK:
+        dispatcher = _ALERT_DISPATCHER
+    if dispatcher is not None:
+        dispatcher.stop()
 
 
 def _task_service_snapshot(
@@ -2387,7 +2538,16 @@ def _worker_loop(run_once: bool = False):
 
         newly_available_codes: List[str] = []
         try:
-            newly_available_codes = process_notifications(cfg, results, start, end)
+            task_id = str(getattr(cfg, "task_id", "") or _resolve_task_id())
+            setattr(cfg, "task_id", task_id)
+            newly_available_codes = _process_legacy_notifications(
+                task_id, cfg, results, start, end
+            )
+            created_alerts = _evaluate_alert_results(
+                task_id, results, start, end
+            )
+            if created_alerts:
+                _ensure_alert_dispatcher().wake()
         except Exception as e:
             _log(f"[error] notify: {e}")
         try:
@@ -2523,7 +2683,15 @@ def _worker_loop(run_once: bool = False):
                     enhanced_results.append(failed_result)
             if enhanced_results:
                 try:
-                    process_notifications(cfg, enhanced_results, start, end)
+                    task_id = str(getattr(cfg, "task_id", "") or _resolve_task_id())
+                    _process_legacy_notifications(
+                        task_id, cfg, enhanced_results, start, end
+                    )
+                    created_alerts = _evaluate_alert_results(
+                        task_id, enhanced_results, start, end
+                    )
+                    if created_alerts:
+                        _ensure_alert_dispatcher().wake()
                 except Exception as e:
                     _log(f"[enhanced] notify failed: {e}")
                 try:
@@ -3354,8 +3522,60 @@ def home() -> Response:
 	          <section class="app-view" id="view-push-settings" data-view="push-settings" aria-label="Push Settings" hidden>
 	            <details class="box settings-panel" open>
               <summary>推送设定 Push Settings</summary>
-              <div class="settings-note">空房、重复提醒、无房变化和启动通知会发送到所有已启用渠道。</div>
+              <div class="settings-note">设置目标价、降价和会员价规则，并控制静默时段、消息聚合与每日摘要。</div>
               <div class="settings-grid">
+                <div class="settings-card alert-center-card">
+                  <div class="alert-center-heading">
+                    <div>
+                      <h3>价格提醒与通知策略 Price Alerts &amp; Policy</h3>
+                      <p>规则属于当前选中的监控任务；首个价格观测只建立降价基线。</p>
+                    </div>
+                    <div class="alert-center-stats" id="alert-center-stats">0 rules · 0 queued</div>
+                  </div>
+                  <div class="alert-rule-editor">
+                    <label>规则名称 Rule Name<input id="alert_rule_name" type="text" maxlength="120" placeholder="例如：东京目标价"></label>
+                    <label>规则类型 Rule Type<select id="alert_rule_type">
+                      <option value="target_price">目标价 Target price</option>
+                      <option value="member_price">会员价 Member price</option>
+                      <option value="price_drop">降价 Price drop</option>
+                      <option value="vacancy_transition">空房变化 Vacancy transition</option>
+                    </select></label>
+                    <label>酒店范围 Hotel<select id="alert_rule_hotel"><option value="">当前任务全部酒店 All task hotels</option></select></label>
+                    <label>目标价 / 降价金额 JPY<input id="alert_rule_value" type="number" min="0" step="100" placeholder="10000"></label>
+                    <label>降价百分比 Drop %<input id="alert_rule_percent" type="number" min="0" max="100" step="1" placeholder="10" disabled></label>
+                    <label>价格口径 Price Basis<select id="alert_rule_basis">
+                      <option value="best">最低可用价 Best</option>
+                      <option value="member">会员价 Member</option>
+                      <option value="non_member">非会员价 Non-member</option>
+                    </select></label>
+                    <label>空房变化 Vacancy Direction<select id="alert_rule_direction" disabled>
+                      <option value="available">出现空房 Available</option>
+                      <option value="unavailable">空房消失 Unavailable</option>
+                      <option value="any">任意变化 Any</option>
+                    </select></label>
+                    <label>开始日期 From<input id="alert_rule_date_start" type="date"></label>
+                    <label>结束日期 To<input id="alert_rule_date_end" type="date"></label>
+                    <label>规则冷却秒数 Cooldown<input id="alert_rule_cooldown" type="number" min="0" max="2592000" step="60" value="1800"></label>
+                    <label class="inline alert-critical"><input id="alert_rule_critical" type="checkbox"> 紧急规则 Critical</label>
+                    <button id="btn_alert_rule_add" type="button" class="primary">添加提醒 Add Alert</button>
+                    <button id="btn_alert_rule_cancel" type="button" hidden>取消编辑 Cancel</button>
+                  </div>
+                  <div class="alert-rule-list" id="alert-rule-list"><div class="alert-empty">尚未创建价格提醒 No price alerts yet</div></div>
+                  <div class="alert-policy-editor">
+                    <label>时区 Timezone<input id="alert_policy_timezone" type="text" value="Asia/Shanghai" placeholder="Asia/Shanghai"></label>
+                    <label>静默开始 Quiet Start<input id="alert_policy_quiet_start" type="time"></label>
+                    <label>静默结束 Quiet End<input id="alert_policy_quiet_end" type="time"></label>
+                    <label>消息聚合秒数 Aggregate<input id="alert_policy_aggregation" type="number" min="0" max="3600" step="30" value="120"></label>
+                    <label>摘要模式 Digest<select id="alert_policy_digest_mode"><option value="off">关闭 Off</option><option value="daily">每日摘要 Daily</option></select></label>
+                    <label>摘要时间 Digest Time<input id="alert_policy_digest_time" type="time" value="09:00"></label>
+                    <label class="inline"><input id="alert_policy_allow_critical" type="checkbox" checked> 紧急规则跳过静默/摘要 Critical override</label>
+                    <button id="btn_alert_policy_save" type="button">保存策略 Save Policy</button>
+                  </div>
+                  <details class="alert-history-panel">
+                    <summary>提醒历史与渠道结果 Alert History</summary>
+                    <div class="alert-history-list" id="alert-history-list"><div class="alert-empty">暂无提醒历史 No alert history</div></div>
+                  </details>
+                </div>
 	                <div class="settings-card">
 	                  <h3 class="info-title" tabindex="0" data-tip="控制发现空房后的重复提醒。重复提醒次数为首次提醒后的追加提醒次数；最右侧 INF 表示持续提醒。冷却时间用于避免同一酒店短时间反复推送，建议 300 秒以上。">提醒策略 Reminder Policy</h3>
 	                  <div class="section-label" id="notify_events_title">推送事件 Notification Events</div>
@@ -4896,6 +5116,167 @@ def task_runs(task_id: str) -> Response:
         return _task_api_error(exc, task_id=task_id)
 
 
+def _alert_api_error(exc: Exception) -> Tuple[Response, int]:
+    if isinstance(exc, _AlertNotFoundError):
+        status = 404
+    elif isinstance(exc, _AlertConflictError):
+        status = 409
+    elif isinstance(exc, (_AlertValidationError, ValueError, TypeError)):
+        status = 400
+    else:
+        status = 500
+        _log(f"[alerts] API error: {exc}")
+    return jsonify({"ok": False, "message": str(exc)}), status
+
+
+def alert_rules_collection() -> Response:
+    try:
+        if request.method == "GET":
+            task_id = _resolve_task_id(request.args.get("task_id"))
+            return jsonify({
+                "ok": True,
+                "task_id": task_id,
+                "rules": _list_alert_rules(task_id),
+                "policy": _get_alert_policy(task_id),
+                "summary": _alert_summary(task_id),
+            })
+        payload = request.get_json(force=True, silent=True) or {}
+        task_id = _resolve_task_id(payload.get("task_id"))
+        rule = _create_alert_rule(task_id, payload)
+        return jsonify({"ok": True, "task_id": task_id, "rule": rule}), 201
+    except Exception as exc:
+        return _alert_api_error(exc)
+
+
+def alert_rule_detail(rule_id: str) -> Response:
+    try:
+        if request.method == "GET":
+            return jsonify({"ok": True, "rule": _get_alert_rule(rule_id)})
+        if request.method == "DELETE":
+            payload = request.get_json(silent=True) or {}
+            rule = _delete_alert_rule(
+                rule_id,
+                expected_revision=payload.get(
+                    "expected_revision",
+                    request.args.get("expected_revision"),
+                ),
+            )
+            return jsonify({"ok": True, "rule": rule})
+        payload = request.get_json(force=True, silent=True) or {}
+        rule = _update_alert_rule(
+            rule_id,
+            payload,
+            expected_revision=payload.get("expected_revision"),
+        )
+        return jsonify({"ok": True, "rule": rule})
+    except Exception as exc:
+        return _alert_api_error(exc)
+
+
+def alert_policy_detail() -> Response:
+    try:
+        payload = (
+            request.get_json(force=True, silent=True) or {}
+            if request.method == "PATCH"
+            else {}
+        )
+        task_id = _resolve_task_id(
+            payload.get("task_id", request.args.get("task_id"))
+        )
+        if request.method == "GET":
+            return jsonify({
+                "ok": True,
+                "task_id": task_id,
+                "policy": _get_alert_policy(task_id),
+            })
+        policy = _update_alert_policy(
+            task_id,
+            payload,
+            expected_revision=payload.get("expected_revision"),
+        )
+        _ensure_alert_dispatcher().wake()
+        return jsonify({"ok": True, "task_id": task_id, "policy": policy})
+    except Exception as exc:
+        return _alert_api_error(exc)
+
+
+def alert_rule_preview() -> Response:
+    try:
+        payload = request.get_json(force=True, silent=True) or {}
+        task_id = _resolve_task_id(payload.get("task_id"))
+        task = _ensure_task_service().public_task(task_id, include_results=True)
+        config = task.get("config") or {}
+        rule_payload = payload.get("rule")
+        if not isinstance(rule_payload, dict):
+            raise _AlertValidationError("rule must be an object")
+        matches = _preview_alert_rule(
+            task_id,
+            rule_payload,
+            task.get("results") or [],
+            str(payload.get("stay_date") or config.get("start_date") or ""),
+            str(payload.get("checkout_date") or config.get("end_date") or ""),
+        )
+        return jsonify({
+            "ok": True,
+            "task_id": task_id,
+            "matches": matches,
+            "match_count": len(matches),
+        })
+    except Exception as exc:
+        return _alert_api_error(exc)
+
+
+def alert_history_status() -> Response:
+    try:
+        task_id = _resolve_task_id(request.args.get("task_id"))
+        try:
+            limit = max(1, min(500, int(request.args.get("limit", 100))))
+        except (TypeError, ValueError):
+            limit = 100
+        history = _list_alert_history(
+            task_id=task_id,
+            hotel_code=str(request.args.get("hotel_code") or ""),
+            event_type=str(request.args.get("event_type") or ""),
+            state=str(request.args.get("state") or ""),
+            limit=limit,
+        )
+        return jsonify({
+            "ok": True,
+            "task_id": task_id,
+            "history": history,
+            "summary": _alert_summary(task_id),
+        })
+    except Exception as exc:
+        return _alert_api_error(exc)
+
+
+def alert_batch_retry(batch_id: str) -> Response:
+    try:
+        batch = _retry_alert_batch(batch_id)
+        _ensure_alert_dispatcher().wake()
+        return jsonify({"ok": True, "batch": batch})
+    except Exception as exc:
+        return _alert_api_error(exc)
+
+
+def alert_calendar_badges_status() -> Response:
+    try:
+        task_id = _resolve_task_id(request.args.get("task_id"))
+        hotel_code = str(request.args.get("hotel_code") or "").strip()
+        month = str(request.args.get("month") or "").strip()
+        if not hotel_code:
+            raise _AlertValidationError("hotel_code is required")
+        return jsonify({
+            "ok": True,
+            "task_id": task_id,
+            "hotel_code": hotel_code,
+            "month": month,
+            "badges": _alert_calendar_badges(task_id, hotel_code, month),
+        })
+    except Exception as exc:
+        return _alert_api_error(exc)
+
+
 def start() -> Response:
     global _RUN_REQUESTED, _LAST_RESULTS, _RESULTS_REVISION
     payload = request.get_json(force=True, silent=True) or {}
@@ -5280,6 +5661,16 @@ def _runtime_status_snapshot() -> Dict[str, Any]:
         "results_revision": results_revision,
         "availability_logs_revision": availability_log_revision(),
     }
+    try:
+        payload["alerts"] = _alert_summary(requested_task_id)
+    except Exception:
+        payload["alerts"] = {
+            "rules": 0,
+            "enabled_rules": 0,
+            "events": 0,
+            "queued_events": 0,
+            "last_24h": 0,
+        }
     if task_snapshot is not None:
         payload["task"] = task_snapshot
         payload["next_run_at"] = task_snapshot.get("next_run_at")
@@ -5453,13 +5844,24 @@ def _price_calendar_response_payload(
     calendar_data = _price_calendar_data_snapshot(cfg, hotel_code, month)
     current_month = date.today().strftime("%Y-%m")
     selected = next((hotel for hotel in hotels if hotel["code"] == hotel_code), None)
+    task_id = str(getattr(cfg, "task_id", "") or "")
+    try:
+        badges = (
+            _alert_calendar_badges(task_id, hotel_code, month)
+            if task_id
+            else {}
+        )
+    except Exception:
+        badges = {}
     return {
         "ok": True,
+        "task_id": task_id or None,
         "hotel": selected,
         "hotels": hotels,
         "month": month,
         "days": calendar_data["days"],
         "summary": calendar_data["summary"],
+        "alert_badges": badges,
         "job": _price_calendar_job_snapshot(_price_calendar_job_key(cfg, hotel_code, month)),
         "limits": {"min_month": current_month, "max_month": _month_offset(current_month, 12)},
         "conditions": {
@@ -5579,6 +5981,16 @@ def _run_price_calendar_job(
                 _record_price_calendar_day(
                     cfg, hotel_code, provider, stay_date, checkout_date, result
                 )
+                task_id = str(getattr(cfg, "task_id", "") or "")
+                if task_id:
+                    created_alerts = _evaluate_alert_results(
+                        task_id,
+                        [result],
+                        stay_date,
+                        checkout_date,
+                    )
+                    if created_alerts:
+                        _ensure_alert_dispatcher().wake()
                 live_checks += 0 if result.from_cache and not result.cache_validated else 1
                 if result.available is None:
                     consecutive_errors += 1
@@ -5699,8 +6111,20 @@ def _start_price_calendar_job(
 
 def price_calendar_status() -> Response:
     payload = (request.get_json(silent=True) or {}) if request.method == "POST" else {}
-    with _CONFIG_LOCK:
-        cfg = _price_calendar_request_config(_CONFIG, payload)
+    requested_task_id = payload.get("task_id", request.args.get("task_id"))
+    if requested_task_id:
+        try:
+            task_id = _resolve_task_id(requested_task_id)
+            cfg = _price_calendar_request_config(
+                _task_config_with_globals(_workspace.get_task(task_id)),
+                payload,
+            )
+        except Exception:
+            with _CONFIG_LOCK:
+                cfg = _price_calendar_request_config(_CONFIG, payload)
+    else:
+        with _CONFIG_LOCK:
+            cfg = _price_calendar_request_config(_CONFIG, payload)
     try:
         hotel_code, month, hotels = _price_calendar_context(
             cfg,
@@ -5714,8 +6138,19 @@ def price_calendar_status() -> Response:
 
 def price_calendar_refresh() -> Response:
     payload = request.get_json(force=True, silent=True) or {}
-    with _CONFIG_LOCK:
-        cfg = _price_calendar_request_config(_CONFIG, payload)
+    if payload.get("task_id"):
+        try:
+            task_id = _resolve_task_id(payload.get("task_id"))
+            cfg = _price_calendar_request_config(
+                _task_config_with_globals(_workspace.get_task(task_id)),
+                payload,
+            )
+        except Exception:
+            with _CONFIG_LOCK:
+                cfg = _price_calendar_request_config(_CONFIG, payload)
+    else:
+        with _CONFIG_LOCK:
+            cfg = _price_calendar_request_config(_CONFIG, payload)
     try:
         hotel_code, month, hotels = _price_calendar_context(
             cfg,

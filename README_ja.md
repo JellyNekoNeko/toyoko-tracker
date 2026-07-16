@@ -19,12 +19,16 @@
 - 🛏 シングル・ダブル・ツインの部屋タイプ絞り込み
 - 💳 会員価格と一般価格の表示
 - 📅 選択した各ホテルの月間料金カレンダーを必要時に更新
+- 🎯 目標価格・会員価格・値下げ・空室変化の通知
+- 🌙 サイレント時間、通知集約、日次ダイジェスト、緊急ルール
 - 🔔 デスクトップ通知
 - 🤖 Telegram、📱 Bark、💬 Server Chan、📧 SMTP メール通知
 - 🚀 複数ホテルを効率的に検索するスマート並列処理
 
 0.7.0 のマルチタスク操作は
 [`docs/PHASE1_MULTI_TASK_GUIDE.md`](docs/PHASE1_MULTI_TASK_GUIDE.md)を参照してください。
+価格通知と通知ポリシーは
+[`docs/PHASE2_ALERTS_GUIDE.md`](docs/PHASE2_ALERTS_GUIDE.md)を参照してください。
 
 ## 必要環境
 

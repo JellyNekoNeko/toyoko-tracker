@@ -41,7 +41,8 @@ dependencies = [
   "Flask>=2.2",
   "requests>=2.31",
   "beautifulsoup4>=4.12",
-  "tqdm>=4.66"
+  "tqdm>=4.66",
+  "tzdata>=2025.2; sys_platform == 'win32'"
 ]
 
 # ---- Optional / extra dependencies (PEP 621 compliant) ----

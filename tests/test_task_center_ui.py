@@ -75,3 +75,34 @@ def test_task_center_has_all_supported_locales_and_mobile_layout():
         assert "navTasks:" in block
     assert ".task-center-layout{grid-template-columns:1fr;}" in APP_CSS
     assert ".task-detail-actions{grid-template-columns:1fr 1fr;}" in APP_CSS
+
+
+def test_phase_two_alert_editor_policy_history_and_calendar_badges_are_wired():
+    for element_id in (
+        "alert_rule_type",
+        "alert_rule_hotel",
+        "alert_rule_value",
+        "alert_rule_percent",
+        "alert_rule_cooldown",
+        "alert_rule_critical",
+        "btn_alert_rule_add",
+        "btn_alert_rule_cancel",
+        "alert_policy_timezone",
+        "alert_policy_quiet_start",
+        "alert_policy_quiet_end",
+        "alert_policy_aggregation",
+        "alert_policy_digest_mode",
+        "alert_policy_digest_time",
+        "btn_alert_policy_save",
+        "alert-history-list",
+    ):
+        assert f'id="{element_id}"' in RUNTIME
+    for path in (
+        "/api/v1/alerts/rules",
+        "/api/v1/alerts/policy",
+        "/api/v1/alerts/history",
+        "/api/v1/alerts/batches/",
+    ):
+        assert path in APP_JS
+    assert "payload.alert_badges" in APP_JS
+    assert "price-alert-badge" in APP_CSS

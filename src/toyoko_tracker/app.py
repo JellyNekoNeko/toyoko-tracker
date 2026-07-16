@@ -172,6 +172,41 @@ def task_runs(task_id: str) -> Response:
     return _runtime.task_runs(task_id)
 
 
+@app.route("/api/v1/alerts/rules", methods=["GET", "POST"])
+def alert_rules_collection() -> Response:
+    return _runtime.alert_rules_collection()
+
+
+@app.route("/api/v1/alerts/rules/preview", methods=["POST"])
+def alert_rule_preview() -> Response:
+    return _runtime.alert_rule_preview()
+
+
+@app.route("/api/v1/alerts/rules/<rule_id>", methods=["GET", "PATCH", "DELETE"])
+def alert_rule_detail(rule_id: str) -> Response:
+    return _runtime.alert_rule_detail(rule_id)
+
+
+@app.route("/api/v1/alerts/policy", methods=["GET", "PATCH"])
+def alert_policy_detail() -> Response:
+    return _runtime.alert_policy_detail()
+
+
+@app.route("/api/v1/alerts/history")
+def alert_history_status() -> Response:
+    return _runtime.alert_history_status()
+
+
+@app.route("/api/v1/alerts/batches/<batch_id>/retry", methods=["POST"])
+def alert_batch_retry(batch_id: str) -> Response:
+    return _runtime.alert_batch_retry(batch_id)
+
+
+@app.route("/api/v1/alerts/calendar-badges")
+def alert_calendar_badges_status() -> Response:
+    return _runtime.alert_calendar_badges_status()
+
+
 @app.route("/api/v1/cache")
 def cache_status() -> Response:
     return _runtime.cache_status()

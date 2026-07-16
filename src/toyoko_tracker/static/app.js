@@ -55,6 +55,13 @@
             let TASK_CENTER_INITIALIZED = false;
             let TASK_CENTER_POLL_TIMER = null;
             let TASK_CENTER_SUMMARY = {};
+            let ALERT_RULES = [];
+            let ALERT_POLICY = null;
+            let ALERT_HISTORY = [];
+            let ALERT_REQUEST_TOKEN = 0;
+            let ALERT_EDITING_RULE_ID = '';
+            let ALERT_EDITING_RULE_REVISION = null;
+            let ALERT_POLL_TIMER = null;
             const TASK_CENTER_SELECTION_KEY = 'toyoko-chan-selected-task-v1';
             let PREFERENCE_SAVE_TIMER = null;
             let PREFERENCE_SAVE_IN_FLIGHT = false;
@@ -127,7 +134,7 @@
                 noData: '暂无结果 / No data yet', start: '启动 / Start', stop: '停止 / Stop', defaults: '默认 / Default',
                 testNotification: '发送测试通知 / Test Notification',
                 searchSettingsNote: '引擎、检索节奏和智能并行集中在这里。智能并行仅用于 HTTP/API，并会错峰请求。',
-                pushSettingsNote: '空房、重复提醒、无房变化和启动通知会发送到所有已启用渠道。',
+                pushSettingsNote: '设置目标价、降价和会员价规则，并控制静默时段、消息聚合与每日摘要。',
                 searchEngine: '检索引擎 / Search Engine', engineHelp: 'HTTP/API 请求更少更快；失败时会尝试回退 Playwright。',
                 enableSmartParallel: '启用智能并行 / Enable', workers: '并行线数 / Workers', current: '当前 / Current',
                 smartParallelHelp: '仅 HTTP/API 生效；不同品牌并行，同品牌动态限速，重点与近期变化酒店优先',
@@ -192,7 +199,7 @@
                 noData: '暫無結果 / No data yet', start: '啟動 / Start', stop: '停止 / Stop', defaults: '預設 / Default',
                 testNotification: '傳送測試通知 / Test Notification',
                 searchSettingsNote: '引擎、搜尋節奏和智慧並行集中在這裡。智慧並行僅用於 HTTP/API，並會錯峰請求。',
-                pushSettingsNote: '空房、重複提醒、無房變化和啟動通知會傳送到所有已啟用通道。',
+                pushSettingsNote: '設定目標價、降價與會員價規則，並控制靜默時段、訊息彙整與每日摘要。',
                 searchEngine: '搜尋引擎 / Search Engine', engineHelp: 'HTTP/API 請求更少更快；失敗時會嘗試回退 Playwright。',
                 enableSmartParallel: '啟用智慧並行 / Enable', workers: '並行線數 / Workers', current: '目前 / Current',
                 smartParallelHelp: '僅 HTTP/API 生效；不同品牌並行，同品牌動態限速，重點與近期變化飯店優先',
@@ -257,7 +264,7 @@
                 noData: 'データなし / No data yet', start: '開始 / Start', stop: '停止 / Stop', defaults: '初期値 / Default',
                 testNotification: 'テスト通知 / Test Notification',
                 searchSettingsNote: 'エンジン、検索間隔、スマート並列をここで設定します。スマート並列は HTTP/API のみ有効です。',
-                pushSettingsNote: '空室、繰り返し通知、満室化、開始通知は有効なすべての通知先へ送信されます。',
+                pushSettingsNote: '目標価格・値下げ・会員価格ルールと、サイレント時間・集約・日次ダイジェストを設定します。',
                 searchEngine: '検索エンジン / Search Engine', engineHelp: 'HTTP/API は軽く高速です。失敗時は Playwright へフォールバックします。',
                 enableSmartParallel: 'スマート並列を有効化 / Enable', workers: '並列数 / Workers', current: '現在 / Current',
                 smartParallelHelp: 'HTTP/API のみ有効。ブランド別に動的制限し、重点・変化ホテルを優先します',
@@ -322,7 +329,7 @@
                 noData: '결과 없음 / No data yet', start: '시작 / Start', stop: '중지 / Stop', defaults: '기본값 / Default',
                 testNotification: '테스트 알림 / Test Notification',
                 searchSettingsNote: '엔진, 검색 주기, 스마트 병렬을 여기에서 설정합니다. 스마트 병렬은 HTTP/API에서만 작동합니다.',
-                pushSettingsNote: '빈 객실, 반복 알림, 매진 변화, 시작 알림은 활성화된 모든 채널로 전송됩니다.',
+                pushSettingsNote: '목표가·가격 인하·회원가 규칙과 방해 금지 시간, 메시지 묶음, 일일 요약을 설정합니다.',
                 searchEngine: '검색 엔진 / Search Engine', engineHelp: 'HTTP/API는 더 가볍고 빠릅니다. 실패하면 Playwright로 폴백합니다.',
                 enableSmartParallel: '스마트 병렬 활성화 / Enable', workers: '병렬 라인 수 / Workers', current: '현재 / Current',
                 smartParallelHelp: 'HTTP/API 전용. 브랜드별 동적 제한과 중점·최근 변경 호텔 우선 처리',
@@ -1000,7 +1007,7 @@
               areaSelected:'Region selected. Load the full region or choose a detail area, then check hotels and start searching.',
               historyHint:'Shows the 10 most recent searches. Identical settings are not duplicated.',
               searchSettingsNote:'Engine, scan cadence, and smart parallel settings are managed here. Smart Parallel applies to HTTP/API only and staggers requests.',
-              pushSettingsNote:'Availability, repeat, loss, and start notifications are sent through every enabled channel.',
+              pushSettingsNote:'Configure target, member-price, and price-drop rules with quiet hours, aggregation, and daily digests.',
               engineHelp:'HTTP/API uses fewer requests and is faster. It can fall back to Playwright when parsing fails.',
               smartParallelHelp:'HTTP/API only. Runs brands in parallel, adapts each rate, and prioritizes starred or recently changed hotels.',
               localHelp:'Local notifications use terminal-notifier/osascript on macOS, PowerShell on Windows, and notify-send on Linux.',
@@ -1500,6 +1507,12 @@
                 renderTaskCenter();
                 loadTaskRunHistory(task.id);
                 refreshStatus(true);
+                if (ACTIVE_APP_VIEW === 'push-settings') loadAlertCenter();
+                if (ACTIVE_APP_VIEW === 'price') {
+                  PRICE_CALENDAR_DATA = null;
+                  PRICE_CALENDAR_AUTO_KEY = '';
+                  preparePriceCalendar();
+                }
               } catch(error) {
                 showCommandFeedback(`${tx('taskApiError')}: ${error}`, 'error');
               }
@@ -1624,6 +1637,306 @@
               if (!TASK_CENTER_INITIALIZED) taskCenterSeed(LAST_CONFIG);
               loadTaskCenter();
             }
+            function alertActiveTask(){
+              return TASK_CENTER_TASKS.find(item => item.id === TASK_CENTER_ACTIVE_ID) || null;
+            }
+            function alertRuleTypeLabel(type){
+              return ({
+                target_price:'目标价 / Target',
+                member_price:'会员价 / Member',
+                price_drop:'降价 / Price drop',
+                vacancy_transition:'空房变化 / Vacancy'
+              })[type] || String(type || '');
+            }
+            function alertEventLabel(type){
+              return ({
+                'price.target_reached':'达到目标价 / Target reached',
+                'price.member_target_reached':'会员价达标 / Member target',
+                'price.drop':'价格下降 / Price drop',
+                'availability.available':'出现空房 / Available',
+                'availability.unavailable':'空房消失 / Unavailable'
+              })[type] || String(type || '').replaceAll('.', ' ');
+            }
+            function renderAlertHotelOptions(){
+              const select = document.getElementById('alert_rule_hotel');
+              if (!select) return;
+              const task = alertActiveTask();
+              const config = task?.config || LAST_CONFIG || {};
+              const selected = select.value;
+              const meta = new Map((config.selected_hotels || []).map(item => [String(item.code || ''), item]));
+              const codes = Array.from(new Set((config.hotel_codes || []).map(String).filter(Boolean)));
+              select.innerHTML = `<option value="">当前任务全部酒店 / All task hotels</option>` + codes.map(code => {
+                const item = meta.get(code) || {};
+                const name = item.name_primary || item.name || item.name_en || code;
+                return `<option value="${priceSafe(code)}">${priceSafe(code)} · ${priceSafe(name)}</option>`;
+              }).join('');
+              if (codes.includes(selected)) select.value = selected;
+              const start = document.getElementById('alert_rule_date_start');
+              const end = document.getElementById('alert_rule_date_end');
+              if (start && !start.value) start.value = config.start_date || '';
+              if (end && !end.value) end.value = config.end_date || '';
+            }
+            function renderAlertRules(){
+              const list = document.getElementById('alert-rule-list');
+              if (!list) return;
+              if (!ALERT_RULES.length) {
+                list.innerHTML = '<div class="alert-empty">尚未创建价格提醒 / No price alerts yet</div>';
+                return;
+              }
+              list.innerHTML = ALERT_RULES.map(rule => {
+                const scope = rule.hotel_code || '全部酒店 / All hotels';
+                const threshold = rule.rule_type === 'vacancy_transition'
+                  ? (rule.config?.direction || 'available')
+                  : [
+                      rule.threshold_value != null ? `¥${Number(rule.threshold_value).toLocaleString()}` : '',
+                      rule.threshold_percent != null ? `${Number(rule.threshold_percent)}%` : ''
+                    ].filter(Boolean).join(' · ');
+                const dates = rule.date_start || rule.date_end ? `${rule.date_start || '…'} → ${rule.date_end || '…'}` : '全部日期 / All dates';
+                return `<div class="alert-rule-row" data-alert-rule-id="${priceSafe(rule.rule_id)}">
+                  <div><strong>${priceSafe(rule.name)}</strong><small>${priceSafe(scope)} · ${priceSafe(dates)} · ${priceSafe(threshold)}</small></div>
+                  <span class="alert-rule-chip">${priceSafe(alertRuleTypeLabel(rule.rule_type))}</span>
+                  ${rule.critical ? '<span class="alert-rule-chip critical">Critical</span>' : '<span></span>'}
+                  <div class="alert-rule-actions">
+                    <button type="button" data-alert-action="edit">编辑 / Edit</button>
+                    <button type="button" data-alert-action="toggle">${rule.enabled ? '暂停 / Pause' : '启用 / Enable'}</button>
+                    <button type="button" data-alert-action="delete" class="danger">删除 / Delete</button>
+                  </div>
+                </div>`;
+              }).join('');
+              list.querySelectorAll('[data-alert-action]').forEach(button => {
+                button.addEventListener('click', () => {
+                  const row = button.closest('[data-alert-rule-id]');
+                  alertRuleAction(row?.dataset.alertRuleId || '', button.dataset.alertAction || '');
+                });
+              });
+            }
+            function renderAlertPolicy(policy){
+              ALERT_POLICY = policy || null;
+              const set = (id, value) => {
+                const element = document.getElementById(id);
+                if (element) element.value = value == null ? '' : value;
+              };
+              set('alert_policy_timezone', policy?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
+              set('alert_policy_quiet_start', policy?.quiet_start || '');
+              set('alert_policy_quiet_end', policy?.quiet_end || '');
+              set('alert_policy_aggregation', policy?.aggregation_window_seconds ?? 120);
+              set('alert_policy_digest_mode', policy?.digest_mode || 'off');
+              set('alert_policy_digest_time', policy?.digest_time || '09:00');
+              const critical = document.getElementById('alert_policy_allow_critical');
+              if (critical) critical.checked = policy?.allow_critical !== false;
+            }
+            function renderAlertHistory(){
+              const list = document.getElementById('alert-history-list');
+              if (!list) return;
+              if (!ALERT_HISTORY.length) {
+                list.innerHTML = '<div class="alert-empty">暂无提醒历史 / No alert history</div>';
+                return;
+              }
+              list.innerHTML = ALERT_HISTORY.slice(0, 50).map(item => {
+                const payload = item.payload || {};
+                const hotel = payload.hotel_name || item.hotel_code || 'Hotel';
+                const price = payload.member_price ?? payload.price;
+                const when = item.created_at ? new Date(Number(item.created_at) * 1000).toLocaleString() : '';
+                const channels = (item.deliveries || []).map(delivery =>
+                  `<i>${priceSafe(delivery.channel)} · ${priceSafe(delivery.state)}</i>`
+                ).join('') || `<i>${priceSafe(item.state || 'queued')}</i>`;
+                const retry = ['failed','partial'].includes(item.state)
+                  ? `<button type="button" data-alert-retry="${priceSafe(item.batch_id || '')}">重试失败渠道 / Retry</button>`
+                  : '';
+                return `<div class="alert-history-row">
+                  <header><strong>${priceSafe(alertEventLabel(item.event_type))} · ${priceSafe(hotel)}</strong><span>${priceSafe(when)}</span></header>
+                  <small>${priceSafe(item.stay_date || '')}${price != null ? ` · ¥${Number(price).toLocaleString()}` : ''} · ${priceSafe(item.batch_mode || '')}</small>
+                  <div class="alert-history-channels">${channels}${retry}</div>
+                </div>`;
+              }).join('');
+              list.querySelectorAll('[data-alert-retry]').forEach(button => {
+                button.addEventListener('click', () => retryAlertBatch(button.dataset.alertRetry || ''));
+              });
+            }
+            async function loadAlertCenter(){
+              if (!TASK_CENTER_ACTIVE_ID) return;
+              const token = ++ALERT_REQUEST_TOKEN;
+              renderAlertHotelOptions();
+              try {
+                const [rulesResponse, historyResponse] = await Promise.all([
+                  fetch(`/api/v1/alerts/rules?task_id=${encodeURIComponent(TASK_CENTER_ACTIVE_ID)}`),
+                  fetch(`/api/v1/alerts/history?task_id=${encodeURIComponent(TASK_CENTER_ACTIVE_ID)}&limit=50`)
+                ]);
+                const rulesPayload = await rulesResponse.json();
+                const historyPayload = await historyResponse.json();
+                if (token !== ALERT_REQUEST_TOKEN) return;
+                if (!rulesResponse.ok || !rulesPayload.ok) throw new Error(rulesPayload.message || `HTTP ${rulesResponse.status}`);
+                ALERT_RULES = rulesPayload.rules || [];
+                ALERT_HISTORY = historyPayload.history || [];
+                if (
+                  ALERT_EDITING_RULE_ID
+                  && !ALERT_RULES.some(item => item.rule_id === ALERT_EDITING_RULE_ID)
+                ) resetAlertRuleEditor();
+                renderAlertRules();
+                if (!document.activeElement?.closest?.('.alert-policy-editor')) {
+                  renderAlertPolicy(rulesPayload.policy || {});
+                }
+                renderAlertHistory();
+                const summary = historyPayload.summary || rulesPayload.summary || {};
+                setNodeText('#alert-center-stats', `${summary.enabled_rules || 0} rules · ${summary.queued_events || 0} queued · ${summary.last_24h || 0} / 24h`);
+              } catch(error) {
+                if (token !== ALERT_REQUEST_TOKEN) return;
+                setNodeText('#alert-center-stats', `Alert API · ${String(error)}`);
+              } finally {
+                if (ALERT_POLL_TIMER) clearTimeout(ALERT_POLL_TIMER);
+                if (ACTIVE_APP_VIEW === 'push-settings') {
+                  ALERT_POLL_TIMER = setTimeout(loadAlertCenter, 5000);
+                }
+              }
+            }
+            async function addAlertRule(){
+              const type = document.getElementById('alert_rule_type')?.value || 'target_price';
+              const valueText = document.getElementById('alert_rule_value')?.value || '';
+              const percentText = document.getElementById('alert_rule_percent')?.value || '';
+              const payload = {
+                task_id:TASK_CENTER_ACTIVE_ID,
+                name:(document.getElementById('alert_rule_name')?.value || '').trim() || alertRuleTypeLabel(type),
+                rule_type:type,
+                hotel_code:document.getElementById('alert_rule_hotel')?.value || '',
+                threshold_value:valueText === '' ? null : Number(valueText),
+                threshold_percent:percentText === '' ? null : Number(percentText),
+                date_start:document.getElementById('alert_rule_date_start')?.value || '',
+                date_end:document.getElementById('alert_rule_date_end')?.value || '',
+                cooldown_seconds:Number(document.getElementById('alert_rule_cooldown')?.value || 0),
+                critical:Boolean(document.getElementById('alert_rule_critical')?.checked),
+                config:{
+                  price_basis:document.getElementById('alert_rule_basis')?.value || 'best',
+                  direction:document.getElementById('alert_rule_direction')?.value || 'available'
+                }
+              };
+              try {
+                const editing = ALERT_RULES.find(item => item.rule_id === ALERT_EDITING_RULE_ID);
+                if (editing) payload.expected_revision = ALERT_EDITING_RULE_REVISION;
+                const response = await fetch(editing
+                  ? `/api/v1/alerts/rules/${encodeURIComponent(editing.rule_id)}`
+                  : '/api/v1/alerts/rules', {
+                  method:editing ? 'PATCH' : 'POST',
+                  headers:{'Content-Type':'application/json'},
+                  body:JSON.stringify(payload)
+                });
+                const data = await response.json();
+                if (!response.ok || !data.ok) throw new Error(data.message || `HTTP ${response.status}`);
+                resetAlertRuleEditor();
+                showCommandFeedback(
+                  editing ? '价格提醒已更新 / Price alert updated' : '价格提醒已添加 / Price alert added',
+                  'success'
+                );
+                await loadAlertCenter();
+              } catch(error) {
+                showCommandFeedback(`价格提醒保存失败 / Alert save failed: ${error}`, 'error');
+              }
+            }
+            async function alertRuleAction(ruleId, action){
+              const rule = ALERT_RULES.find(item => item.rule_id === ruleId);
+              if (!rule) return;
+              if (action === 'edit') {
+                ALERT_EDITING_RULE_ID = rule.rule_id;
+                ALERT_EDITING_RULE_REVISION = rule.revision;
+                const set = (id, value) => {
+                  const element = document.getElementById(id);
+                  if (element) element.value = value == null ? '' : value;
+                };
+                set('alert_rule_name', rule.name);
+                set('alert_rule_type', rule.rule_type);
+                set('alert_rule_hotel', rule.hotel_code);
+                set('alert_rule_value', rule.threshold_value);
+                set('alert_rule_percent', rule.threshold_percent);
+                set('alert_rule_basis', rule.config?.price_basis || 'best');
+                set('alert_rule_direction', rule.config?.direction || 'available');
+                set('alert_rule_date_start', rule.date_start);
+                set('alert_rule_date_end', rule.date_end);
+                set('alert_rule_cooldown', rule.cooldown_seconds);
+                const critical = document.getElementById('alert_rule_critical');
+                if (critical) critical.checked = Boolean(rule.critical);
+                const type = document.getElementById('alert_rule_type');
+                type?.dispatchEvent(new Event('change', {bubbles:true}));
+                setNodeText('#btn_alert_rule_add', '保存修改 / Save Changes');
+                const cancel = document.getElementById('btn_alert_rule_cancel');
+                if (cancel) cancel.hidden = false;
+                document.getElementById('alert_rule_name')?.focus();
+                return;
+              }
+              try {
+                const response = await fetch(`/api/v1/alerts/rules/${encodeURIComponent(ruleId)}`, {
+                  method:action === 'delete' ? 'DELETE' : 'PATCH',
+                  headers:{'Content-Type':'application/json'},
+                  body:JSON.stringify(action === 'delete'
+                    ? {expected_revision:rule.revision}
+                    : {enabled:!rule.enabled, expected_revision:rule.revision})
+                });
+                const payload = await response.json();
+                if (!response.ok || !payload.ok) throw new Error(payload.message || `HTTP ${response.status}`);
+                await loadAlertCenter();
+              } catch(error) {
+                showCommandFeedback(`提醒规则操作失败 / Alert operation failed: ${error}`, 'error');
+              }
+            }
+            function resetAlertRuleEditor(){
+              ALERT_EDITING_RULE_ID = '';
+              ALERT_EDITING_RULE_REVISION = null;
+              const set = (id, value) => {
+                const element = document.getElementById(id);
+                if (element) element.value = value;
+              };
+              set('alert_rule_name', '');
+              set('alert_rule_type', 'target_price');
+              set('alert_rule_hotel', '');
+              set('alert_rule_value', '');
+              set('alert_rule_percent', '');
+              set('alert_rule_basis', 'best');
+              set('alert_rule_direction', 'available');
+              set('alert_rule_cooldown', '1800');
+              const critical = document.getElementById('alert_rule_critical');
+              if (critical) critical.checked = false;
+              const task = alertActiveTask();
+              set('alert_rule_date_start', task?.config?.start_date || LAST_CONFIG?.start_date || '');
+              set('alert_rule_date_end', task?.config?.end_date || LAST_CONFIG?.end_date || '');
+              document.getElementById('alert_rule_type')?.dispatchEvent(new Event('change', {bubbles:true}));
+              setNodeText('#btn_alert_rule_add', '添加提醒 / Add Alert');
+              const cancel = document.getElementById('btn_alert_rule_cancel');
+              if (cancel) cancel.hidden = true;
+            }
+            async function saveAlertPolicy(){
+              const payload = {
+                task_id:TASK_CENTER_ACTIVE_ID,
+                timezone:document.getElementById('alert_policy_timezone')?.value || 'UTC',
+                quiet_start:document.getElementById('alert_policy_quiet_start')?.value || '',
+                quiet_end:document.getElementById('alert_policy_quiet_end')?.value || '',
+                aggregation_window_seconds:Number(document.getElementById('alert_policy_aggregation')?.value || 0),
+                digest_mode:document.getElementById('alert_policy_digest_mode')?.value || 'off',
+                digest_time:document.getElementById('alert_policy_digest_time')?.value || '09:00',
+                allow_critical:Boolean(document.getElementById('alert_policy_allow_critical')?.checked),
+                expected_revision:ALERT_POLICY?.revision ?? 0
+              };
+              try {
+                const response = await fetch('/api/v1/alerts/policy', {
+                  method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)
+                });
+                const data = await response.json();
+                if (!response.ok || !data.ok) throw new Error(data.message || `HTTP ${response.status}`);
+                renderAlertPolicy(data.policy);
+                showCommandFeedback('通知策略已保存 / Notification policy saved', 'success');
+              } catch(error) {
+                showCommandFeedback(`通知策略保存失败 / Policy save failed: ${error}`, 'error');
+              }
+            }
+            async function retryAlertBatch(batchId){
+              if (!batchId) return;
+              try {
+                const response = await fetch(`/api/v1/alerts/batches/${encodeURIComponent(batchId)}/retry`, {method:'POST'});
+                const payload = await response.json();
+                if (!response.ok || !payload.ok) throw new Error(payload.message || `HTTP ${response.status}`);
+                showCommandFeedback('失败渠道已重新排队 / Failed channels requeued', 'success');
+                await loadAlertCenter();
+              } catch(error) {
+                showCommandFeedback(`提醒重试失败 / Retry failed: ${error}`, 'error');
+              }
+            }
             function switchAppView(view, options={}){
               const next = APP_VIEWS.includes(view) ? view : 'home';
               ACTIVE_APP_VIEW = next;
@@ -1661,6 +1974,11 @@
               } else if (PRICE_CALENDAR_POLL_TIMER) {
                 clearTimeout(PRICE_CALENDAR_POLL_TIMER);
                 PRICE_CALENDAR_POLL_TIMER = null;
+              }
+              if (next === 'push-settings') loadAlertCenter();
+              else if (ALERT_POLL_TIMER) {
+                clearTimeout(ALERT_POLL_TIMER);
+                ALERT_POLL_TIMER = null;
               }
               setTimeout(() => {
                 try { AREA_SELECTED_MAP?.invalidateSize(); } catch(e) {}
@@ -1880,6 +2198,20 @@
               });
               document.getElementById('price-calendar-refresh')?.addEventListener('click', () => startPriceCalendarRefresh(true));
               document.getElementById('price-empty-action')?.addEventListener('click', () => switchAppView('search'));
+              document.getElementById('btn_alert_rule_add')?.addEventListener('click', addAlertRule);
+              document.getElementById('btn_alert_rule_cancel')?.addEventListener('click', resetAlertRuleEditor);
+              document.getElementById('btn_alert_policy_save')?.addEventListener('click', saveAlertPolicy);
+              document.getElementById('alert_rule_type')?.addEventListener('change', event => {
+                const type = String(event.target?.value || '');
+                const value = document.getElementById('alert_rule_value');
+                const percent = document.getElementById('alert_rule_percent');
+                const direction = document.getElementById('alert_rule_direction');
+                const basis = document.getElementById('alert_rule_basis');
+                if (value) value.disabled = type === 'vacancy_transition';
+                if (percent) percent.disabled = type !== 'price_drop';
+                if (direction) direction.disabled = type !== 'vacancy_transition';
+                if (basis) basis.disabled = type === 'vacancy_transition';
+              });
               document.querySelectorAll('[data-home-quick]').forEach(button => {
                 button.addEventListener('click', () => openHomeQuickAction(button.dataset.homeQuick || 'area'));
               });
@@ -1990,6 +2322,7 @@
                 ? selectedAreaCodes()
                 : (Array.isArray(LAST_CONFIG?.hotel_codes) ? LAST_CONFIG.hotel_codes : []);
               return {
+                task_id:TASK_CENTER_ACTIVE_ID,
                 people:Number(document.getElementById('people')?.value || LAST_CONFIG?.people || 1),
                 rooms:Number(document.getElementById('rooms')?.value || LAST_CONFIG?.rooms || 1),
                 smoking:document.getElementById('smoking')?.value || LAST_CONFIG?.smoking || 'noSmoking',
@@ -2137,12 +2470,14 @@
               const count = new Date(year, monthNumber, 0).getDate();
               const trailing = (7 - ((firstWeekday + count) % 7)) % 7;
               const dataByDate = new Map((payload.days || []).map(day => [day.date, day]));
+              const badgesByDate = payload.alert_badges || {};
               const running = Boolean(payload.job?.running && payload.job?.state !== 'busy');
               const cells = [];
               for (let index = 0; index < firstWeekday; index += 1) cells.push('<div class="price-day-cell outside" aria-hidden="true"></div>');
               for (let dayNumber = 1; dayNumber <= count; dayNumber += 1) {
                 const dateText = `${month}-${String(dayNumber).padStart(2, '0')}`;
                 const data = dataByDate.get(dateText);
+                const alertBadge = badgesByDate[dateText] || null;
                 const isPast = dateText < todayStr();
                 const isToday = dateText === todayStr();
                 const dateValue = priceDate(dateText);
@@ -2164,7 +2499,8 @@
                 } else if (data?.available === false) primaryPrice = tx('priceSoldOut');
                 else if (data) primaryPrice = tx('priceNoQuote');
                 const classes = ['price-day-cell', state, isPast ? 'past' : '', isToday ? 'today' : '', data?.stale ? 'stale' : '', loading ? 'price-day-loading' : ''].filter(Boolean).join(' ');
-                const content = `<span class="price-day-top"><span><b class="price-day-number">${dayNumber}</b><small class="price-day-week">${priceSafe(weekday)}</small></span><span class="price-day-status"><i></i>${priceSafe(statusLabel)}</span></span><strong class="price-day-price">${priceSafe(primaryPrice)}</strong><small class="price-day-member">${priceSafe(memberLine || ' ')}</small><small class="price-day-room ${data?.error_summary ? 'price-day-error' : ''}" title="${priceSafe(data?.error_summary || data?.room_type || '')}">${priceSafe(data?.room_type || data?.error_summary || '')}</small>`;
+                const badge = alertBadge ? `<span class="price-alert-badge ${alertBadge.critical_count ? 'critical' : ''}" title="Alerts">${Number(alertBadge.count || 0)}</span>` : '';
+                const content = `<span class="price-day-top"><span><b class="price-day-number">${dayNumber}</b><small class="price-day-week">${priceSafe(weekday)}</small></span><span class="price-day-status">${badge}<i></i>${priceSafe(statusLabel)}</span></span><strong class="price-day-price">${priceSafe(primaryPrice)}</strong><small class="price-day-member">${priceSafe(memberLine || ' ')}</small><small class="price-day-room ${data?.error_summary ? 'price-day-error' : ''}" title="${priceSafe(data?.error_summary || data?.room_type || '')}">${priceSafe(data?.room_type || data?.error_summary || '')}</small>`;
                 if (data?.url && data?.min_price != null) {
                   cells.push(`<a class="${classes}" role="gridcell" href="${priceSafe(data.url)}" target="_blank" rel="noreferrer noopener" aria-label="${priceSafe(fmt('priceOpenBooking', {date:dateText}))}">${content}</a>`);
                 } else {

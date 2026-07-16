@@ -33,7 +33,7 @@ Acceptance gate:
 
 Status: **Delivered**. The task repository, fair scheduler, single lifecycle
 service, task-native API, selected-task compatibility projection and live
-WebUI task center are implemented. Phase 2 is the next development stage.
+WebUI task center are implemented.
 
 Deliverables:
 
@@ -53,6 +53,11 @@ Acceptance gate:
 - Global provider cooldown and concurrency limits apply across every task.
 
 ## Phase 2 — price alerts and notification policy
+
+Status: **Delivered**. Task-scoped price rules, durable observations and
+notification batches, quiet-hour scheduling, aggregation, daily digests,
+critical override, per-channel history, retry behavior and price-calendar
+badges are implemented. Phase 3 is the next development stage.
 
 Deliverables:
 

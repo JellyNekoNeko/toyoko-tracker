@@ -2,6 +2,16 @@
 
 ## v0.7.0 - Development
 
+- Completed Phase 2 price alerts with task-scoped target-price, member-price,
+  price-drop and vacancy-transition rules, date/hotel scopes, revisions and
+  persistent observation baselines.
+- Added timezone-aware quiet hours, aggregation windows, daily digests,
+  critical-rule override, Windows IANA timezone data and restart-safe
+  notification batches.
+- Added rule-to-event-to-batch-to-channel history, redacted delivery failures,
+  failed-channel-only retry and legacy availability-event mirroring.
+- Added the price-alert and notification-policy editor, alert history, alert
+  APIs and date-aware badges in the price calendar.
 - Completed Phase 1 multi-task monitoring with one process-wide scheduler,
   task-native CRUD/control/results/run APIs and selected-task compatibility for
   the original Start, Stop, Status and results routes.
