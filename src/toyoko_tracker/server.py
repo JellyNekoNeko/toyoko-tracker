@@ -16,6 +16,7 @@ from flask import Flask
 from . import runtime
 from .mobile_access import manager
 from .settings import AUTO_SAVE_PATH, INSTANCE_STATE_PATH, LEGACY_AUTO_SAVE_PATH, __version__
+from .workspace import ensure_default_task, initialize_workspace
 
 
 _RESTART_LOCK = threading.Lock()
@@ -68,6 +69,12 @@ def initialize_runtime(lan_enabled: Optional[bool] = None) -> bool:
         runtime._restore_runtime_checkpoint()
     except Exception as exc:
         runtime._log(f"[boot] checkpoint restore skipped: {exc}")
+    try:
+        initialize_workspace()
+        with runtime._CONFIG_LOCK:
+            ensure_default_task(runtime._CONFIG)
+    except Exception as exc:
+        runtime._log(f"[boot] workspace initialization skipped: {exc}")
     runtime._check_latest_async()
     runtime._start_catalog_scheduler()
     runtime._start_provider_database_scheduler()
