@@ -21,6 +21,16 @@ The repository owns durable task definitions and run history:
 The repository does not own notification credentials, live worker objects,
 threading events or Provider HTTP clients.
 
+Task definitions and runtime observations use separate counters:
+
+- `revision` changes only when the user-facing task definition or desired state
+  changes;
+- `runtime_revision` changes for progress state, next-run time, result summary
+  and runtime errors.
+
+This prevents a background scan from invalidating an editor that is saving a
+definition revision observed before the scan progressed.
+
 ### Runtime coordinator
 
 One coordinator exists per application process. It owns:
@@ -103,6 +113,26 @@ value.
 
 Startup marks orphaned `queued` or `running` records as `interrupted` before
 new work is scheduled.
+
+## Wave 2 implementation boundary
+
+The Phase 1 scheduling core is split into three layers:
+
+- `TaskCoordinator` owns monotonic readiness, rotation, bounded turns and
+  cadence calculation;
+- `TaskRuntimeRegistry` owns one isolated context per durable task and performs
+  orphaned-run recovery;
+- `TaskSchedulerKernel` joins storage, contexts, the coordinator and the shared
+  Provider pacer through an injected single-hotel scan callback.
+
+Durable `next_run_at` values are wall-clock timestamps. The kernel converts
+them to monotonic deadlines while scheduling and converts the next deadline
+back before persistence.
+
+The kernel remains behind the task-native API and legacy adapter boundary in
+this wave. Process bootstrap continues using the historical single-task worker
+until P1-06/P1-07 connect one production scan callback; this avoids running the
+default task twice during the transition.
 
 ## Fair scheduling contract
 

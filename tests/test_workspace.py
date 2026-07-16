@@ -59,6 +59,50 @@ def test_workspace_schema_is_initialized_idempotently():
         }.issubset(tables)
 
 
+def test_workspace_v1_adds_runtime_revision_without_rewriting_tasks():
+    cfg = _config()
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        database = str(Path(tmp_dir) / "workspace.sqlite3")
+        with sqlite3.connect(database) as connection:
+            connection.execute(
+                """
+                CREATE TABLE monitor_tasks (
+                    task_id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    desired_state TEXT NOT NULL DEFAULT 'paused',
+                    runtime_state TEXT NOT NULL DEFAULT 'idle',
+                    config_json TEXT NOT NULL,
+                    sort_order INTEGER NOT NULL DEFAULT 0,
+                    revision INTEGER NOT NULL DEFAULT 1,
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL,
+                    last_started_at REAL,
+                    last_stopped_at REAL,
+                    next_run_at REAL,
+                    last_error TEXT NOT NULL DEFAULT '',
+                    result_summary_json TEXT NOT NULL DEFAULT '{}'
+                )
+                """
+            )
+            connection.execute(
+                """
+                INSERT INTO monitor_tasks(
+                    task_id, name, desired_state, runtime_state, config_json,
+                    sort_order, revision, created_at, updated_at
+                ) VALUES ('legacy', 'Legacy', 'paused', 'idle', ?, 0, 7, 1, 1)
+                """,
+                (json.dumps(workspace.task_config_snapshot(cfg)),),
+            )
+        with patch.object(workspace, "HOTEL_DATABASE_PATH", database):
+            initialized = workspace.initialize_workspace()
+            task = workspace.get_task("legacy")
+
+    assert initialized["schema_version"] == workspace.WORKSPACE_SCHEMA_VERSION
+    assert task["revision"] == 7
+    assert task["runtime_revision"] == 0
+    assert task["config"]["hotel_codes"] == ["00001"]
+
+
 def test_default_task_imports_search_config_without_notification_secrets():
     cfg = _config()
     with tempfile.TemporaryDirectory() as tmp_dir:
@@ -254,6 +298,7 @@ def test_desired_and_runtime_states_store_schedule_progress_and_error():
                 next_run_at=180.0,
                 result_summary={"done": 1, "total": 3},
                 expected_revision=desired["revision"],
+                expected_runtime_revision=desired["runtime_revision"],
             )
             failed = workspace.set_task_runtime_state(
                 "tokyo",
@@ -261,14 +306,19 @@ def test_desired_and_runtime_states_store_schedule_progress_and_error():
                 next_run_at=None,
                 last_error="provider timeout",
                 expected_revision=running["revision"],
+                expected_runtime_revision=running["runtime_revision"],
             )
 
     assert desired["desired_state"] == "active"
     assert running["runtime_state"] == "scanning"
+    assert running["revision"] == desired["revision"]
+    assert running["runtime_revision"] == desired["runtime_revision"] + 1
     assert running["last_started_at"] is not None
     assert running["next_run_at"] == 180.0
     assert running["result_summary"] == {"done": 1, "total": 3}
     assert failed["runtime_state"] == "error"
+    assert failed["revision"] == running["revision"]
+    assert failed["runtime_revision"] == running["runtime_revision"] + 1
     assert failed["last_stopped_at"] is not None
     assert failed["next_run_at"] is None
     assert failed["last_error"] == "provider timeout"
@@ -336,6 +386,97 @@ def test_task_run_states_follow_the_frozen_phase_one_contract():
 
     assert queued["state"] == "queued"
     assert finished["state"] == "cancelled"
+
+
+def test_active_run_listing_promotion_and_restart_interruption_are_atomic():
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        database = str(Path(tmp_dir) / "workspace.sqlite3")
+        with patch.object(workspace, "HOTEL_DATABASE_PATH", database):
+            first_task = workspace.create_task("First", _config(), task_id="first")
+            second_task = workspace.create_task("Second", _config(), task_id="second")
+            first_run = workspace.start_task_run(
+                first_task["task_id"],
+                run_id="first-run",
+                state="queued",
+                started_at=10.0,
+            )
+            second_run = workspace.start_task_run(
+                second_task["task_id"],
+                run_id="second-run",
+                state="running",
+                started_at=20.0,
+            )
+            terminal_run = workspace.start_task_run(
+                second_task["task_id"],
+                run_id="terminal-run",
+                state="running",
+                started_at=5.0,
+            )
+            workspace.finish_task_run(
+                terminal_run["run_id"],
+                state="complete",
+                completed_at=6.0,
+            )
+            promoted = workspace.mark_task_run_running(first_run["run_id"])
+            active_for_first = workspace.list_active_task_runs(first_task["task_id"])
+            active_all = workspace.list_active_task_runs()
+            interrupted = workspace.interrupt_active_task_runs(
+                completed_at=30.0,
+                error="restart recovery",
+            )
+            remaining = workspace.list_active_task_runs()
+            all_second_runs = workspace.list_task_runs(second_task["task_id"])
+            with pytest.raises(workspace.TaskConflictError, match="not queued"):
+                workspace.mark_task_run_running(second_run["run_id"])
+
+    assert promoted["state"] == "running"
+    assert [run["run_id"] for run in active_for_first] == ["first-run"]
+    assert [run["run_id"] for run in active_all] == ["first-run", "second-run"]
+    assert [run["state"] for run in interrupted] == ["interrupted", "interrupted"]
+    assert all(run["completed_at"] == 30.0 for run in interrupted)
+    assert all(run["error"] == "restart recovery" for run in interrupted)
+    assert remaining == []
+    assert next(run for run in all_second_runs if run["run_id"] == "terminal-run")[
+        "state"
+    ] == "complete"
+
+
+def test_runtime_updates_do_not_create_definition_revision_conflicts():
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        database = str(Path(tmp_dir) / "workspace.sqlite3")
+        with patch.object(workspace, "HOTEL_DATABASE_PATH", database):
+            created = workspace.create_task("Tokyo", _config(), task_id="tokyo")
+            scanning = workspace.set_task_runtime_state(
+                "tokyo",
+                "scanning",
+                expected_runtime_revision=created["runtime_revision"],
+            )
+            renamed = workspace.update_task(
+                "tokyo",
+                name="Tokyo Weekend",
+                expected_revision=created["revision"],
+            )
+            waiting = workspace.set_task_runtime_state(
+                "tokyo",
+                "waiting",
+                next_run_at=500.0,
+                expected_runtime_revision=scanning["runtime_revision"],
+            )
+            with pytest.raises(
+                workspace.TaskConflictError,
+                match="runtime revision conflict",
+            ):
+                workspace.set_task_runtime_state(
+                    "tokyo",
+                    "idle",
+                    expected_runtime_revision=scanning["runtime_revision"],
+                )
+
+    assert scanning["revision"] == created["revision"]
+    assert renamed["revision"] == created["revision"] + 1
+    assert renamed["runtime_revision"] == scanning["runtime_revision"]
+    assert waiting["revision"] == renamed["revision"]
+    assert waiting["runtime_revision"] == scanning["runtime_revision"] + 1
 
 
 def test_task_table_never_serializes_notification_fields_from_mapping():

@@ -19,7 +19,7 @@ from .settings import (
 )
 
 
-WORKSPACE_SCHEMA_VERSION = 1
+WORKSPACE_SCHEMA_VERSION = 2
 DEFAULT_TASK_ID = "default"
 _LOCK = threading.RLock()
 
@@ -180,6 +180,7 @@ def _migrate(connection: sqlite3.Connection) -> None:
             config_json TEXT NOT NULL,
             sort_order INTEGER NOT NULL DEFAULT 0,
             revision INTEGER NOT NULL DEFAULT 1,
+            runtime_revision INTEGER NOT NULL DEFAULT 0,
             created_at REAL NOT NULL,
             updated_at REAL NOT NULL,
             last_started_at REAL,
@@ -266,6 +267,17 @@ def _migrate(connection: sqlite3.Connection) -> None:
         );
         """
     )
+    columns = {
+        str(row["name"])
+        for row in connection.execute("PRAGMA table_info(monitor_tasks)").fetchall()
+    }
+    if "runtime_revision" not in columns:
+        connection.execute(
+            """
+            ALTER TABLE monitor_tasks
+            ADD COLUMN runtime_revision INTEGER NOT NULL DEFAULT 0
+            """
+        )
     connection.execute(
         """
         INSERT INTO workspace_meta(key, value, updated_at)
@@ -582,6 +594,7 @@ def _task_from_row(row: sqlite3.Row) -> Dict[str, Any]:
         "config": _json_object(row["config_json"]),
         "sort_order": int(row["sort_order"]),
         "revision": int(row["revision"]),
+        "runtime_revision": int(row["runtime_revision"]),
         "created_at": float(row["created_at"]),
         "updated_at": float(row["updated_at"]),
         "last_started_at": row["last_started_at"],
@@ -596,8 +609,9 @@ def _select_task(connection: sqlite3.Connection, task_id: str) -> sqlite3.Row:
     row = connection.execute(
         """
         SELECT task_id, name, desired_state, runtime_state, config_json,
-               sort_order, revision, created_at, updated_at, last_started_at,
-               last_stopped_at, next_run_at, last_error, result_summary_json
+               sort_order, revision, runtime_revision, created_at, updated_at,
+               last_started_at, last_stopped_at, next_run_at, last_error,
+               result_summary_json
         FROM monitor_tasks WHERE task_id=?
         """,
         (task_id,),
@@ -652,8 +666,9 @@ def list_tasks() -> List[Dict[str, Any]]:
         rows = connection.execute(
             """
             SELECT task_id, name, desired_state, runtime_state, config_json,
-                   sort_order, revision, created_at, updated_at, last_started_at,
-                   last_stopped_at, next_run_at, last_error, result_summary_json
+                   sort_order, revision, runtime_revision, created_at, updated_at,
+                   last_started_at, last_stopped_at, next_run_at, last_error,
+                   result_summary_json
             FROM monitor_tasks
             ORDER BY sort_order, created_at, task_id
             """
@@ -722,27 +737,47 @@ def update_task(
     last_error: Optional[str] = None,
     result_summary: Optional[Mapping[str, Any]] = None,
     expected_revision: Optional[int] = None,
+    expected_runtime_revision: Optional[int] = None,
 ) -> Dict[str, Any]:
     cleaned_id = _clean_identifier(task_id, "task_id")
     with _LOCK, _connect() as connection:
         row = _select_task(connection, cleaned_id)
         _assert_revision(row, expected_revision)
+        if expected_runtime_revision is not None:
+            try:
+                expected_runtime = int(expected_runtime_revision)
+            except (TypeError, ValueError) as exc:
+                raise TaskValidationError(
+                    "expected_runtime_revision must be an integer"
+                ) from exc
+            current_runtime = int(row["runtime_revision"])
+            if expected_runtime != current_runtime:
+                raise TaskConflictError(
+                    "task runtime revision conflict: "
+                    f"expected {expected_runtime}, current {current_runtime}"
+                )
         updates: Dict[str, Any] = {}
+        definition_changed = False
+        runtime_changed = False
         if name is not None:
             updates["name"] = _clean_name(name)
+            definition_changed = True
         if config is not None:
             base = None if replace_config else _json_object(row["config_json"])
             updates["config_json"] = _json_dump(validate_task_config(config, base=base))
+            definition_changed = True
         if desired_state is not None:
             desired = str(desired_state)
             if desired not in DESIRED_TASK_STATES:
                 raise TaskValidationError("desired_state must be paused or active")
             updates["desired_state"] = desired
+            definition_changed = True
         if runtime_state is not None:
             runtime = str(runtime_state)
             if runtime not in RUNTIME_TASK_STATES:
                 raise TaskValidationError("runtime_state is not supported")
             updates["runtime_state"] = runtime
+            runtime_changed = True
         if next_run_at is not ...:
             if next_run_at is None:
                 updates["next_run_at"] = None
@@ -751,32 +786,52 @@ def update_task(
                     updates["next_run_at"] = float(next_run_at)
                 except (TypeError, ValueError) as exc:
                     raise TaskValidationError("next_run_at must be a timestamp") from exc
+            runtime_changed = True
         if last_error is not None:
             updates["last_error"] = str(last_error or "")[:1000]
+            runtime_changed = True
         if result_summary is not None:
             if not isinstance(result_summary, Mapping):
                 raise TaskValidationError("result_summary must be an object")
             updates["result_summary_json"] = _json_dump(dict(result_summary))
+            runtime_changed = True
         if not updates:
             return _task_from_row(row)
 
         now = time.time()
         updates["updated_at"] = now
-        updates["revision"] = int(row["revision"]) + 1
+        if definition_changed:
+            updates["revision"] = int(row["revision"]) + 1
+        if runtime_changed:
+            updates["runtime_revision"] = int(row["runtime_revision"]) + 1
         if updates.get("runtime_state") == "scanning":
             updates["last_started_at"] = now
-        elif updates.get("runtime_state") in {"idle", "waiting", "error"}:
+        elif updates.get("runtime_state") in {"idle", "error"}:
             updates["last_stopped_at"] = now
         assignments = ", ".join(f"{column}=?" for column in updates)
+        conditions = ["task_id=?"]
+        condition_values: List[Any] = [cleaned_id]
+        if definition_changed:
+            conditions.append("revision=?")
+            condition_values.append(int(row["revision"]))
+        if runtime_changed:
+            conditions.append("runtime_revision=?")
+            condition_values.append(int(row["runtime_revision"]))
         cursor = connection.execute(
-            f"UPDATE monitor_tasks SET {assignments} WHERE task_id=? AND revision=?",
-            (*updates.values(), cleaned_id, int(row["revision"])),
+            f"UPDATE monitor_tasks SET {assignments} WHERE {' AND '.join(conditions)}",
+            (*updates.values(), *condition_values),
         )
         if cursor.rowcount != 1:
             current = _select_task(connection, cleaned_id)
+            if definition_changed and int(current["revision"]) != int(row["revision"]):
+                raise TaskConflictError(
+                    "task revision conflict: "
+                    f"expected {int(row['revision'])}, current {int(current['revision'])}"
+                )
             raise TaskConflictError(
-                "task revision conflict: "
-                f"expected {int(row['revision'])}, current {int(current['revision'])}"
+                "task runtime revision conflict: "
+                f"expected {int(row['runtime_revision'])}, "
+                f"current {int(current['runtime_revision'])}"
             )
         return _task_from_row(_select_task(connection, cleaned_id))
 
@@ -802,6 +857,7 @@ def set_task_runtime_state(
     last_error: Optional[str] = None,
     result_summary: Optional[Mapping[str, Any]] = None,
     expected_revision: Optional[int] = None,
+    expected_runtime_revision: Optional[int] = None,
 ) -> Dict[str, Any]:
     return update_task(
         task_id,
@@ -810,6 +866,7 @@ def set_task_runtime_state(
         last_error=last_error,
         result_summary=result_summary,
         expected_revision=expected_revision,
+        expected_runtime_revision=expected_runtime_revision,
     )
 
 
@@ -956,6 +1013,31 @@ def start_task_run(
     return _run_from_row(row)
 
 
+def mark_task_run_running(run_id: str) -> Dict[str, Any]:
+    """Promote one queued run to running without altering its enqueue timestamp."""
+    cleaned_run_id = _clean_identifier(run_id, "run_id")
+    with _LOCK, _connect() as connection:
+        row = connection.execute(
+            "SELECT * FROM task_runs WHERE run_id=?", (cleaned_run_id,)
+        ).fetchone()
+        if row is None:
+            raise TaskNotFoundError(f"run not found: {cleaned_run_id}")
+        if str(row["state"]) != "queued":
+            raise TaskConflictError(
+                f"run is not queued: {cleaned_run_id} ({row['state']})"
+            )
+        cursor = connection.execute(
+            "UPDATE task_runs SET state='running' WHERE run_id=? AND state='queued'",
+            (cleaned_run_id,),
+        )
+        if cursor.rowcount != 1:
+            raise TaskConflictError(f"run state conflict: {cleaned_run_id}")
+        updated = connection.execute(
+            "SELECT * FROM task_runs WHERE run_id=?", (cleaned_run_id,)
+        ).fetchone()
+    return _run_from_row(updated)
+
+
 def finish_task_run(
     run_id: str,
     *,
@@ -999,6 +1081,65 @@ def finish_task_run(
             "SELECT * FROM task_runs WHERE run_id=?", (cleaned_run_id,)
         ).fetchone()
     return _run_from_row(updated)
+
+
+def list_active_task_runs(task_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Return queued/running records for one task or for the whole workspace."""
+    parameters: tuple[Any, ...] = ()
+    where = "state IN ('queued', 'running')"
+    if task_id is not None:
+        cleaned_task_id = _clean_identifier(task_id, "task_id")
+        where += " AND task_id=?"
+        parameters = (cleaned_task_id,)
+    with _LOCK, _connect() as connection:
+        if task_id is not None:
+            _select_task(connection, parameters[0])
+        rows = connection.execute(
+            f"""
+            SELECT run_id, task_id, state, started_at, completed_at,
+                   result_summary_json, error
+            FROM task_runs
+            WHERE {where}
+            ORDER BY started_at, run_id
+            """,
+            parameters,
+        ).fetchall()
+    return [_run_from_row(row) for row in rows]
+
+
+def interrupt_active_task_runs(
+    *,
+    completed_at: Optional[float] = None,
+    error: str = "application restarted",
+) -> List[Dict[str, Any]]:
+    """Atomically mark every orphaned queued/running record as interrupted."""
+    completed = time.time() if completed_at is None else float(completed_at)
+    clean_error = str(error or "")[:1000]
+    with _LOCK, _connect() as connection:
+        rows = connection.execute(
+            """
+            SELECT run_id FROM task_runs
+            WHERE state IN ('queued', 'running')
+            ORDER BY started_at, run_id
+            """
+        ).fetchall()
+        run_ids = [str(row["run_id"]) for row in rows]
+        if run_ids:
+            connection.execute(
+                """
+                UPDATE task_runs
+                SET state='interrupted', completed_at=?, error=?
+                WHERE state IN ('queued', 'running')
+                """,
+                (completed, clean_error),
+            )
+        updated = [
+            connection.execute(
+                "SELECT * FROM task_runs WHERE run_id=?", (run_id,)
+            ).fetchone()
+            for run_id in run_ids
+        ]
+    return [_run_from_row(row) for row in updated if row is not None]
 
 
 def list_task_runs(task_id: str, *, limit: int = 50) -> List[Dict[str, Any]]:

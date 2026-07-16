@@ -2,6 +2,14 @@
 
 ## v0.7.0 - Development
 
+- Added the Phase 1 fair task coordinator with rotating ready queues, bounded
+  hotel batches and priorities, target-start cadence and cancellable turns.
+- Added isolated per-task runtime contexts for progress, results, errors,
+  checkpoints, cancellation, run history and restart reconciliation.
+- Added the scheduler kernel joining durable tasks, runtime contexts and the
+  installation-wide Provider gate, including recurring and one-time rounds.
+- Added workspace schema v2 with a separate `runtime_revision`, so background
+  progress updates no longer create task-editor revision conflicts.
 - Started Phase 1 multi-task monitoring with transactional task CRUD, copy,
   reorder, revision conflicts, desired/runtime state, run history and
   search-only `AppConfig` mapping.

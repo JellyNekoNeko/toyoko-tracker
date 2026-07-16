@@ -123,7 +123,7 @@ Status: **Delivered** in commit `592e103`.
 
 | ID | Owner | Work package | Depends on | Required output |
 | --- | --- | --- | --- | --- |
-| P3-00 | A/B | Domain and Provider capability contract | Phase 1 | Flexible-search DTOs, status enums, currency/tax/evidence semantics and schema v2 |
+| P3-00 | A/B | Domain and Provider capability contract | Phase 1 | Flexible-search DTOs, status enums, currency/tax/evidence semantics and schema v3 |
 | P3-01 | B | Date combination engine | P3-00 | Date window, stay length, weekend and next-30-days deterministic combinations |
 | P3-02 | A | Quote repository and resumable jobs | P3-00 | Jobs, candidates, quotes, progress, evidence and cleanup policy |
 | P3-03 | B | Flexible-search scheduler | P3-01/02/P1 pacer | Pause, resume, cancel, batching and shared Provider pacing |
@@ -159,7 +159,7 @@ Status: **Delivered** in commit `592e103`.
 | P4-01 | A | Historical statistics repository | P4-00 | Min/average/max/median/percentiles and current-price position |
 | P4-02 | B | Price assessment rules | P4-01 | Low/normal/high labels with sample count, window and explanation |
 | P4-03 | B | Split-stay optimizer | P3-04/05 | Reproducible ranking by moves, distance and total price with nightly evidence |
-| P4-04 | A | Travel-list repository and schema v3 | Stable Phase 1–3 IDs | Lists, hotel items, priorities, notes, budget and association tables |
+| P4-04 | A | Travel-list repository and schema v4 | Stable Phase 1–3 IDs | Lists, hotel items, priorities, notes, budget and association tables |
 | P4-05 | A | Travel-list APIs and associations | P4-04 | Link/unlink tasks, rules and saved comparison views |
 | P4-06 | C | Decision center and travel-list UI | P4-02/03/05 | Overview, hotels, prices, split plans, evidence and ranking details |
 | P4-07 | A/C | Readable trip-summary export | P4-02/03/05 | Versioned JSON plus Markdown/HTML without credentials |
@@ -249,16 +249,15 @@ Status: **Delivered** in commit `592e103`.
 
 ## Current assignment
 
-Phase 1 is the active phase. The first work wave is assigned as follows:
+Phase 1 is the active phase. Wave 2 has completed its scheduling and runtime
+core; Wave 3 is the next integration target.
 
 | Lane | Active assignment | Completion signal |
 | --- | --- | --- |
-| A | P1-01 task repository, followed by P1-02 mapping | Transactional CRUD and config round-trip tests pass |
-| B | P1-03 installation-wide Provider pacer | Three simulated tasks share concurrency and cooldown |
-| C | P1-08 task-center mock/prototype | Task switching, ordering and local mutations pass UI contract checks |
-| D | P1-10 test harness and P1-11 document skeleton | Virtual clock, provider fixtures and legacy contract suite ready |
-
-P1-04 begins only after P1-01/02/03 interfaces are reviewed together.
+| A | P1-06 task-native APIs | CRUD, control, runs, results and summary contracts pass |
+| B | P1-07 production scan adapter preparation | One scheduler path owns Provider requests |
+| C | Connect P1-08 prototype and build P1-09 dashboard | Task editing and runtime polling use task-native APIs |
+| D | Extend P1-10/P1-11 | API, browser, recovery and legacy projection gates pass |
 
 The frozen Phase 1 integration contracts are documented in
 `docs/PHASE1_ARCHITECTURE.md`.
@@ -274,5 +273,15 @@ The frozen Phase 1 integration contracts are documented in
 | P1-10 | In progress | Wave 1 contracts are covered; coordinator, API and recovery cases follow their implementations |
 | P1-11 | In progress | State, pacing, API direction and legacy projection are frozen |
 
-The next implementation wave starts with P1-04 and P1-05, then connects P1-06
-and the task-center prototype to persisted task records.
+### Wave 2 implementation status
+
+| Work package | Status | Evidence |
+| --- | --- | --- |
+| P1-04 | Implemented | Equal-readiness rotation, bounded turns/priorities, no-catch-up cadence and cancellation tests |
+| P1-05 | Implemented | Task-local progress/results/errors/checkpoints, draining pause and restart recovery tests |
+| P1-10 | In progress | Added three-size fairness, cross-thread cancellation, Provider cooldown and isolation integration coverage |
+| P1-11 | In progress | Added schema v2 revision semantics and Wave 2 implementation boundary |
+
+The scheduler kernel is intentionally not started beside the historical worker.
+Wave 3 will implement P1-06 task APIs, connect the task-center prototype and
+then complete P1-07 legacy-route projection through one production scan path.
